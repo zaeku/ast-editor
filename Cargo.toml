@@ -16,7 +16,6 @@ keywords = ["incremental", "parsing"]
 categories = ["command-line-utilities", "parsing"]
 
 [workspace.dependencies]
-wasmtime = { version = "19", default-features = false }
 tokio = { version = "1.36", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -30,7 +29,4 @@ lto = true            # Enable Link-Time Optimization
 codegen-units = 1     # Maximize LTO optimization scope
 strip = true          # Strip symbols and debuginfo
 panic = "abort"       # Abort on panic to remove unwinding tables
-
-[patch.crates-io]
-tree-sitter = { path = "third_party/tree-sitter/lib" }
 

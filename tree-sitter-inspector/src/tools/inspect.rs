@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Result, Context, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tree_sitter::{Query, QueryCursor};
+use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use std::hash::{Hash, Hasher};
 
 use crate::parser::ParserManager;
@@ -108,9 +108,9 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     if let Some(ref q_str) = query_str {
         if let Ok(query) = Query::new(&language, q_str) {
             let mut cursor = QueryCursor::new();
-            let matches_iter = cursor.matches(&query, root_node, code.as_bytes());
+            let mut matches_iter = cursor.matches(&query, root_node, code.as_bytes());
             
-            for m in matches_iter {
+            while let Some(m) = matches_iter.next() {
                 for capture in m.captures {
                     let node = capture.node;
                     let capture_name = query.capture_names()[capture.index as usize].to_string();

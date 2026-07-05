@@ -60,7 +60,7 @@ fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, m
     
     if depth < max_depth {
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
+            if let Some(child) = node.child(i as u32) {
                 let child_field = node.field_name_for_child(i as u32);
                 format_node(child, child_field, code, depth + 1, max_depth, out);
             }

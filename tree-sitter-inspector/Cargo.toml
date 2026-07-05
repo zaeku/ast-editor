@@ -6,10 +6,9 @@ authors.workspace = true
 
 [dependencies]
 # Core parser
-tree-sitter = { version = "0.22.6", features = ["wasm"] }
+tree-sitter = { version = "0.26.10", features = ["wasm"] }
 
-# wasmtime with JIT compiler to support WasmStore loading
-wasmtime = { workspace = true, default-features = true, features = ["cranelift", "cache"] }
+wasmtime = { version = "=36.0.12", default-features = true, features = ["cache"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

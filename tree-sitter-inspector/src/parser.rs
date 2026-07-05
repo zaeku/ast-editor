@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use wasmtime::{Engine, Config};
+use wasmtime::{Engine, Config, Cache};
 use tokio::sync::Mutex as TokioMutex;
 use anyhow::{Context, Result, bail};
 use tree_sitter::{WasmStore, Parser, Language};
@@ -20,9 +20,9 @@ pub struct ParserManager {
 impl ParserManager {
     pub fn new() -> Result<Self> {
         let mut config = Config::new();
-        config.wasm_tail_call(true);
-        config.wasm_threads(true);
-        let _ = config.cache_config_load_default(); // Enable Wasmtime native AOT/JIT cache
+        if let Ok(cache) = Cache::from_file(None) {
+            config.cache(Some(cache));
+        }
         let engine = Engine::new(&config)
             .context("Failed to initialize Wasmtime engine")?;
         
@@ -45,9 +45,9 @@ impl ParserManager {
     /// Custom paths constructor for testing
     pub fn with_paths(_cache_dir: PathBuf, _compiler_path: PathBuf, wasm_dir: PathBuf) -> Result<Self> {
         let mut config = Config::new();
-        config.wasm_tail_call(true);
-        config.wasm_threads(true);
-        let _ = config.cache_config_load_default();
+        if let Ok(cache) = Cache::from_file(None) {
+            config.cache(Some(cache));
+        }
         let engine = Engine::new(&config)?;
         Ok(Self {
             engine,
@@ -76,7 +76,7 @@ impl ParserManager {
         }
         
         // 2. Cache Miss: Fresh load and compilation
-        let mut wasm_store = WasmStore::new(self.engine.clone())
+        let mut wasm_store = WasmStore::new(&self.engine)
             .context("Failed to create WasmStore")?;
 
         // Load WASM bytes

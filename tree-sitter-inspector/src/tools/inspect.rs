@@ -5,7 +5,7 @@ use anyhow::{Result, Context, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tree_sitter::{Query, QueryCursor};
-use sha2::Digest;
+use std::hash::{Hash, Hasher};
 
 use crate::parser::ParserManager;
 
@@ -127,9 +127,9 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                             "".to_string()
                         };
                         
-                        let mut hasher = sha2::Sha256::new();
-                        hasher.update(node_text.as_bytes());
-                        let block_hash = hex::encode(hasher.finalize());
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        node_text.hash(&mut hasher);
+                        let block_hash = format!("{:x}", hasher.finish());
 
                         Some(InspectDefinition {
                             r#type: node.kind().to_string(),

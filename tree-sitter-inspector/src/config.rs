@@ -63,23 +63,7 @@ pub fn get_wasm_file(wasm_dir: &Path, ext: &str) -> Result<String> {
 #[cfg(test)]
 pub fn clear_langs_map_for_testing() {}
 
-/// Returns the cache directory where compiled .cwasm modules are stored.
-pub fn get_cache_dir() -> PathBuf {
-    if let Ok(home) = env::var("HOME") {
-        PathBuf::from(home).join(".cache").join("tree-sitter-inspector")
-    } else {
-        PathBuf::from(".cache").join("tree-sitter-inspector")
-    }
-}
 
-/// Returns the path to the `wasmtime-compiler` binary.
-pub fn get_compiler_path() -> PathBuf {
-    if let Ok(path) = env::var("WASMTIME_COMPILER") {
-        PathBuf::from(path)
-    } else {
-        PathBuf::from("./wasmtime-compiler")
-    }
-}
 
 /// Returns the path to the WebAssembly grammar files directory (resources/wasm).
 pub fn get_wasm_dir() -> PathBuf {

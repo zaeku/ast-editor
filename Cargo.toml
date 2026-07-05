@@ -1,7 +1,6 @@
 [workspace]
 members = [
-    "tree-sitter-inspector",
-    "wasmtime-compiler"
+    "tree-sitter-inspector"
 ]
 resolver = "2"
 
@@ -9,15 +8,21 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 authors = ["Antigravity Developer"]
+rust-version = "1.74.1"
+homepage = "https://tree-sitter.github.io/tree-sitter"
+repository = "https://github.com/tree-sitter/tree-sitter"
+license = "MIT"
+keywords = ["incremental", "parsing"]
+categories = ["command-line-utilities", "parsing"]
 
 [workspace.dependencies]
-wasmtime = { version = "22.0.0", default-features = false }
+wasmtime = { version = "19", default-features = false }
 tokio = { version = "1.36", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
-sha2 = "0.10"
-hex = "0.4"
+regex = "1.10.4"
+cc = "1.0.95"
 
 [profile.release]
 opt-level = 3         # Maximize runtime execution and startup speed
@@ -25,4 +30,7 @@ lto = true            # Enable Link-Time Optimization
 codegen-units = 1     # Maximize LTO optimization scope
 strip = true          # Strip symbols and debuginfo
 panic = "abort"       # Abort on panic to remove unwinding tables
+
+[patch.crates-io]
+tree-sitter = { path = "third_party/tree-sitter/lib" }
 

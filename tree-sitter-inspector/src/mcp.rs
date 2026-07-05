@@ -171,12 +171,7 @@ impl McpServer {
                         let mut err_data = serde_json::Map::new();
                         err_data.insert("cause".to_string(), Value::String(err_str.clone()));
                         
-                        if err_str.contains("wasmtime-compiler") || err_str.contains("compiler binary") {
-                            err_data.insert("missing_file".to_string(), Value::String(crate::config::get_compiler_path().to_string_lossy().to_string()));
-                            err_data.insert("suggestion".to_string(), Value::String(
-                                "Please compile 'wasmtime-compiler' and place it in the project root, or set the WASMTIME_COMPILER environment variable.".to_string()
-                            ));
-                        } else if err_str.contains("languages.json") || err_str.contains("Configuration file 'languages.json' is missing") {
+                        if err_str.contains("languages.json") || err_str.contains("Configuration file 'languages.json' is missing") {
                             let expected_path = crate::config::get_wasm_dir().join("languages.json");
                             err_data.insert("missing_file".to_string(), Value::String(expected_path.to_string_lossy().to_string()));
                             err_data.insert("suggestion".to_string(), Value::String(
@@ -377,46 +372,7 @@ mod tests {
         assert!(wasm_dir.contains("wasm"));
     }
 
-    #[tokio::test]
-    async fn test_mcp_tools_call_dump_missing_compiler() {
-        let fixture = TempTestFixture::new("test_tools_call_dump_fail");
-        let server = create_test_server(&fixture);
 
-        let test_file = fixture.dir.join("test.rs");
-        fs::write(&test_file, "struct Point {}\n").unwrap();
-
-        // Write a mock raw wasm file so that it passes the "wasm exists" check
-        let wasm_dir = fixture.dir.join("wasm");
-        fs::create_dir_all(&wasm_dir).unwrap();
-        let raw_wasm_path = wasm_dir.join("tree-sitter-rust.wasm");
-        fs::write(&raw_wasm_path, b"dummy wasm bytecode").unwrap();
-
-        let req = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "tools/call".to_string(),
-            params: Some(serde_json::json!({
-                "name": "tree_sitter_dump_tree",
-                "arguments": {
-                    "file": test_file.to_str().unwrap()
-                }
-            })),
-            id: Some(serde_json::json!(99)),
-        };
-
-        let resp = server.handle_request(req).await;
-        assert_eq!(resp.id, Some(serde_json::json!(99)));
-        assert!(resp.result.is_none());
-        assert!(resp.error.is_some());
-
-        let error = resp.error.unwrap();
-        let data = error.data.unwrap();
-        
-        let suggestion = data.get("suggestion").unwrap().as_str().unwrap();
-        assert!(suggestion.contains("Please compile 'wasmtime-compiler'"));
-        
-        let missing_file = data.get("missing_file").unwrap().as_str().unwrap();
-        assert!(missing_file.contains("wasmtime-compiler"));
-    }
 
     #[tokio::test]
     async fn test_mcp_tools_call_missing_languages_config() {

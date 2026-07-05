@@ -1,0 +1,1 @@
+{"result":{"content":[{"type":"text","text":"[tree-sitter-dump-tree]\nMax Depth Limit: 3\nTarget Node Type: document\nTarget Node Line Range: 1-2\nSearched by range parameter: no\n========================================================================\ndocument [1:0 - 2:0]\n  object [1:0 - 1:2]\n    { [1:0 - 1:1] \"{\"\n    } [1:1 - 1:2] \"}\"\n"}]},"jsonrpc":"2.0","id":1}

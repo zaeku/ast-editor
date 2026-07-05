@@ -1,0 +1,23 @@
+[package]
+name = "tree-sitter-inspector"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Core parser
+tree-sitter = { version = "0.22.6", features = ["wasm"] }
+
+# wasmtime with JIT compiler to support WasmStore loading
+wasmtime = { workspace = true, default-features = true, features = ["cranelift"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+once_cell = "1.21.4"
+log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -67,9 +67,10 @@ pub fn clear_langs_map_for_testing() {}
 
 /// Returns the path to the WebAssembly grammar files directory (resources/wasm).
 pub fn get_wasm_dir() -> PathBuf {
-    if let Ok(dir) = env::var("TREE_SITTER_WASM_DIR") {
-        PathBuf::from(dir)
-    } else {
-        PathBuf::from("./resources/wasm")
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
+            return parent.join("resources").join("wasm");
+        }
     }
+    PathBuf::from("./resources/wasm")
 }

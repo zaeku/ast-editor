@@ -12,8 +12,28 @@
     "wasm_file": "tree-sitter-javascript.wasm"
   },
   "typescript": {
-    "extensions": [".ts", ".tsx"],
+    "extensions": [".ts"],
     "wasm_file": "tree-sitter-typescript.wasm"
+  },
+  "tsx": {
+    "extensions": [".tsx"],
+    "wasm_file": "tree-sitter-tsx.wasm"
+  },
+  "c": {
+    "extensions": [".c", ".h"],
+    "wasm_file": "tree-sitter-c.wasm"
+  },
+  "cpp": {
+    "extensions": [".cpp", ".cc", ".cxx"],
+    "wasm_file": "tree-sitter-cpp.wasm"
+  },
+  "java": {
+    "extensions": [".java"],
+    "wasm_file": "tree-sitter-java.wasm"
+  },
+  "swift": {
+    "extensions": [".swift"],
+    "wasm_file": "tree-sitter-swift.wasm"
   },
   "go": {
     "extensions": [".go"],

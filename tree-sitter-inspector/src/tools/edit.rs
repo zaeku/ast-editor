@@ -42,9 +42,10 @@ async fn validate_syntax(filepath: &str, content: &str, parser_manager: &crate::
     let ext = std::path::Path::new(filepath)
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_ascii_lowercase();
 
-    let (tree, _language) = parser_manager.parse_code(ext, content).await
+    let (tree, _language) = parser_manager.parse_code(&ext, content).await
         .context("Failed to parse code for syntax validation")?;
 
     let ast = tree.root_node().to_sexp();
@@ -81,6 +82,7 @@ pub async fn apply_line_edits(
     let tx = conn.transaction()?;
 
     let mut newly_modified_ids = Vec::new();
+    let mut deleted_orders = Vec::new();
 
     // Check if file is completely empty
     let total_lines: i64 = tx.query_row(
@@ -219,10 +221,10 @@ pub async fn apply_line_edits(
                 let target_id = edit.target_id.as_ref().context("Missing target_id for delete op")?;
                 let (target_seq, target_hash) = parse_line_id(target_id)?;
 
-                let (db_hash_opt, db_id): (Option<String>, i64) = tx.query_row(
-                    "SELECT line_hash, id FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                let (db_hash_opt, db_id, sort_order): (Option<String>, i64, f64) = tx.query_row(
+                    "SELECT line_hash, id, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
                     rusqlite::params![session_id, target_seq],
-                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
+                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, f64>(2)?))
                 ).context(format!("Target line not found for target_id={}", target_id))?;
                 
                 let db_hash = match db_hash_opt {
@@ -247,6 +249,7 @@ pub async fn apply_line_edits(
                 }
 
                 tx.execute("DELETE FROM lines WHERE id = ?1;", [db_id])?;
+                deleted_orders.push(sort_order);
             }
             other => bail!("Unknown edit operation: {}", other),
         }
@@ -291,7 +294,7 @@ pub async fn apply_line_edits(
     let mut sorted_lines = Vec::new();
     let mut missing_hashes = Vec::new();
     {
-        let mut stmt = conn.prepare("SELECT id, sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
+        let mut stmt = conn.prepare("SELECT id, sequence_id, line_hash, content, sort_order FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
         let mut rows = stmt.query([&session_id])?;
         
         while let Some(row) = rows.next()? {
@@ -299,6 +302,7 @@ pub async fn apply_line_edits(
             let seq: i64 = row.get(1)?;
             let hash_opt: Option<String> = row.get(2)?;
             let content: String = row.get(3)?;
+            let sort_order: f64 = row.get(4)?;
             
             let hash = match hash_opt {
                 Some(h) => h,
@@ -308,7 +312,7 @@ pub async fn apply_line_edits(
                     h
                 }
             };
-            sorted_lines.push((seq, hash, content));
+            sorted_lines.push((seq, hash, content, sort_order));
         }
     }
     
@@ -325,7 +329,7 @@ pub async fn apply_line_edits(
     
     // Find modified rows and show context around them
     let mut indices_to_show = std::collections::BTreeSet::new();
-    for (line_idx, (seq, hash, _)) in sorted_lines.iter().enumerate() {
+    for (line_idx, (seq, hash, _, _)) in sorted_lines.iter().enumerate() {
         if newly_modified_ids.iter().any(|(m_seq, m_hash)| m_seq == seq && m_hash == hash) {
             // Show modified row plus 2 rows before and 2 rows after
             let start = line_idx.saturating_sub(2);
@@ -333,6 +337,27 @@ pub async fn apply_line_edits(
             for i in start..=end {
                 indices_to_show.insert(i);
             }
+        }
+    }
+
+    // Find closest lines to deleted ones and show context around them
+    for &del_order in &deleted_orders {
+        if sorted_lines.is_empty() {
+            continue;
+        }
+        let mut min_diff = f64::MAX;
+        let mut closest_idx = 0;
+        for (line_idx, (_, _, _, line_order)) in sorted_lines.iter().enumerate() {
+            let diff = (line_order - del_order).abs();
+            if diff < min_diff {
+                min_diff = diff;
+                closest_idx = line_idx;
+            }
+        }
+        let start = closest_idx.saturating_sub(2);
+        let end = std::cmp::min(closest_idx + 2, sorted_lines.len().saturating_sub(1));
+        for i in start..=end {
+            indices_to_show.insert(i);
         }
     }
 
@@ -345,7 +370,7 @@ pub async fn apply_line_edits(
     }
 
     for idx in indices_to_show {
-        let (seq, hash, content) = &sorted_lines[idx];
+        let (seq, hash, content, _) = &sorted_lines[idx];
         let hex_seq = format!("{:x}", seq);
         output.push_str(&format!("{} | {}#{} | {}\n", idx + 1, hex_seq, hash, content));
     }
@@ -624,6 +649,50 @@ mod tests {
         let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("fn main() {"));
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n}\n");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_case_insensitive_validation_and_deletion_preview() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let env = TestEnvironment::new("case_insensitive_and_delete");
+
+        // Use uppercase extension: .RS
+        let file_path = env.dir.join("code.RS");
+        fs::write(&file_path, "fn main() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let metadata = init_edit_session(filepath_str, false)?;
+        assert_eq!(metadata.total_lines, 5);
+
+        // Get the line IDs by viewing
+        let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 5)?;
+        let mut b_id = String::new();
+        for line in lines_view.lines() {
+            if line.contains("let b = 2;") {
+                let parts: Vec<&str> = line.split('|').collect();
+                b_id = parts[1].trim().to_string();
+            }
+        }
+        assert!(!b_id.is_empty());
+
+        // Test delete on .RS file (verifies lowercase lookup/delegation works for uppercase extensions too)
+        let edits = vec![
+            LineEdit {
+                op: "delete".to_string(),
+                target_id: Some(b_id.clone()),
+                content: None,
+            }
+        ];
+
+        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        
+        // The deleted line was `let b = 2;`.
+        // The remaining lines around it should be rendered in the preview.
+        assert!(preview.contains("let a = 1;"));
+        assert!(preview.contains("let c = 3;"));
+        assert!(!preview.contains("let b = 2;"));
 
         Ok(())
     }

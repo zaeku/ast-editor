@@ -101,6 +101,27 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     let root_node = tree.root_node();
     let has_syntax_errors = root_node.has_error();
 
+    // JIT edit session pre-caching
+    let mut session_conn = None;
+    let mut session_id_opt = None;
+    match crate::tools::session_db::init_edit_session(&args.file, false) {
+        Ok(meta) => {
+            crate::tools::session_db::start_background_hash_worker(meta.session_id.clone());
+            session_id_opt = Some(meta.session_id);
+            match crate::tools::session_db::get_db_connection() {
+                Ok(conn) => {
+                    session_conn = Some(conn);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to open DB connection for inspect pre-caching: {:?}", e);
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to initialize edit session for inspect pre-caching: {:?}", e);
+        }
+    }
+
     // 3. Perform Query matching if requested
     let mut matches = Vec::new();
     let mut status = "success".to_string();
@@ -153,11 +174,25 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                         
                         // Generate a structural definition block
                         let definition = if capture_name == "function" || capture_name == "class" {
-                            let text_val = if args.include_code.unwrap_or(true) {
-                                node_text.clone()
-                            } else {
-                                "".to_string()
-                            };
+                            let mut text_val = "".to_string();
+                            let start_line = start_position.row + 1;
+                            let end_line = end_position.row + 1;
+
+                            if args.include_code.unwrap_or(true) {
+                                if let (Some(ref conn), Some(ref session_id)) = (&session_conn, &session_id_opt) {
+                                    match format_definition_table(conn, session_id, start_line, end_line) {
+                                        Ok(table_text) => {
+                                            text_val = table_text;
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!("Failed to format definition table: {:?}", e);
+                                            text_val = node_text.clone();
+                                        }
+                                    }
+                                } else {
+                                    text_val = node_text.clone();
+                                }
+                            }
                             
                             let mut hasher = std::collections::hash_map::DefaultHasher::new();
                             node_text.hash(&mut hasher);
@@ -165,9 +200,9 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
 
                             Some(InspectDefinition {
                                 r#type: node.kind().to_string(),
-                                start_line: start_position.row + 1,
+                                start_line,
                                 start_column: start_position.column + 1,
-                                end_line: end_position.row + 1,
+                                end_line,
                                 end_column: end_position.column + 1,
                                 block_hash,
                                 text: text_val,
@@ -194,6 +229,25 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                 hint = Some(format!("Invalid Tree-sitter query S-expression: {}. Error: {:?}", q_str, e));
             }
         }
+    }
+
+    // Footnote JIT tips recommending apply_line_edits or view_session_lines
+    let mut jit_footnote = None;
+    if !matches.is_empty() {
+        let footnote = if args.include_code.unwrap_or(true) {
+            "Tip: You can apply edits to this file using the 'apply_line_edits' tool with the line IDs shown in the definition block."
+        } else {
+            "Tip: You can view line IDs for this file using the 'view_session_lines' tool."
+        };
+        jit_footnote = Some(footnote.to_string());
+    }
+
+    let mut final_hint = hint;
+    if let Some(footnote) = jit_footnote {
+        final_hint = match final_hint {
+            Some(h) => Some(format!("{}\n\n{}", h, footnote)),
+            None => Some(footnote),
+        };
     }
 
     // Handle output_file option if specified
@@ -231,7 +285,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         has_syntax_errors,
         match_count: matches.len(),
         matches,
-        hint,
+        hint: final_hint.clone(),
     };
 
     let pretty_json = serde_json::to_string_pretty(&result)?;
@@ -265,7 +319,10 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
             has_syntax_errors: result.has_syntax_errors,
             match_count: result.match_count,
             saved_to_file: path_str.clone(),
-            hint: Some("The full query result has been saved to the file specified in 'saved_to_file'. You can analyze it using jq, jc, or ripgrep.".to_string()),
+            hint: Some(format!(
+                "The full query result has been saved to the file specified in 'saved_to_file'. You can analyze it using jq, jc, or ripgrep.{}",
+                final_hint.as_ref().map(|h| format!("\n\n{}", h)).unwrap_or_default()
+            )),
         };
         serde_json::to_string_pretty(&summary)?
     } else {
@@ -300,4 +357,38 @@ pub(crate) async fn run_gc(outputs_dir: std::path::PathBuf) {
             }
         }
     }
+}
+
+fn format_definition_table(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<String> {
+    crate::tools::session_db::ensure_hashes_for_range(conn, session_id, start_line, end_line)?;
+
+    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
+    let offset = start_line.saturating_sub(1);
+
+    let mut stmt = conn.prepare(
+        "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
+    )?;
+
+    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
+    let mut output = String::new();
+    output.push_str("LINE | LINE ID | CODE\n");
+
+    let mut current_idx = start_line;
+    while let Some(row) = rows.next()? {
+        let seq_id: i64 = row.get(0)?;
+        let line_hash_opt: Option<String> = row.get(1)?;
+        let content: String = row.get(2)?;
+        
+        let line_hash = line_hash_opt.unwrap_or_else(|| crate::tools::session_db::compute_line_hash(&content));
+        let hex_seq = format!("{:x}", seq_id);
+        output.push_str(&format!("{} | {}#{} | {}\n", current_idx, hex_seq, line_hash, content));
+        current_idx += 1;
+    }
+
+    Ok(output)
 }

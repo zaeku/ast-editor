@@ -324,15 +324,19 @@ mod tests {
 
         let result = resp.result.unwrap();
         let tools = result.get("tools").unwrap().as_array().unwrap();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 5);
         
         let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
         assert!(tool_names.contains(&"tree_sitter_inspect"));
         assert!(tool_names.contains(&"tree_sitter_dump_tree"));
+        assert!(tool_names.contains(&"init_edit_session"));
+        assert!(tool_names.contains(&"view_session_lines"));
+        assert!(tool_names.contains(&"apply_line_edits"));
     }
 
     #[tokio::test]
     async fn test_mcp_tools_call_inspect_missing_wasm() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
         let fixture = TempTestFixture::new("test_tools_call_inspect_fail");
         let server = create_test_server(&fixture);
 
@@ -374,6 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_tools_call_inspect_success() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
         let fixture = TempTestFixture::new("test_inspect_success");
         let server = create_test_server(&fixture);
 
@@ -426,6 +431,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_tools_call_inspect_unsupported_template_warning() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
         let fixture = TempTestFixture::new("test_inspect_warning");
         let server = create_test_server(&fixture);
 
@@ -468,6 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_tools_call_inspect_invalid_query_error() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
         let fixture = TempTestFixture::new("test_inspect_error");
         let server = create_test_server(&fixture);
 
@@ -556,6 +563,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_tools_call_inspect_output_file_success() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
         let fixture = TempTestFixture::new("test_inspect_output_file");
         let server = create_test_server(&fixture);
 
@@ -615,6 +623,88 @@ mod tests {
 
         // Clean up the output file to keep build folder clean
         let _ = fs::remove_file(saved_path);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_tools_call_inspect_jit_caching_and_formatting() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
+        let fixture = TempTestFixture::new("test_inspect_jit");
+        let server = create_test_server(&fixture);
+
+        // Copy real rust wasm
+        let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let real_wasm_path = manifest_dir.parent().unwrap().join("resources").join("wasm").join("tree-sitter-rust.wasm");
+        let target_wasm_path = fixture.dir.join("wasm").join("tree-sitter-rust.wasm");
+        if real_wasm_path.exists() {
+            fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+        }
+
+        let test_file = fixture.dir.join("test.rs");
+        fs::write(&test_file, "pub fn hello() {\n    let x = 1;\n}\n").unwrap();
+
+        // 1. Call tree_sitter_inspect with include_code: true
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "tree_sitter_inspect",
+                "arguments": {
+                    "file": test_file.to_str().unwrap(),
+                    "template": "functions",
+                    "include_code": true
+                }
+            })),
+            id: Some(serde_json::json!(301)),
+        };
+
+        let resp = server.handle_request(req).await;
+        assert!(resp.error.is_none());
+
+        let result = resp.result.unwrap();
+        let content = result.get("content").unwrap().as_array().unwrap();
+        let text_raw = content[0].get("text").unwrap().as_str().unwrap();
+        let inspect_res: serde_json::Value = serde_json::from_str(text_raw).unwrap();
+
+        // Check for JIT tips footnote in the hint field recommending 'apply_line_edits'
+        let hint = inspect_res.get("hint").unwrap().as_str().unwrap();
+        assert!(hint.contains("Tip: You can apply edits to this file using the 'apply_line_edits' tool"));
+
+        // Check formatting of the definition text
+        let matches = inspect_res.get("matches").unwrap().as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        let def = matches[0].get("definition").unwrap();
+        let def_text = def.get("text").unwrap().as_str().unwrap();
+        assert!(def_text.contains("LINE | LINE ID | CODE"));
+        assert!(def_text.contains("1 | 1#"));
+        assert!(def_text.contains("2 | 2#"));
+        assert!(def_text.contains("3 | 3#"));
+        assert!(def_text.contains("pub fn hello() {"));
+        assert!(def_text.contains("let x = 1;"));
+
+        // 2. Call tree_sitter_inspect with include_code: false
+        let req_no_code = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "tree_sitter_inspect",
+                "arguments": {
+                    "file": test_file.to_str().unwrap(),
+                    "template": "functions",
+                    "include_code": false
+                }
+            })),
+            id: Some(serde_json::json!(302)),
+        };
+
+        let resp_no_code = server.handle_request(req_no_code).await;
+        let result_no_code = resp_no_code.result.unwrap();
+        let content_no_code = result_no_code.get("content").unwrap().as_array().unwrap();
+        let text_raw_no_code = content_no_code[0].get("text").unwrap().as_str().unwrap();
+        let inspect_res_no_code: serde_json::Value = serde_json::from_str(text_raw_no_code).unwrap();
+
+        // Check for JIT tips footnote in the hint field recommending 'view_session_lines'
+        let hint_no_code = inspect_res_no_code.get("hint").unwrap().as_str().unwrap();
+        assert!(hint_no_code.contains("Tip: You can view line IDs for this file using the 'view_session_lines' tool"));
     }
 
     #[tokio::test]

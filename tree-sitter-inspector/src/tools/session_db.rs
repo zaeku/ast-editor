@@ -4,13 +4,14 @@ use std::path::PathBuf;
 use std::fs;
 
 pub fn get_db_path() -> Result<PathBuf> {
-    let mut path = if let Ok(test_dir) = std::env::var("TEST_DB_DIR") {
-        PathBuf::from(test_dir)
+    let mut path = if cfg!(test) {
+        std::env::temp_dir().join("line-editor-test")
     } else {
-        dirs::home_dir().context("Failed to get home directory")?
+        let mut p = dirs::home_dir().context("Failed to get home directory")?;
+        p.push(".cache");
+        p.push("line-editor");
+        p
     };
-    path.push(".cache");
-    path.push("line-editor");
     fs::create_dir_all(&path).context("Failed to create cache directory")?;
     path.push("sessions.db");
     Ok(path)
@@ -96,17 +97,15 @@ mod tests {
 
     #[test]
     fn test_get_db_path() -> Result<()> {
-        let temp_dir = std::env::temp_dir().join("line-editor-test");
-        std::env::set_var("TEST_DB_DIR", &temp_dir);
-
-        let res = get_db_path();
-
-        std::env::remove_var("TEST_DB_DIR");
-
-        let path = res?;
+        let path = get_db_path()?;
         assert!(path.to_string_lossy().contains("sessions.db"));
+        
+        let temp_dir = std::env::temp_dir().join("line-editor-test");
         assert!(path.starts_with(&temp_dir));
 
+        if path.exists() {
+            fs::remove_file(&path).context("Failed to clean up test DB file")?;
+        }
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir).context("Failed to clean up test directory")?;
         }

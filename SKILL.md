@@ -63,6 +63,7 @@ Use this tool to find targeted syntax structures using Tree-sitter queries.
 *   `code_format` (string, optional, default: `"lines"`): Format of the returned code. Options:
     *   `"lines"`: Prefixes each line with its 1-indexed line number (e.g. `40: def my_func():`), compatible with `view_file`.
     *   `"raw"`: Returns the raw code string without line number prefixes.
+*   `output_file` (boolean, optional, default: `false`): If `true`, saves the full matches JSON payload to a file in the plugin's outputs directory and returns only a lightweight summary. Highly recommended for large source files to avoid context/token overflow and bypass platform redirects.
 
 #### Common Tree-sitter S-Expression Queries (for manual query override)
 
@@ -119,6 +120,43 @@ The tool outputs structured JSON containing:
     - `text` (formatted or raw code text of the definition, included if `include_code` is `true`)
 
 Use the `definition` field's `text` directly to view the definition code without requiring a separate `view_file` call.
+
+### Large File Optimization & CLI Pipeline Filtering (`output_file: true`)
+
+If `output_file` is set to `true`, the MCP tool will write the query result to a unique file under the plugin's `outputs/` folder and return a compact summary in the following structure over Stdio:
+```json
+{
+  "status": "success",
+  "filepath": "/path/to/target_file.rs",
+  "language": "rust",
+  "has_syntax_errors": false,
+  "match_count": 42,
+  "saved_to_file": "/Users/zaeku/.../outputs/inspect_output_1783504233_b7feac63.json",
+  "hint": "The full query result has been saved to the file specified in 'saved_to_file'. You can analyze it using jq, jc, or ripgrep."
+}
+```
+
+Since the full list of matches is saved directly to the disk, calling agents should leverage **high-performance CLI tools** like `jq` or `ripgrep` directly on the `saved_to_file` path to query details rather than loading the entire JSON file into the context window.
+
+#### Filtering Examples (파이프라인 활용 모범 사례)
+1. **Find Start/End Lines of a Specific Function (특정 함수의 시작/끝 라인 추출)**
+   ```bash
+   jq '.matches[] | select(.text == "main") | {start_line, end_line}' <saved_to_file>
+   ```
+2. **Extract All Matched Function Names (매칭된 함수명 전체 목록화)**
+   ```bash
+   jq -r '.matches[].text' <saved_to_file>
+   ```
+3. **Filter Matches for Syntax Errors (구문 에러 유무 단일값 파싱)**
+   ```bash
+   jq '.has_syntax_errors' <saved_to_file>
+   ```
+4. **Locate Specific Captures with ripgrep (빠른 문자열 탐색)**
+   ```bash
+   rg '"definition"' <saved_to_file>
+   ```
+
+Using these CLI pipelines ensures **O(1) memory and token consumption** for the agent, letting you query files of arbitrary sizes in milliseconds.
 
 ## Handling Unsupported Languages (지원하지 않는 언어 대응 지침)
 

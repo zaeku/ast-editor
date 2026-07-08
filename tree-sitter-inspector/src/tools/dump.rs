@@ -2,27 +2,17 @@ use std::sync::Arc;
 use std::fs;
 use std::path::Path;
 use anyhow::{Result, Context, bail};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tree_sitter::Node;
 
 use crate::parser::ParserManager;
 
+use crate::tools::{McpTextContent, McpToolResult};
+
 #[derive(Debug, Deserialize)]
 pub struct DumpArgs {
     pub file: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct McpTextContent {
-    #[serde(rename = "type")]
-    pub content_type: String,
-    pub text: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct McpToolResult {
-    pub content: Vec<McpTextContent>,
 }
 
 fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, max_depth: usize, out: &mut String) {
@@ -115,5 +105,6 @@ pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Re
             content_type: "text".to_string(),
             text: final_text,
         }],
+        is_error: None,
     })?)
 }

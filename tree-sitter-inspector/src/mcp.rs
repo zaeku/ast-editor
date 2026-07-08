@@ -372,7 +372,143 @@ mod tests {
         assert!(wasm_dir.contains("wasm"));
     }
 
+    #[tokio::test]
+    async fn test_mcp_tools_call_inspect_success() {
+        let fixture = TempTestFixture::new("test_inspect_success");
+        let server = create_test_server(&fixture);
 
+        // Copy real rust wasm so that compilation succeeds
+        let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let real_wasm_path = manifest_dir.parent().unwrap().join("resources").join("wasm").join("tree-sitter-rust.wasm");
+        let target_wasm_path = fixture.dir.join("wasm").join("tree-sitter-rust.wasm");
+        if real_wasm_path.exists() {
+            fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+        }
+
+        let test_file = fixture.dir.join("test.rs");
+        fs::write(&test_file, "pub fn hello() {}\npub fn world() {}\n").unwrap();
+
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "tree_sitter_inspect",
+                "arguments": {
+                    "file": test_file.to_str().unwrap(),
+                    "template": "functions"
+                }
+            })),
+            id: Some(serde_json::json!(101)),
+        };
+
+        let resp = server.handle_request(req).await;
+        assert_eq!(resp.id, Some(serde_json::json!(101)));
+        assert!(resp.error.is_none());
+        
+        let result = resp.result.unwrap();
+        let content = result.get("content").unwrap().as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        
+        let content_item = &content[0];
+        assert_eq!(content_item.get("type").unwrap().as_str().unwrap(), "text");
+        
+        let text_raw = content_item.get("text").unwrap().as_str().unwrap();
+        let inspect_res: serde_json::Value = serde_json::from_str(text_raw).unwrap();
+        
+        assert_eq!(inspect_res.get("status").unwrap().as_str().unwrap(), "success");
+        assert_eq!(inspect_res.get("language").unwrap().as_str().unwrap(), "rust");
+        assert_eq!(inspect_res.get("match_count").unwrap().as_u64().unwrap(), 2);
+        
+        let matches = inspect_res.get("matches").unwrap().as_array().unwrap();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].get("capture_name").unwrap().as_str().unwrap(), "function");
+    }
+
+    #[tokio::test]
+    async fn test_mcp_tools_call_inspect_unsupported_template_warning() {
+        let fixture = TempTestFixture::new("test_inspect_warning");
+        let server = create_test_server(&fixture);
+
+        // Copy real rust wasm
+        let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let real_wasm_path = manifest_dir.parent().unwrap().join("resources").join("wasm").join("tree-sitter-rust.wasm");
+        let target_wasm_path = fixture.dir.join("wasm").join("tree-sitter-rust.wasm");
+        if real_wasm_path.exists() {
+            fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+        }
+
+        let test_file = fixture.dir.join("test.rs");
+        fs::write(&test_file, "pub fn hello() {}\n").unwrap();
+
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "tree_sitter_inspect",
+                "arguments": {
+                    "file": test_file.to_str().unwrap(),
+                    "template": "invalid_template_name"
+                }
+            })),
+            id: Some(serde_json::json!(102)),
+        };
+
+        let resp = server.handle_request(req).await;
+        assert_eq!(resp.id, Some(serde_json::json!(102)));
+        assert!(resp.error.is_none());
+        
+        let result = resp.result.unwrap();
+        let content = result.get("content").unwrap().as_array().unwrap();
+        let text_raw = content[0].get("text").unwrap().as_str().unwrap();
+        let inspect_res: serde_json::Value = serde_json::from_str(text_raw).unwrap();
+        
+        assert_eq!(inspect_res.get("status").unwrap().as_str().unwrap(), "warning");
+        assert!(inspect_res.get("hint").unwrap().as_str().unwrap().contains("Template 'invalid_template_name' is not supported"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_tools_call_inspect_invalid_query_error() {
+        let fixture = TempTestFixture::new("test_inspect_error");
+        let server = create_test_server(&fixture);
+
+        // Copy real rust wasm
+        let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let real_wasm_path = manifest_dir.parent().unwrap().join("resources").join("wasm").join("tree-sitter-rust.wasm");
+        let target_wasm_path = fixture.dir.join("wasm").join("tree-sitter-rust.wasm");
+        if real_wasm_path.exists() {
+            fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+        }
+
+        let test_file = fixture.dir.join("test.rs");
+        fs::write(&test_file, "pub fn hello() {}\n").unwrap();
+
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "tree_sitter_inspect",
+                "arguments": {
+                    "file": test_file.to_str().unwrap(),
+                    "query": "(invalid_s_expression_syntax"
+                }
+            })),
+            id: Some(serde_json::json!(103)),
+        };
+
+        let resp = server.handle_request(req).await;
+        assert_eq!(resp.id, Some(serde_json::json!(103)));
+        assert!(resp.error.is_none());
+        
+        let result = resp.result.unwrap();
+        assert_eq!(result.get("is_error").unwrap().as_bool().unwrap(), true);
+        
+        let content = result.get("content").unwrap().as_array().unwrap();
+        let text_raw = content[0].get("text").unwrap().as_str().unwrap();
+        let inspect_res: serde_json::Value = serde_json::from_str(text_raw).unwrap();
+        
+        assert_eq!(inspect_res.get("status").unwrap().as_str().unwrap(), "error");
+        assert!(inspect_res.get("hint").unwrap().as_str().unwrap().contains("Invalid Tree-sitter query S-expression"));
+    }
 
     #[tokio::test]
     async fn test_mcp_tools_call_missing_languages_config() {
@@ -416,6 +552,97 @@ mod tests {
         
         let missing_file = data.get("missing_file").unwrap().as_str().unwrap();
         assert!(missing_file.contains("languages.json"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_tools_call_inspect_output_file_success() {
+        let fixture = TempTestFixture::new("test_inspect_output_file");
+        let server = create_test_server(&fixture);
+
+        // Copy real rust wasm so that compilation succeeds
+        let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let real_wasm_path = manifest_dir.parent().unwrap().join("resources").join("wasm").join("tree-sitter-rust.wasm");
+        let target_wasm_path = fixture.dir.join("wasm").join("tree-sitter-rust.wasm");
+        if real_wasm_path.exists() {
+            fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+        }
+
+        let test_file = fixture.dir.join("test.rs");
+        fs::write(&test_file, "pub fn hello() {}\n").unwrap();
+
+        // Let's call the tool with output_file: true
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": "tree_sitter_inspect",
+                "arguments": {
+                    "file": test_file.to_str().unwrap(),
+                    "template": "functions",
+                    "output_file": true
+                }
+            })),
+            id: Some(serde_json::json!(201)),
+        };
+
+        let resp = server.handle_request(req).await;
+        assert_eq!(resp.id, Some(serde_json::json!(201)));
+        assert!(resp.error.is_none());
+
+        let result = resp.result.unwrap();
+        let content = result.get("content").unwrap().as_array().unwrap();
+        let text_raw = content[0].get("text").unwrap().as_str().unwrap();
+        let inspect_res: serde_json::Value = serde_json::from_str(text_raw).unwrap();
+
+        assert_eq!(inspect_res.get("status").unwrap().as_str().unwrap(), "success");
+
+        // The summary returned over stdio should NOT contain the detailed matches array
+        assert!(inspect_res.get("matches").is_none());
+
+        // Verify the saved_to_file path exists and contains JSON
+        let saved_to_file_path_str = inspect_res.get("saved_to_file").unwrap().as_str().unwrap();
+        let saved_path = std::path::Path::new(saved_to_file_path_str);
+        assert!(saved_path.exists());
+
+        let file_content = fs::read_to_string(saved_path).unwrap();
+        let file_json: serde_json::Value = serde_json::from_str(&file_content).unwrap();
+        assert_eq!(file_json.get("status").unwrap().as_str().unwrap(), "success");
+
+        // The actual saved file MUST contain the detailed matches
+        assert!(file_json.get("matches").is_some());
+        // The actual saved file MUST NOT contain the self-referential saved_to_file field
+        assert!(file_json.get("saved_to_file").is_none());
+
+        // Clean up the output file to keep build folder clean
+        let _ = fs::remove_file(saved_path);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_stateless_gc_behavior() {
+        let fixture = TempTestFixture::new("test_gc_behavior");
+        let outputs_dir = fixture.dir.join("outputs");
+        fs::create_dir_all(&outputs_dir).unwrap();
+
+        let old_file = outputs_dir.join("old_output.json");
+        let new_file = outputs_dir.join("new_output.json");
+
+        fs::write(&old_file, "{}").unwrap();
+        fs::write(&new_file, "{}").unwrap();
+
+        // Adjust old_file's modified time to 24 hours ago (Mac/Unix touch command)
+        let status = std::process::Command::new("touch")
+            .args(&["-m", "-t", "202001010000", old_file.to_str().unwrap()])
+            .status()
+            .expect("failed to execute touch command for testing");
+        assert!(status.success());
+
+        // Run the GC logic directly on outputs_dir
+        crate::tools::inspect::run_gc(outputs_dir.clone()).await;
+
+        // old_file should be deleted (older than 12 hours)
+        assert!(!old_file.exists(), "Old file was not cleaned up by GC");
+        // new_file should still exist
+        assert!(new_file.exists(), "New file was prematurely deleted by GC");
     }
 }
 

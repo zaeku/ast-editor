@@ -54,28 +54,49 @@ None. Everything works as intended.
 ## 6. Feedback & Fixes (Reviewer Feedback)
 
 Following feedback from the reviewer, the following fixes were implemented:
-1. **Host Mutation in Tests**:
-   - `get_db_path()` was modified to check if the `TEST_DB_DIR` environment variable is set. If present, it uses this path instead of `dirs::home_dir()`.
-   - `test_get_db_path()` was updated to set `TEST_DB_DIR` to a temporary directory (`std::env::temp_dir().join("line-editor-test")`), run `get_db_path()`, unset the environment variable, verify the path structure, and clean up the temporary directory.
-2. **SQLite Configuration and Index Context**:
+
+1. **SQLite Configuration and Index Context**:
    - Appended `.context(...)` explaining what failed for the PRAGMA statements and CREATE INDEX statements in `session_db.rs`.
 
-### Updated Test Outputs (`cargo test -p tree-sitter-inspector`):
+2. **Thread-Safety Hazard in Tests**:
+   - Initially, `get_db_path()` checked `TEST_DB_DIR` environment variable, which was mutated in unit tests. This created a thread-safety hazard because Rust runs unit tests concurrently by default.
+   - **Fix**: Reverted the environment variable check. Instead, updated `get_db_path()` to use compile-time `cfg!(test)` to select the temporary directory path:
+     ```rust
+     pub fn get_db_path() -> Result<PathBuf> {
+         let mut path = if cfg!(test) {
+             std::env::temp_dir().join("line-editor-test")
+         } else {
+             let mut p = dirs::home_dir().context("Failed to get home directory")?;
+             p.push(".cache");
+             p.push("line-editor");
+             p
+         };
+         fs::create_dir_all(&path).context("Failed to create cache directory")?;
+         path.push("sessions.db");
+         Ok(path)
+     }
+     ```
+     Updated `test_get_db_path` to call `get_db_path()` directly, verify the returned path, and cleanly delete the generated test database file/directory. This eliminates all environment variable mutations and ensures thread-safety.
+
+3. **Note on Nullable `line_hash`**:
+   - The reviewer claimed `line_hash` should be `NOT NULL`. However, the specification explicitly requires lazy hashing, meaning lines are inserted with `NULL` hashes and resolved on-demand/in the background. So we kept it nullable as designed.
+
+### Final Test Outputs (`cargo test -p tree-sitter-inspector`):
 ```text
 running 12 tests
 test mcp::tests::test_mcp_initialize ... ok
 test mcp::tests::test_mcp_tools_list ... ok
-test mcp::tests::test_mcp_tools_call_missing_languages_config ... ok
 test tools::session_db::tests::test_get_db_path ... ok
+test mcp::tests::test_mcp_tools_call_missing_languages_config ... ok
 test tools::session_db::tests::test_create_tables_in_memory ... ok
 test mcp::tests::test_mcp_stateless_gc_behavior ... ok
 test parser::tests::test_parse_code_success ... ok
 test mcp::tests::test_mcp_tools_call_inspect_missing_wasm ... ok
-test mcp::tests::test_mcp_tools_call_inspect_invalid_query_error ... ok
 test mcp::tests::test_mcp_tools_call_inspect_unsupported_template_warning ... ok
+test mcp::tests::test_mcp_tools_call_inspect_invalid_query_error ... ok
 test mcp::tests::test_mcp_tools_call_inspect_success ... ok
 test mcp::tests::test_mcp_tools_call_inspect_output_file_success ... ok
 
-test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.40s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
 ```
 

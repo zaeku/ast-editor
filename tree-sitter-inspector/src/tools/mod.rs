@@ -2,6 +2,7 @@ pub mod inspect;
 pub mod dump;
 pub mod session_db;
 pub mod view;
+pub mod edit;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
@@ -110,3 +111,7 @@ impl ToolDispatcher {
         }
     }
 }
+
+#[cfg(test)]
+pub static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+

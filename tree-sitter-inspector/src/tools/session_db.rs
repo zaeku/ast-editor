@@ -335,9 +335,7 @@ pub fn start_background_hash_worker(session_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static DB_LOCK: Mutex<()> = Mutex::new(());
+    use crate::tools::TEST_DB_LOCK as DB_LOCK;
 
     #[test]
     fn test_create_tables_in_memory() -> Result<()> {

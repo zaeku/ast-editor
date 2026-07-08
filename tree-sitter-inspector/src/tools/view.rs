@@ -2,6 +2,13 @@ use anyhow::{Result, Context};
 use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};
 
 pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
+    if start_line == 0 {
+        anyhow::bail!("Invalid bounds: start_line must be greater than 0");
+    }
+    if start_line > end_line {
+        anyhow::bail!("Invalid bounds: start_line ({}) cannot be greater than end_line ({})", start_line, end_line);
+    }
+
     let conn = get_db_connection()?;
     
     let mut stmt = conn.prepare("SELECT session_id FROM sessions WHERE filepath = ?1")?;

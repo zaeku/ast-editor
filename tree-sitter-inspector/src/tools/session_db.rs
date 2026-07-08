@@ -22,6 +22,10 @@ pub fn get_db_connection() -> Result<Connection> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).context("Failed to open SQLite database")?;
     
+    // Set busy timeout to 5 seconds to prevent SQLITE_BUSY errors
+    conn.busy_timeout(std::time::Duration::from_millis(5000))
+        .context("Failed to set SQLite busy timeout")?;
+    
     // Configure high-performance memory pragmas and enable foreign keys
     conn.pragma_update(None, "journal_mode", &"WAL")
         .context("Failed to configure WAL journal mode")?;
@@ -271,8 +275,11 @@ pub fn ensure_hashes_for_range(conn: &Connection, session_id: &str, start_line: 
         }
     }
 
-    for (id, hash) in updates {
-        conn.execute("UPDATE lines SET line_hash = ?1 WHERE id = ?2;", rusqlite::params![hash, id])?;
+    if !updates.is_empty() {
+        let mut update_stmt = conn.prepare("UPDATE lines SET line_hash = ?1 WHERE id = ?2;")?;
+        for (id, hash) in updates {
+            update_stmt.execute(rusqlite::params![hash, id])?;
+        }
     }
     
     Ok(())
@@ -282,27 +289,45 @@ pub fn start_background_hash_worker(session_id: String) {
     if tokio::runtime::Handle::try_current().is_ok() {
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            if let Ok(conn) = get_db_connection() {
-                let mut stmt = match conn.prepare("SELECT id, content FROM lines WHERE session_id = ?1 AND line_hash IS NULL") {
+            let mut conn = match get_db_connection() {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let tx = match conn.transaction() {
+                Ok(t) => t,
+                Err(_) => return,
+            };
+            
+            let mut updates = Vec::new();
+            {
+                let mut stmt = match tx.prepare("SELECT id, content FROM lines WHERE session_id = ?1 AND line_hash IS NULL") {
                     Ok(s) => s,
                     Err(_) => return,
                 };
-                
                 let query_res = stmt.query([&session_id]);
                 if let Ok(mut rows) = query_res {
-                    let mut updates = Vec::new();
                     while let Ok(Some(row)) = rows.next() {
                         if let (Ok(id), Ok(content)) = (row.get::<_, i64>(0), row.get::<_, String>(1)) {
                             let hash = compute_line_hash(&content);
                             updates.push((id, hash));
                         }
                     }
-                    
-                    for (id, hash) in updates {
-                        let _ = conn.execute("UPDATE lines SET line_hash = ?1 WHERE id = ?2;", rusqlite::params![hash, id]);
+                }
+            }
+            
+            if !updates.is_empty() {
+                let mut update_stmt = match tx.prepare("UPDATE lines SET line_hash = ?1 WHERE id = ?2;") {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+                for (id, hash) in updates {
+                    if update_stmt.execute(rusqlite::params![hash, id]).is_err() {
+                        return;
                     }
                 }
             }
+            
+            let _ = tx.commit();
         });
     }
 }
@@ -654,6 +679,10 @@ mod tests {
         assert!(sub_output.contains("2 | 2#"));
         assert!(!sub_output.contains("1 | 1#"));
         assert!(!sub_output.contains("3 | 3#"));
+
+        // 4. Test bounds validation
+        assert!(crate::tools::view::view_session_lines(filepath_str, 0, 3).is_err());
+        assert!(crate::tools::view::view_session_lines(filepath_str, 3, 1).is_err());
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())

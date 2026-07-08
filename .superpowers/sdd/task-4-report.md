@@ -87,3 +87,54 @@ test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 ## Concerns
 
 - None.
+
+## Reviewer Feedback Improvements (Task 4 Fixes)
+
+We addressed the following feedback points:
+1. **Output Preview Context for Deletion Operations**:
+   - Recorded the `sort_order` of deleted lines prior to calling database `DELETE`.
+   - In the preview step, computed the remaining line index in `sorted_lines` closest to each recorded deleted `sort_order`.
+   - Added these indices and their `+/- 2` context lines to the generated preview.
+2. **Case-insensitive Extension in validate_syntax**:
+   - Converted the extension `ext` in `validate_syntax` to lowercase using `.to_ascii_lowercase()` prior to querying/delegating.
+
+### New Test and Test Output
+A new unit test `test_case_insensitive_validation_and_deletion_preview` was added to verify both requirements. It tests syntax validation and deletion context preview on an uppercase extension `.RS` file.
+
+All 29 tests passed:
+```
+running 29 tests
+test mcp::tests::test_mcp_tools_call_missing_languages_config ... ok
+test mcp::tests::test_mcp_tools_list ... ok
+test mcp::tests::test_mcp_initialize ... ok
+test mcp::tests::test_mcp_stateless_gc_behavior ... ok
+test parser::tests::test_parse_code_success ... ok
+test mcp::tests::test_mcp_tools_call_inspect_missing_wasm ... ok
+test mcp::tests::test_mcp_tools_call_inspect_invalid_query_error ... ok
+test mcp::tests::test_mcp_tools_call_inspect_unsupported_template_warning ... ok
+test tools::session_db::tests::test_check_language_supported ... ok
+test mcp::tests::test_mcp_tools_call_inspect_success ... ok
+test mcp::tests::test_mcp_tools_call_inspect_output_file_success ... ok
+test tools::session_db::tests::test_compute_sha256 ... ok
+test tools::edit::tests::test_apply_line_edits_insert_update_delete ... ok
+test tools::edit::tests::test_case_insensitive_validation_and_deletion_preview ... ok
+test tools::edit::tests::test_checksum_error ... ok
+test tools::edit::tests::test_concurrency_error ... ok
+test tools::edit::tests::test_insert_into_empty_file ... ok
+test tools::session_db::tests::test_is_binary_file ... ok
+test tools::edit::tests::test_syntax_validation_error_rolls_back ... ok
+test tools::session_db::tests::test_background_hash_worker ... ok
+test tools::session_db::tests::test_cleanup_stale_sessions ... ok
+test tools::session_db::tests::test_create_tables_in_memory ... ok
+test tools::session_db::tests::test_get_db_path ... ok
+test tools::session_db::tests::test_init_edit_session_binary_file ... ok
+test tools::session_db::tests::test_init_edit_session_lifecycle ... ok
+test tools::session_db::tests::test_init_edit_session_nonexistent_file ... ok
+test tools::session_db::tests::test_init_edit_session_unsupported_language ... ok
+test tools::session_db::tests::test_line_hashing_and_lazy_populating ... ok
+test tools::session_db::tests::test_view_session_lines ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.67s
+```
+
+**New Commit Hash**: `f99143720d5df6c8b8126380774e35567596f692`

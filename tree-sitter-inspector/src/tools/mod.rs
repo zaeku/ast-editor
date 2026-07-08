@@ -1,6 +1,7 @@
 pub mod inspect;
 pub mod dump;
 pub mod session_db;
+pub mod view;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;

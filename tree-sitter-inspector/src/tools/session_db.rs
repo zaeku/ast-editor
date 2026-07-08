@@ -231,6 +231,8 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 
     tx.commit().context("Failed to commit SQLite transaction")?;
 
+    start_background_hash_worker(session_id.clone());
+
     Ok(SessionMetadata {
         session_id,
         total_lines: lines_count,
@@ -239,6 +241,70 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
         is_supported,
         warning_message,
     })
+}
+
+pub fn compute_line_hash(content: &str) -> String {
+    use sha1::{Sha1, Digest};
+    let mut hasher = Sha1::new();
+    hasher.update(content.as_bytes());
+    let hex = format!("{:x}", hasher.finalize());
+    hex[..4].to_string()
+}
+
+pub fn ensure_hashes_for_range(conn: &Connection, session_id: &str, start_line: usize, end_line: usize) -> Result<()> {
+    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
+    let offset = start_line.saturating_sub(1);
+
+    let mut stmt = conn.prepare(
+        "SELECT id, content, line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
+    )?;
+    
+    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
+    let mut updates = Vec::new();
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let content: String = row.get(1)?;
+        let line_hash: Option<String> = row.get(2)?;
+        if line_hash.is_none() {
+            let hash = compute_line_hash(&content);
+            updates.push((id, hash));
+        }
+    }
+
+    for (id, hash) in updates {
+        conn.execute("UPDATE lines SET line_hash = ?1 WHERE id = ?2;", rusqlite::params![hash, id])?;
+    }
+    
+    Ok(())
+}
+
+pub fn start_background_hash_worker(session_id: String) {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            if let Ok(conn) = get_db_connection() {
+                let mut stmt = match conn.prepare("SELECT id, content FROM lines WHERE session_id = ?1 AND line_hash IS NULL") {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+                
+                let query_res = stmt.query([&session_id]);
+                if let Ok(mut rows) = query_res {
+                    let mut updates = Vec::new();
+                    while let Ok(Some(row)) = rows.next() {
+                        if let (Ok(id), Ok(content)) = (row.get::<_, i64>(0), row.get::<_, String>(1)) {
+                            let hash = compute_line_hash(&content);
+                            updates.push((id, hash));
+                        }
+                    }
+                    
+                    for (id, hash) in updates {
+                        let _ = conn.execute("UPDATE lines SET line_hash = ?1 WHERE id = ?2;", rusqlite::params![hash, id]);
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -462,6 +528,133 @@ mod tests {
             "}".to_string(),
         ]);
         
+        fs::remove_dir_all(&temp_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_line_hashing_and_lazy_populating() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let conn = Connection::open_in_memory()?;
+        create_tables(&conn)?;
+
+        // Test compute_line_hash
+        let hash = compute_line_hash("hello world");
+        assert_eq!(hash.len(), 4);
+        assert_eq!(hash, "2aae"); // sha1 prefix
+        
+        let hash2 = compute_line_hash("hello world");
+        assert_eq!(hash, hash2);
+
+        // Setup a dummy session
+        let session_id = "test_session_id";
+        conn.execute(
+            "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
+            rusqlite::params!["dummy.rs", session_id, "hash", 100, 100],
+        )?;
+
+        // Insert three lines with line_hash = NULL
+        conn.execute(
+            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);",
+            rusqlite::params![session_id, 1, "line 1 content", 1000.0],
+        )?;
+        conn.execute(
+            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);",
+            rusqlite::params![session_id, 2, "line 2 content", 2000.0],
+        )?;
+        conn.execute(
+            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);",
+            rusqlite::params![session_id, 3, "line 3 content", 3000.0],
+        )?;
+
+        // Ensure hashes only for lines 1 and 2
+        ensure_hashes_for_range(&conn, session_id, 1, 2)?;
+
+        // Retrieve lines and check hashes
+        let mut stmt = conn.prepare("SELECT sequence_id, line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
+        let results: Vec<(i64, Option<String>)> = stmt.query_map([session_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?.collect::<Result<_, _>>()?;
+
+        assert_eq!(results[0].0, 1);
+        assert!(results[0].1.is_some());
+        assert_eq!(results[0].1.as_ref().unwrap(), &compute_line_hash("line 1 content"));
+
+        assert_eq!(results[1].0, 2);
+        assert!(results[1].1.is_some());
+        assert_eq!(results[1].1.as_ref().unwrap(), &compute_line_hash("line 2 content"));
+
+        assert_eq!(results[2].0, 3);
+        assert!(results[2].1.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_background_hash_worker() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("line-editor-test-bg-worker");
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir)?;
+        }
+        fs::create_dir_all(&temp_dir)?;
+        let file_path = temp_dir.join("bg_code.rs");
+        fs::write(&file_path, "line 1\nline 2\n")?;
+
+        let metadata = init_edit_session(file_path.to_str().unwrap(), false)?;
+        
+        // Wait for the background worker to finish hashing
+        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+
+        let conn = get_db_connection()?;
+        let mut stmt = conn.prepare("SELECT line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
+        let hashes: Vec<Option<String>> = stmt.query_map([&metadata.session_id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+
+        assert_eq!(hashes.len(), 2);
+        assert!(hashes[0].is_some());
+        assert!(hashes[1].is_some());
+        assert_eq!(hashes[0].as_ref().unwrap(), &compute_line_hash("line 1"));
+        assert_eq!(hashes[1].as_ref().unwrap(), &compute_line_hash("line 2"));
+
+        fs::remove_dir_all(&temp_dir)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_view_session_lines() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("line-editor-test-view");
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir)?;
+        }
+        fs::create_dir_all(&temp_dir)?;
+        let file_path = temp_dir.join("code.rs");
+        fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        // 1. Initialize session
+        let metadata = init_edit_session(filepath_str, false)?;
+        assert_eq!(metadata.total_lines, 3);
+
+        // 2. View all lines (1 to 3)
+        let output = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
+        
+        // Verify structure
+        assert!(output.contains("LINE | LINE ID | CODE"));
+        assert!(output.contains("1 | 1#"));
+        assert!(output.contains("2 | 2#"));
+        assert!(output.contains("3 | 3#"));
+        assert!(output.contains("fn main() {"));
+        assert!(output.contains("println!(\"Hello!\");"));
+        assert!(output.contains("}"));
+
+        // 3. View sub-range (2 to 2)
+        let sub_output = crate::tools::view::view_session_lines(filepath_str, 2, 2)?;
+        assert!(sub_output.contains("2 | 2#"));
+        assert!(!sub_output.contains("1 | 1#"));
+        assert!(!sub_output.contains("3 | 3#"));
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }

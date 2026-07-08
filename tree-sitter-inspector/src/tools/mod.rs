@@ -1,11 +1,27 @@
 pub mod inspect;
 pub mod dump;
+pub mod session_db;
 
+use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::sync::Arc;
 use anyhow::{Result, bail};
 
 use crate::parser::ParserManager;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct McpTextContent {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub text: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct McpToolResult {
+    pub content: Vec<McpTextContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_error: Option<bool>,
+}
 
 pub struct ToolDispatcher;
 
@@ -52,6 +68,10 @@ impl ToolDispatcher {
                             "type": "string",
                             "enum": ["lines", "raw"],
                             "description": "Format of the returned code (default: 'lines')"
+                        },
+                        "output_file": {
+                            "type": "boolean",
+                            "description": "If true, saves the inspect output JSON to a unique file in the plugin's outputs directory and returns its absolute path. Recommended for large source files to bypass token limits."
                         }
                     },
                     "required": ["file"]

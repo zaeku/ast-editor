@@ -105,9 +105,10 @@ fn check_language_supported(path: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("");
+        .unwrap_or("")
+        .to_ascii_lowercase();
     matches!(
-        ext,
+        ext.as_str(),
         "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java" |
         "cpp" | "cc" | "cxx" | "c" | "h" | "lua" | "html" | "htm" |
         "json" | "yaml" | "yml" | "toml" | "swift"
@@ -123,7 +124,7 @@ pub fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
 }
 
 pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<SessionMetadata> {
-    let conn = get_db_connection()?;
+    let mut conn = get_db_connection()?;
     create_tables(&conn)?;
     cleanup_stale_sessions(&conn)?;
 
@@ -149,12 +150,18 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
     // Check if session already exists and file mtime/hash matches
-    let mut stmt = conn.prepare(
-        "SELECT session_id, last_accessed_at FROM sessions WHERE filepath = ?1 AND file_hash = ?2 AND mtime = ?3"
-    )?;
-    let existing: Result<(String, i64), _> = stmt.query_row(rusqlite::params![filepath, file_hash, mtime], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    });
+    let existing = {
+        let mut stmt = conn.prepare(
+            "SELECT session_id FROM sessions WHERE filepath = ?1 AND file_hash = ?2 AND mtime = ?3"
+        )?;
+        match stmt.query_row(rusqlite::params![filepath, file_hash, mtime], |row| {
+            row.get::<_, String>(0)
+        }) {
+            Ok(session_id) => Some(session_id),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(err) => return Err(anyhow::Error::from(err).context("Failed to query existing session")),
+        }
+    };
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
@@ -163,7 +170,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
         None
     };
 
-    if let Ok((session_id, _)) = existing {
+    if let Some(session_id) = existing {
         // Reuse session
         conn.execute("UPDATE sessions SET last_accessed_at = ?1 WHERE session_id = ?2;", rusqlite::params![now, session_id])
             .context("Failed to update last_accessed_at for reused session")?;
@@ -189,33 +196,40 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     // Read the file and populate rows
     let content = fs::read_to_string(filepath).context("Failed to read file content")?;
     
+    // Begin transaction
+    let tx = conn.transaction().context("Failed to begin SQLite transaction")?;
+
     // Clear any stale session for this filepath
-    conn.execute("DELETE FROM sessions WHERE filepath = ?1;", rusqlite::params![filepath])
+    tx.execute("DELETE FROM sessions WHERE filepath = ?1;", rusqlite::params![filepath])
         .context("Failed to delete existing session for path")?;
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
         rusqlite::params![filepath, session_id, file_hash, mtime, now],
     ).context("Failed to insert new session")?;
 
-    let mut stmt = conn.prepare(
-        "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);"
-    )?;
-
     let mut lines_count = 0;
-    // Split by lines, preserving empty final lines
-    let mut parts: Vec<&str> = content.split('\n').collect();
-    if parts.last() == Some(&"") {
-        parts.pop();
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);"
+        )?;
+
+        // Split by lines, preserving empty final lines
+        let mut parts: Vec<&str> = content.split('\n').collect();
+        if parts.last() == Some(&"") {
+            parts.pop();
+        }
+        
+        for (idx, line_content) in parts.iter().enumerate() {
+            let seq = idx + 1;
+            let sort_order = (seq as f64) * 1000.0;
+            stmt.execute(rusqlite::params![session_id, seq, line_content, sort_order])
+                .context("Failed to insert line")?;
+            lines_count += 1;
+        }
     }
-    
-    for (idx, line_content) in parts.iter().enumerate() {
-        let seq = idx + 1;
-        let sort_order = (seq as f64) * 1000.0;
-        stmt.execute(rusqlite::params![session_id, seq, line_content, sort_order])
-            .context("Failed to insert line")?;
-        lines_count += 1;
-    }
+
+    tx.commit().context("Failed to commit SQLite transaction")?;
 
     Ok(SessionMetadata {
         session_id,
@@ -302,6 +316,8 @@ mod tests {
         assert!(check_language_supported("main.cpp"));
         assert!(check_language_supported("index.html"));
         assert!(check_language_supported("config.toml"));
+        assert!(check_language_supported("FOO.RS"));
+        assert!(check_language_supported("Bar.Py"));
         assert!(!check_language_supported("foo.txt"));
         assert!(!check_language_supported("foo.pdf"));
         assert!(!check_language_supported("foo"));

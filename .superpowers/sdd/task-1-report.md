@@ -1,37 +1,36 @@
-# Task 1 Report: Flatten Crate Directory and Merge Cargo.toml
+# Task 1 Report: Inner DB and logic renames & JIT session initialization
 
-## Status: DONE
+## What was Implemented
+1. **Renamed Inner Logic Functions & Provided Shims**:
+   - Renamed `pub fn view_session_lines` to `pub fn view_lines` in [view.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/view.rs).
+   - Renamed `pub fn apply_line_edits` to `pub fn edit_lines` in [edit.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/edit.rs).
+   - Retained deprecated shims for `view_session_lines` and `apply_line_edits` to ensure the project continues to compile cleanly while transitioning through Tasks 2 & 3.
+2. **JIT Session Initialization**:
+   - Implemented JIT check in `view_lines` ([view.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/view.rs)): Checks if a database session exists and is up to date (by comparing the disk `mtime` with `old_mtime`). If missing or out-of-sync, automatically calls `session_db::init_edit_session(filepath, false)`.
+   - Implemented JIT check in `edit_lines` ([edit.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/edit.rs)): Checks if a session exists. If missing, automatically calls `session_db::init_edit_session(filepath, false)`. If it exists but is out-of-sync, it continues to raise a concurrency/out-of-sync error to protect against applying edits on stale line IDs.
+3. **Updated Unsupported Warning Message**:
+   - Updated `warning_message` inside `init_edit_session` in [session_db.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/session_db.rs) to refer to `view_lines` and `edit_lines`.
+4. **New Unit Tests**:
+   - Added `test_view_lines_jit_initialization` in [session_db.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/session_db.rs) to verify JIT caching for line viewing.
+   - Added `test_edit_lines_jit_initialization` in [edit.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/edit.rs) to verify JIT caching for line editing.
 
-## Commit Details
-- **Hash:** `1c4549b` (on `master`)
-- **Message:** `refactor: flatten workspace structure into single root crate`
-- **Files Modified/Created/Deleted:**
-  - Modified: `Cargo.toml`, `Cargo.lock`
-  - Renamed/Moved:
-    - `tree-sitter-inspector/src/` -> `src/`
-    - `tree-sitter-inspector/tests/` -> `tests/`
-  - Deleted: `tree-sitter-inspector/Cargo.toml`, `tree-sitter-inspector/-o`
-  - Removed folder: `tree-sitter-inspector/`
+## Compile & Verification Results
+- **Library Unit Tests**: `cargo test --lib` compiles and passes cleanly with 38 successful tests.
+- **Integration Tests**: `cargo test --test line_edit_tests` compiles and passes cleanly (7 passed; 0 failed) without any deprecation warnings from the integration test file.
 
-## Compilation and Test Summary
-- **Cargo Check:** Compilation checked successfully with no warnings or errors.
-- **Cargo Test:** Ran 35 tests (`cargo test -- --test-threads=1`) and all passed.
-  - Unit tests in `src/lib.rs` (30 tests): `ok. 30 passed`
-  - Unit tests in `src/main.rs` (0 tests): `ok. 0 passed`
-  - Integration tests in `tests/line_edit_tests.rs` (5 tests): `ok. 5 passed`
-- **Strict Validator:** Checked the project via `strict_check` and got 0 errors.
+## Follow-up Fixes (Review Feedback Address)
+1. **Updated lazy hashing test assertion**:
+   - Modified `test_view_lines_lazy_hashing` in [line_edit_tests.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/tests/line_edit_tests.rs) to assert the tip contains `"edit_lines"` instead of `"Edit these lines by calling 'apply_line_edits'"`.
+2. **Replaced deprecated functions**:
+   - Replaced all occurrences of deprecated `view_session_lines` and `apply_line_edits` with `view_lines` and `edit_lines` in [line_edit_tests.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/tests/line_edit_tests.rs) to avoid compiler deprecation warnings.
 
-## Path Adjustments Made
-Because the crate was moved from the nested directory `tree-sitter-inspector/` to the root workspace directory, the `CARGO_MANIFEST_DIR` environment variable now resolves to the project root instead of the sub-crate root. To prevent unit/integration tests from failing to locate the WebAssembly parser grammars, the following path constructions were updated:
-1. **`tests/line_edit_tests.rs` (line 38):**
-   Changed `manifest_dir.parent().unwrap().join("resources")` to `manifest_dir.join("resources")`.
-2. **`src/tools/edit.rs` (line 419):**
-   Changed `manifest_dir.parent().unwrap().join("resources")` to `manifest_dir.join("resources")`.
-3. **`src/mcp.rs` (lines 387, 440, 483, 574, 638):**
-   Changed `manifest_dir.parent().unwrap().join("resources")` to `manifest_dir.join("resources")`.
-4. **Imports & Crate Names:**
-   - Modified `src/main.rs` to import from `ast_editor` instead of `tree_sitter_inspector`.
-   - Modified `tests/line_edit_tests.rs` to import from `ast_editor` instead of `tree_sitter_inspector`.
+## Files Changed
+- [view.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/view.rs)
+- [edit.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/edit.rs)
+- [session_db.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/src/tools/session_db.rs)
+- [line_edit_tests.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/tests/line_edit_tests.rs)
 
-## Concerns / Risks
-- None. The build has been flattened, all tests pass cleanly, and the project is ready for the subsequent tasks.
+## Self-Review Findings & Concerns
+- Checked busy timeouts and connection caching: JIT checks query existing session metadata via SELECT before calling initialization logic, which is cheap and transaction-safe.
+- Background hash worker is triggered properly inside `init_edit_session`.
+- No new concerns. Ready for Task 2.

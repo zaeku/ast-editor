@@ -72,14 +72,14 @@ async fn test_view_lines_lazy_hashing() {
     let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
     
     // Retrieve lines (this triggers lazy hashing for range)
-    let view_res = view::view_session_lines(file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
     let line0 = lines[0].as_array().unwrap();
     assert!(line0[1].as_str().unwrap().starts_with("1#"));
     assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
-    assert!(val["tip"].as_str().unwrap().contains("Edit these lines by calling 'apply_line_edits'"));
+    assert!(val["tip"].as_str().unwrap().contains("edit_lines"));
 }
 
 #[tokio::test]
@@ -92,7 +92,7 @@ async fn test_edit_operations_and_ast_validation() {
     session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &meta.session_id, 1, 3).unwrap();
 
     // Fetch the correct target ID for line 2
-    let view_res = view::view_session_lines(file.path_str(), 2, 2).unwrap();
+    let view_res = view::view_lines(file.path_str(), 2, 2).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[1].as_str().unwrap().to_string();
 
@@ -103,7 +103,7 @@ async fn test_edit_operations_and_ast_validation() {
         content: Some("let a = ;".to_string()), // missing value
         ..Default::default()
     }];
-    let edit_res = edit::apply_line_edits(file.path_str(), invalid_edits, &pm).await;
+    let edit_res = edit::edit_lines(file.path_str(), invalid_edits, &pm).await;
     
     if let Err(ref e) = edit_res {
         println!("DEBUG: invalid edit error = {:?}", e);
@@ -123,7 +123,7 @@ async fn test_edit_operations_and_ast_validation() {
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
-    let edit_res = edit::apply_line_edits(file.path_str(), valid_edits, &pm).await.unwrap();
+    let edit_res = edit::edit_lines(file.path_str(), valid_edits, &pm).await.unwrap();
     assert!(edit_res.contains("let a = 2;"));
 
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -140,7 +140,7 @@ async fn test_transactional_deletes_and_inserts() {
     session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &meta.session_id, 1, 4).unwrap();
 
     // Get Line IDs
-    let view_res = view::view_session_lines(file.path_str(), 1, 4).unwrap();
+    let view_res = view::view_lines(file.path_str(), 1, 4).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     
@@ -175,7 +175,7 @@ async fn test_transactional_deletes_and_inserts() {
         }
     ];
 
-    let edit_preview = edit::apply_line_edits(file.path_str(), edits, &pm).await.unwrap();
+    let edit_preview = edit::edit_lines(file.path_str(), edits, &pm).await.unwrap();
     
     // The final file should be:
     // fn main() {
@@ -201,7 +201,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &meta.session_id, 1, 3).unwrap();
 
     // Get line ID
-    let view_res = view::view_session_lines(file.path_str(), 2, 2).unwrap();
+    let view_res = view::view_lines(file.path_str(), 2, 2).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[1].as_str().unwrap().to_string();
 
@@ -217,7 +217,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
         ..Default::default()
     }];
 
-    let edit_res = edit::apply_line_edits(file.path_str(), edits, &pm).await;
+    let edit_res = edit::edit_lines(file.path_str(), edits, &pm).await;
     assert!(edit_res.is_err());
     let err_msg = edit_res.unwrap_err().to_string();
     assert!(err_msg.contains("CONCURRENCY_ERROR"));
@@ -239,7 +239,7 @@ async fn test_integration_append_operation() {
         ..Default::default()
     }];
 
-    let preview = edit::apply_line_edits(file.path_str(), edits, &pm).await.unwrap();
+    let preview = edit::edit_lines(file.path_str(), edits, &pm).await.unwrap();
     assert!(preview.contains("fn additional() {"));
     
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -256,7 +256,7 @@ async fn test_integration_advanced_operations() {
     session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &_meta.session_id, 1, 4).unwrap();
 
     // 1. Get IDs for lines
-    let view_res = view::view_session_lines(file.path_str(), 1, 4).unwrap();
+    let view_res = view::view_lines(file.path_str(), 1, 4).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let _id_main = lines_arr[0].as_array().unwrap()[1].as_str().unwrap().to_string();
@@ -272,7 +272,7 @@ async fn test_integration_advanced_operations() {
         ..Default::default()
     }];
 
-    let preview = edit::apply_line_edits(file.path_str(), edits, &pm).await.unwrap();
+    let preview = edit::edit_lines(file.path_str(), edits, &pm).await.unwrap();
     assert!(preview.contains("let val = 100;"));
     
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -283,7 +283,7 @@ async fn test_integration_advanced_operations() {
     session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &_meta.session_id, 1, 3).unwrap();
 
     // Get new IDs
-    let view_res = view::view_session_lines(file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let id_main_new = lines_arr[0].as_array().unwrap()[1].as_str().unwrap().to_string();
@@ -298,7 +298,7 @@ async fn test_integration_advanced_operations() {
         ..Default::default()
     }];
 
-    let preview_move = edit::apply_line_edits(file.path_str(), edits_move, &pm).await.unwrap();
+    let preview_move = edit::edit_lines(file.path_str(), edits_move, &pm).await.unwrap();
     assert!(preview_move.contains("let val = 100;"));
 
     let content_move = fs::read_to_string(file.path_str()).unwrap();

@@ -1,10 +1,10 @@
 ---
-name: tree-sitter-inspector
+name: ast-editor
 description: >
   Inspects code structure and finds target lines using Tree-sitter S-expression queries. Resilient to syntax errors.
 ---
 
-# Tree-Sitter Code Inspector Skill
+# AST-based Code Editor and Inspector Skill
 
 This skill allows agents to analyze source code structures and identify specific lines of interest using Tree-sitter S-expression queries. It is highly resilient to syntax errors, supports multiple languages, and operates as a Model Context Protocol (MCP) server to eliminate terminal command execution warnings.
 
@@ -34,21 +34,21 @@ To enable this skill, you must register it in your `mcp_config.json` configurati
 ```json
 {
   "mcpServers": {
-    "tree-sitter-inspector": {
-      "command": "/Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/tree-sitter-inspector/scripts/tree-sitter-inspector",
+    "ast-editor": {
+      "command": "/Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/ast-editor/scripts/ast-editor",
       "args": []
     }
   }
 }
 ```
 
-Once registered, the MCP server will run in the background and expose the `tree_sitter_inspect` tool directly to the agent without requiring command approval prompts.
+Once registered, the MCP server will run in the background and expose the `inspect_ast` tool directly to the agent without requiring command approval prompts.
 
 ## Execution Instructions
 
-This skill exposes two primary tools: `tree_sitter_inspect` and `tree_sitter_dump_tree`.
+This skill exposes two primary tools: `inspect_ast` and `dump_ast`.
 
-### 1. `tree_sitter_inspect`
+### 1. `inspect_ast`
 
 Use this tool to find targeted syntax structures using Tree-sitter queries.
 
@@ -91,7 +91,7 @@ Use this tool to find targeted syntax structures using Tree-sitter queries.
 *   **List All Functions**: `(function_declaration name: (simple_identifier) @function)`
 *   **List All Imports**: `(import_declaration) @import`
 
-### 2. `tree_sitter_dump_tree`
+### 2. `dump_ast`
 
 Use this tool to view the hierarchical AST structure of a file. It is especially useful for inspecting node types before writing custom queries.
 
@@ -103,7 +103,7 @@ Use this tool to view the hierarchical AST structure of a file. It is especially
 
 ## Output Interpretation
 
-### `tree_sitter_inspect` Output
+### `inspect_ast` Output
 The tool outputs structured JSON containing:
 - `status`: `"success"` or `"error"`.
 - `has_syntax_errors`: `true` if tree-sitter detected syntax errors (but it still parsed the file).
@@ -172,5 +172,5 @@ If you need to analyze a language that is not currently supported (e.g., Kotlin,
 
 For reference (for the User to extend support):
 1. Obtain the precompiled `tree-sitter-<lang>.wasm` file (compiled with ABI version 13 to 15, ideally using `tree-sitter-cli v0.26` or compatible).
-2. Place the `.wasm` file in the plugin's [resources/wasm/](file:///Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/tree-sitter-inspector/resources/wasm) directory.
-3. Register the file extension and parser mapping in the plugin's [languages.json](file:///Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/tree-sitter-inspector/resources/wasm/languages.json) (e.g., `"kotlin": { "extensions": [".kt"], "wasm_file": "tree-sitter-kotlin.wasm" }`).
+2. Place the `.wasm` file in the plugin's [resources/wasm/](file:///Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/ast-editor/resources/wasm) directory.
+3. Register the file extension and parser mapping in the plugin's [languages.json](file:///Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/ast-editor/resources/wasm/languages.json) (e.g., `"kotlin": { "extensions": [".kt"], "wasm_file": "tree-sitter-kotlin.wasm" }`).

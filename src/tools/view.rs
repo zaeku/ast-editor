@@ -97,10 +97,10 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
     };
 
     let requested_len = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
-    let (capped_end_line, line_count_capped) = if requested_len > 800 {
-        (start_line + 799, true)
+    let capped_end_line = if requested_len > 800 {
+        start_line.saturating_add(799)
     } else {
-        (end_line, false)
+        end_line
     };
 
     let total_lines: usize = conn.query_row(
@@ -108,6 +108,8 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
         rusqlite::params![session_id],
         |row| row.get(0)
     )?;
+
+    let line_count_capped = requested_len > 800 && total_lines > 800;
 
     let total_bytes = std::path::Path::new(filepath).metadata()?.len();
 

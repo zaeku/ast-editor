@@ -407,6 +407,7 @@ async fn test_integration_create_lines_flow() {
 
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_integration_view_lines_truncation_and_protection() {
     let _lock = acquire_db_lock();
     let pm = create_test_parser_manager();

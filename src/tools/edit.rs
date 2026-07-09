@@ -93,37 +93,32 @@ pub async fn edit_lines(
 
     // Long Line Edit Protection Check
     for edit in &edits {
-        if edit.op == "update" || edit.op == "replace_range" {
-            let target_ids_to_check = match edit.op.as_str() {
-                "update" => vec![edit.target_id.as_ref()],
-                "replace_range" => vec![edit.target_id.as_ref(), edit.end_target_id.as_ref()],
-                _ => unreachable!(),
-            };
-
-            for target_id_opt in target_ids_to_check {
-                if let Some(target_id) = target_id_opt {
-                    if !target_id.is_empty() {
-                        let ends_with_trunc = target_id.ends_with("#TRUNC");
-                        let (seq, _) = parse_line_id(target_id)?;
-                        let db_content_res: Result<String, rusqlite::Error> = conn.query_row(
-                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, seq],
-                            |row| row.get(0)
-                        );
-                        match db_content_res {
-                            Ok(content) => {
-                                let char_count = content.chars().count();
-                                if ends_with_trunc || char_count > 2048 {
-                                    bail!(
-                                        "LINE_TOO_LONG_ERROR: Line is too long ({} chars) and has been truncated in the view. Surgical updates on truncated lines are disabled to prevent accidental data loss. Please format the file using a code beautifier (e.g. prettier, black, or cargo fmt) to break it into multiple lines, or rewrite the file using create_lines/write_to_file.",
-                                        char_count
-                                    );
-                                }
-                            }
-                            Err(rusqlite::Error::QueryReturnedNoRows) => {}
-                            Err(err) => return Err(anyhow::Error::from(err)),
+        let target_ids_to_check = vec![
+            edit.target_id.as_ref(),
+            edit.end_target_id.as_ref(),
+            edit.dest_target_id.as_ref(),
+        ];
+        for target_id in target_ids_to_check.into_iter().flatten() {
+            if !target_id.is_empty() {
+                let ends_with_trunc = target_id.ends_with("#TRUNC");
+                let (seq, _) = parse_line_id(target_id)?;
+                let db_content_res: Result<String, rusqlite::Error> = conn.query_row(
+                    "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                    rusqlite::params![session_id, seq],
+                    |row| row.get(0)
+                );
+                match db_content_res {
+                    Ok(content) => {
+                        let char_count = content.chars().count();
+                        if ends_with_trunc || char_count > 2048 {
+                            bail!(
+                                "LINE_TOO_LONG_ERROR: Line is too long ({} chars) and has been truncated in the view. Surgical updates on truncated lines are disabled to prevent accidental data loss. Please format the file using a code beautifier (e.g. prettier, black, or cargo fmt) to break it into multiple lines, or rewrite the file using create_lines/write_to_file.",
+                                char_count
+                            );
                         }
                     }
+                    Err(rusqlite::Error::QueryReturnedNoRows) => {}
+                    Err(err) => return Err(anyhow::Error::from(err)),
                 }
             }
         }

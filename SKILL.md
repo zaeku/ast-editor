@@ -34,19 +34,27 @@ The tool is designed to be highly suitable for paragraph and block-level text ed
 ---
 
 ### The Editing Lifecycle
-The editing workflow follows a structured 2-step transaction cycle:
-$$\text{View Lines} \rightarrow \text{Edit Lines}$$
+The editing workflow follows a structured 3-step transaction cycle:
+$$\text{Create Lines} \rightarrow \text{View Lines} \rightarrow \text{Edit Lines}$$
 
-*Note: Session initialization is completely handled JIT (Just-in-Time) behind the scenes, so there is no need for a manual session opening step.*
+*Note: Session initialization is handled automatically either JIT (Just-in-Time) behind the scenes or explicitly during file creation.*
 
-#### A. `view_lines`
+#### A. `create_lines`
+Creates a brand-new file with the initial content and initializes its line editing session. It returns the list of lines with unique IDs immediately, avoiding an extra view call.
+*   **Safety Features**: To prevent accidental overwriting, the tool fails if the file already exists (returns a error matching `FILE_ALREADY_EXISTS`).
+*   **Arguments**:
+    *   `filepath` (string, required): Absolute path to the file.
+    *   `content` (string, required): Initial text content of the file.
+*   **Output Format**: Returns a JSON object indicating the status, a success message, the column mapping, and the list of generated line items with their persistent Line IDs.
+
+#### B. `view_lines`
 Retrieves lines along with their persistent unique Line IDs for a given file range. If no session exists for the file, it automatically JIT-initializes the session.
 *   **Arguments**:
     *   `filepath` (string, required): Absolute path to the file.
     *   `start_line` (integer, required): 1-indexed starting line.
     *   `end_line` (integer, required): 1-indexed ending line.
 
-#### B. `edit_lines`
+#### C. `edit_lines`
 Transactionally applies one or more line-level edits, runs AST-based syntax validation (if supported), validates file concurrency, updates the file on disk, and returns a +/- 2 line context preview. If no session exists, it JIT-initializes the session.
 *   **Arguments**:
     *   `filepath` (string, required): Absolute path to the file.
@@ -73,8 +81,24 @@ Each element in the `edits` array of `edit_lines` is an object representing a si
 ---
 
 ### JSON Output Format
-Tools returning line lists (`view_lines` and `edit_lines` previews) return a structured, type-safe, self-documenting JSON array format with explicit columns metadata:
+Tools returning line lists return a structured, type-safe, self-documenting JSON format.
 
+#### `create_lines` Output Format
+Returns a confirmation status, a success message, and the full lines list:
+```json
+{
+  "status": "success",
+  "message": "File successfully created and line editing session initialized.",
+  "columns": ["id", "n", "content"],
+  "lines": [
+    ["1#9d33", 1, "use anyhow::{Result, Context};"],
+    ["2#c3b3", 2, "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"]
+  ]
+}
+```
+
+#### `view_lines` and `edit_lines` Output Format
+`view_lines` and `edit_lines` previews return a structured layout with explicit columns metadata and a helpful tip:
 ```json
 {
   "columns": ["id", "n", "content"],

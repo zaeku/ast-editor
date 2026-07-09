@@ -44,7 +44,7 @@ impl ToolDispatcher {
     pub fn list_tools(&self) -> Vec<Value> {
         vec![
             serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",
                 "inputSchema": {
                     "type": "object",
@@ -80,7 +80,7 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "tree_sitter_dump_tree",
+                "name": "dump_ast",
                 "description": "Dumps the complete AST syntax tree of a file as S-expression text.",
                 "inputSchema": {
                     "type": "object",
@@ -165,11 +165,11 @@ impl ToolDispatcher {
     /// Invokes the appropriate tool based on name and deserialized arguments.
     pub async fn call_tool(&self, name: &str, arguments: Value, parser_manager: &Arc<ParserManager>) -> Result<Value> {
         match name {
-            "tree_sitter_inspect" => {
+            "inspect_ast" => {
                 let args = serde_json::from_value(arguments)?;
                 inspect::run_inspect(args, parser_manager).await
             }
-            "tree_sitter_dump_tree" => {
+            "dump_ast" => {
                 let args = serde_json::from_value(arguments)?;
                 dump::run_dump(args, parser_manager).await
             }

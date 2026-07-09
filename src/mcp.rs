@@ -327,8 +327,8 @@ mod tests {
         assert_eq!(tools.len(), 5);
         
         let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
-        assert!(tool_names.contains(&"tree_sitter_inspect"));
-        assert!(tool_names.contains(&"tree_sitter_dump_tree"));
+        assert!(tool_names.contains(&"inspect_ast"));
+        assert!(tool_names.contains(&"dump_ast"));
         assert!(tool_names.contains(&"init_edit_session"));
         assert!(tool_names.contains(&"view_session_lines"));
         assert!(tool_names.contains(&"apply_line_edits"));
@@ -348,7 +348,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap()
                 }
@@ -363,7 +363,7 @@ mod tests {
 
         let error = resp.error.unwrap();
         assert_eq!(error.code, -32603);
-        assert!(error.message.contains("Tool execution failed for 'tree_sitter_inspect'"));
+        assert!(error.message.contains("Tool execution failed for 'inspect_ast'"));
 
         let data = error.data.unwrap();
         println!("DEBUG: inspect_missing_wasm data = {:?}", data);
@@ -397,7 +397,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap(),
                     "template": "functions"
@@ -450,7 +450,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap(),
                     "template": "invalid_template_name"
@@ -493,7 +493,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap(),
                     "query": "(invalid_s_expression_syntax"
@@ -538,7 +538,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_dump_tree",
+                "name": "dump_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap()
                 }
@@ -583,7 +583,7 @@ mod tests {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap(),
                     "template": "functions",
@@ -642,12 +642,12 @@ mod tests {
         let test_file = fixture.dir.join("test.rs");
         fs::write(&test_file, "pub fn hello() {\n    let x = 1;\n}\n").unwrap();
 
-        // 1. Call tree_sitter_inspect with include_code: true
+        // 1. Call inspect_ast with include_code: true
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap(),
                     "template": "functions",
@@ -681,12 +681,12 @@ mod tests {
         assert!(def_text.contains("pub fn hello() {"));
         assert!(def_text.contains("let x = 1;"));
 
-        // 2. Call tree_sitter_inspect with include_code: false
+        // 2. Call inspect_ast with include_code: false
         let req_no_code = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "tools/call".to_string(),
             params: Some(serde_json::json!({
-                "name": "tree_sitter_inspect",
+                "name": "inspect_ast",
                 "arguments": {
                     "file": test_file.to_str().unwrap(),
                     "template": "functions",

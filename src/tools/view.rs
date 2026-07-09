@@ -44,6 +44,7 @@ pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) ->
     }
 
     let result_val = serde_json::json!({
+        "columns": ["n", "id", "content"],
         "lines": items,
         "tip": "Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above."
     });

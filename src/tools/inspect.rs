@@ -394,6 +394,7 @@ fn format_definition_table(
     }
 
     let result_val = serde_json::json!({
+        "columns": ["n", "id", "content"],
         "lines": items
     });
     let output = serde_json::to_string_pretty(&result_val)?;

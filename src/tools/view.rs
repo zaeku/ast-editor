@@ -1,6 +1,43 @@
 use anyhow::Result;
 use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};
 
+fn fetch_and_format_lines(
+    session_id: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<serde_json::Value> {
+    let conn = get_db_connection()?;
+    ensure_hashes_for_range(&conn, session_id, start_line, end_line)?;
+
+    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
+    let offset = start_line.saturating_sub(1);
+
+    let mut stmt = conn.prepare(
+        "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
+    )?;
+
+    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
+    let mut items = Vec::new();
+
+    let mut current_idx = start_line;
+    while let Some(row) = rows.next()? {
+        let seq_id: i64 = row.get(0)?;
+        let line_hash_opt: Option<String> = row.get(1)?;
+        let content: String = row.get(2)?;
+        
+        let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
+        let hex_seq = format!("{:x}", seq_id);
+        items.push(serde_json::json!([
+            format!("{}#{}", hex_seq, line_hash),
+            current_idx,
+            content
+        ]));
+        current_idx += 1;
+    }
+
+    Ok(serde_json::Value::Array(items))
+}
+
 pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
     if start_line == 0 {
         anyhow::bail!("Invalid bounds: start_line must be greater than 0");
@@ -32,33 +69,7 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
         Err(err) => return Err(anyhow::Error::from(err)),
     };
 
-    ensure_hashes_for_range(&conn, &session_id, start_line, end_line)?;
-
-    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
-    let offset = start_line.saturating_sub(1);
-
-    let mut stmt = conn.prepare(
-        "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
-    )?;
-
-    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
-    let mut items = Vec::new();
-
-    let mut current_idx = start_line;
-    while let Some(row) = rows.next()? {
-        let seq_id: i64 = row.get(0)?;
-        let line_hash_opt: Option<String> = row.get(1)?;
-        let content: String = row.get(2)?;
-        
-        let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
-        let hex_seq = format!("{:x}", seq_id);
-        items.push(serde_json::json!([
-            format!("{}#{}", hex_seq, line_hash),
-            current_idx,
-            content
-        ]));
-        current_idx += 1;
-    }
+    let items = fetch_and_format_lines(&session_id, start_line, end_line)?;
 
     let result_val = serde_json::json!({
         "columns": ["id", "n", "content"],
@@ -87,45 +98,32 @@ pub fn create_lines(filepath: &str, content: &str) -> Result<String> {
 
     std::fs::write(filepath, content)?;
 
-    let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
-    let conn = get_db_connection()?;
+    let setup_db_and_fetch = || -> Result<serde_json::Value> {
+        let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
+        if meta.total_lines > 0 {
+            fetch_and_format_lines(&meta.session_id, 1, meta.total_lines)
+        } else {
+            Ok(serde_json::json!([]))
+        }
+    };
 
-    if meta.total_lines > 0 {
-        ensure_hashes_for_range(&conn, &meta.session_id, 1, meta.total_lines)?;
+    match setup_db_and_fetch() {
+        Ok(items) => {
+            let result_val = serde_json::json!({
+                "status": "success",
+                "message": "File successfully created and line editing session initialized.",
+                "columns": ["id", "n", "content"],
+                "lines": items
+            });
+
+            let output = serde_json::to_string_pretty(&result_val)?;
+            Ok(output)
+        }
+        Err(err) => {
+            let _ = std::fs::remove_file(filepath);
+            Err(err)
+        }
     }
-
-    let mut stmt = conn.prepare(
-        "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order"
-    )?;
-
-    let mut rows = stmt.query(rusqlite::params![meta.session_id])?;
-    let mut items = Vec::new();
-
-    let mut current_idx = 1;
-    while let Some(row) = rows.next()? {
-        let seq_id: i64 = row.get(0)?;
-        let line_hash_opt: Option<String> = row.get(1)?;
-        let content: String = row.get(2)?;
-        
-        let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
-        let hex_seq = format!("{:x}", seq_id);
-        items.push(serde_json::json!([
-            format!("{}#{}", hex_seq, line_hash),
-            current_idx,
-            content
-        ]));
-        current_idx += 1;
-    }
-
-    let result_val = serde_json::json!({
-        "status": "success",
-        "message": "File successfully created and line editing session initialized.",
-        "columns": ["id", "n", "content"],
-        "lines": items
-    });
-
-    let output = serde_json::to_string_pretty(&result_val)?;
-    Ok(output)
 }
 
 #[cfg(test)]
@@ -195,6 +193,32 @@ mod tests {
         // Verify that content was NOT overwritten
         let read_content = fs::read_to_string(filepath_str)?;
         assert_eq!(read_content, initial_content);
+
+        fs::remove_dir_all(&temp_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_lines_db_failure_rollback() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("line-editor-test-create-rollback");
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir)?;
+        }
+        fs::create_dir_all(&temp_dir)?;
+        let file_path = temp_dir.join("binary_file.bin");
+        let filepath_str = file_path.to_str().unwrap();
+
+        // Write content containing a null byte to trigger BINARY_FILE_ERROR during DB initialization
+        let content = "hello \x00 world";
+        let res = create_lines(filepath_str, content);
+
+        assert!(res.is_err());
+        let err_msg = res.err().unwrap().to_string();
+        assert!(err_msg.contains("BINARY_FILE_ERROR"));
+
+        // Verify that the file was deleted/rolled back
+        assert!(!file_path.exists());
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())

@@ -91,6 +91,44 @@ pub async fn edit_lines(
         bail!("CONCURRENCY_ERROR: File has been modified externally. Re-initialize the session.");
     }
 
+    // Long Line Edit Protection Check
+    for edit in &edits {
+        if edit.op == "update" || edit.op == "replace_range" {
+            let target_ids_to_check = match edit.op.as_str() {
+                "update" => vec![edit.target_id.as_ref()],
+                "replace_range" => vec![edit.target_id.as_ref(), edit.end_target_id.as_ref()],
+                _ => unreachable!(),
+            };
+
+            for target_id_opt in target_ids_to_check {
+                if let Some(target_id) = target_id_opt {
+                    if !target_id.is_empty() {
+                        let ends_with_trunc = target_id.ends_with("#TRUNC");
+                        let (seq, _) = parse_line_id(target_id)?;
+                        let db_content_res: Result<String, rusqlite::Error> = conn.query_row(
+                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                            rusqlite::params![session_id, seq],
+                            |row| row.get(0)
+                        );
+                        match db_content_res {
+                            Ok(content) => {
+                                let char_count = content.chars().count();
+                                if ends_with_trunc || char_count > 2048 {
+                                    bail!(
+                                        "LINE_TOO_LONG_ERROR: Line is too long ({} chars) and has been truncated in the view. Surgical updates on truncated lines are disabled to prevent accidental data loss. Please format the file using a code beautifier (e.g. prettier, black, or cargo fmt) to break it into multiple lines, or rewrite the file using create_lines/write_to_file.",
+                                        char_count
+                                    );
+                                }
+                            }
+                            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+                            Err(err) => return Err(anyhow::Error::from(err)),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let tx = conn.transaction()?;
 
     let mut newly_modified_ids = Vec::new();
@@ -1249,6 +1287,102 @@ mod tests {
 
         let content = fs::read_to_string(&file_path)?;
         assert_eq!(content, "line 1\nline 2\nline 3\n");
+
+        fs::remove_dir_all(&env.dir)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_long_line_edit_protection() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("long_line_test");
+
+        let file_path = env.dir.join("code.rs");
+        // Create a file containing a line > 2,048 chars.
+        let long_line = "a".repeat(2050);
+        let file_content = format!("fn main() {{\n    // {}\n}}\n", long_line);
+        fs::write(&file_path, &file_content)?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let metadata = init_edit_session(filepath_str, false)?;
+        assert_eq!(metadata.total_lines, 3);
+
+        // Get the lines view
+        let lines_view = crate::tools::view::view_lines(filepath_str, 1, 3)?;
+        
+        // Assert that the line has been truncated in the view (ends with #TRUNC)
+        let target_id = find_line_id(&lines_view, "    // aaaaa");
+        assert!(target_id.ends_with("#TRUNC"));
+
+        // 1. Try to update using target_id (ends with #TRUNC)
+        let edits = vec![
+            LineEdit {
+                op: "update".to_string(),
+                target_id: Some(target_id.clone()),
+                content: Some("    // updated long line".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let result = edit_lines(filepath_str, edits, &env.pm).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("LINE_TOO_LONG_ERROR"));
+        assert!(err_msg.contains("Line is too long (2057 chars)"));
+        assert!(err_msg.contains("prettier, black, or cargo fmt"));
+
+        // Verify that the file remains unchanged on disk
+        let disk_content = fs::read_to_string(&file_path)?;
+        assert_eq!(disk_content, file_content);
+
+        // 2. Try to update using a fake valid-looking ID but same sequence ID
+        let parts: Vec<&str> = target_id.split('#').collect();
+        let normal_target_id = format!("{}#abcdefabcdef", parts[0]);
+        
+        let edits_normal = vec![
+            LineEdit {
+                op: "update".to_string(),
+                target_id: Some(normal_target_id),
+                content: Some("    // updated long line".to_string()),
+                ..Default::default()
+            }
+        ];
+        
+        let result_normal = edit_lines(filepath_str, edits_normal, &env.pm).await;
+        assert!(result_normal.is_err());
+        let err_msg_normal = result_normal.unwrap_err().to_string();
+        assert!(err_msg_normal.contains("LINE_TOO_LONG_ERROR"));
+        assert!(err_msg_normal.contains("Line is too long (2057 chars)"));
+        assert!(err_msg_normal.contains("prettier, black, or cargo fmt"));
+
+        // Verify that the file remains unchanged on disk
+        let disk_content = fs::read_to_string(&file_path)?;
+        assert_eq!(disk_content, file_content);
+
+        // 3. Try replace_range operation where the end line is truncated
+        let start_line_id = find_line_id(&lines_view, "fn main() {");
+        assert!(!start_line_id.ends_with("#TRUNC"));
+
+        let edits_replace = vec![
+            LineEdit {
+                op: "replace_range".to_string(),
+                target_id: Some(start_line_id),
+                end_target_id: Some(target_id),
+                content: Some("fn main() {\n    // replaced".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let result_replace = edit_lines(filepath_str, edits_replace, &env.pm).await;
+        assert!(result_replace.is_err());
+        let err_msg_replace = result_replace.unwrap_err().to_string();
+        assert!(err_msg_replace.contains("LINE_TOO_LONG_ERROR"));
+        assert!(err_msg_replace.contains("Line is too long (2057 chars)"));
+        assert!(err_msg_replace.contains("prettier, black, or cargo fmt"));
+
+        // Verify that the file remains unchanged on disk
+        let disk_content = fs::read_to_string(&file_path)?;
+        assert_eq!(disk_content, file_content);
 
         fs::remove_dir_all(&env.dir)?;
         Ok(())

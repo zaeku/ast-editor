@@ -324,14 +324,13 @@ mod tests {
 
         let result = resp.result.unwrap();
         let tools = result.get("tools").unwrap().as_array().unwrap();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 4);
         
         let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
         assert!(tool_names.contains(&"inspect_ast"));
         assert!(tool_names.contains(&"dump_ast"));
-        assert!(tool_names.contains(&"init_edit_session"));
-        assert!(tool_names.contains(&"view_session_lines"));
-        assert!(tool_names.contains(&"apply_line_edits"));
+        assert!(tool_names.contains(&"view_lines"));
+        assert!(tool_names.contains(&"edit_lines"));
     }
 
     #[tokio::test]
@@ -665,9 +664,9 @@ mod tests {
         let text_raw = content[0].get("text").unwrap().as_str().unwrap();
         let inspect_res: serde_json::Value = serde_json::from_str(text_raw).unwrap();
 
-        // Check for JIT tips footnote in the hint field recommending 'apply_line_edits'
+        // Check for JIT tips footnote in the hint field recommending 'edit_lines'
         let hint = inspect_res.get("hint").unwrap().as_str().unwrap();
-        assert!(hint.contains("Tip: You can apply edits to this file using the 'apply_line_edits' tool"));
+        assert!(hint.contains("Tip: You can apply edits to this file using the 'edit_lines' tool"));
 
         // Check formatting of the definition text
         let matches = inspect_res.get("matches").unwrap().as_array().unwrap();
@@ -707,9 +706,9 @@ mod tests {
         let text_raw_no_code = content_no_code[0].get("text").unwrap().as_str().unwrap();
         let inspect_res_no_code: serde_json::Value = serde_json::from_str(text_raw_no_code).unwrap();
 
-        // Check for JIT tips footnote in the hint field recommending 'view_session_lines'
+        // Check for JIT tips footnote in the hint field recommending 'view_lines'
         let hint_no_code = inspect_res_no_code.get("hint").unwrap().as_str().unwrap();
-        assert!(hint_no_code.contains("Tip: You can view line IDs for this file using the 'view_session_lines' tool"));
+        assert!(hint_no_code.contains("Tip: You can view line IDs for this file using the 'view_lines' tool"));
     }
 
     #[tokio::test]

@@ -94,26 +94,8 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "init_edit_session",
-                "description": "Initializes a line-level editing session for any text file (including source code, markdown, config, or plain text). Returns file metadata.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filepath": {
-                            "type": "string",
-                            "description": "Absolute path to the file to initialize editing session for"
-                        },
-                        "create_if_not_exists": {
-                            "type": "boolean",
-                            "description": "Create empty file if it does not exist (default: false)"
-                        }
-                    },
-                    "required": ["filepath"]
-                }
-            }),
-            serde_json::json!({
-                "name": "view_session_lines",
-                "description": "Retrieves lines along with their persistent unique Line IDs for any text file (including markdown or plain text). Useful for target line selection.",
+                "name": "view_lines",
+                "description": "Retrieves lines along with their persistent unique Line IDs for any text file (including source code, markdown, configuration, or plain text). Useful for target line selection.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -134,8 +116,8 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "apply_line_edits",
-                "description": "Applies a structured batch of line edits (insert_after, insert_before, append, prepend, update, delete, replace_range, move) transactionally to any text file. Performs syntax validation for supported programming languages.",
+                "name": "edit_lines",
+                "description": "Applies a structured batch of line edits (insert_after, insert_before, update, delete, replace_range, move) transactionally to any text file (including source code, markdown, configuration, or plain text). Performs syntax validation for supported programming languages.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -150,12 +132,12 @@ impl ToolDispatcher {
                                 "properties": {
                                     "op": {
                                         "type": "string",
-                                        "enum": ["update", "insert_after", "insert_before", "delete", "append", "prepend", "replace_range", "move"],
+                                        "enum": ["update", "insert_after", "insert_before", "delete", "replace_range", "move"],
                                         "description": "The edit operation to perform."
                                     },
                                     "target_id": {
                                         "type": "string",
-                                        "description": "Target line ID (e.g. 1#a5c7). Required for update, delete, insert_before, insert_after, replace_range, move. Omitted/ignored for append, prepend."
+                                        "description": "Optional target line ID (e.g. 1#a5c7). Required for update, delete, replace_range, move. Optional/omitted for insert_before (prepends) and insert_after (appends)."
                                     },
                                     "end_target_id": {
                                         "type": "string",
@@ -196,32 +178,21 @@ impl ToolDispatcher {
                 let args = serde_json::from_value(arguments)?;
                 dump::run_dump(args, parser_manager).await
             }
-            "init_edit_session" => {
-                let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
-                let create_if_not_exists = arguments.get("create_if_not_exists").and_then(|v| v.as_bool()).unwrap_or(false);
-                let meta = session_db::init_edit_session(filepath, create_if_not_exists)?;
-                session_db::start_background_hash_worker(meta.session_id.clone());
-                let text = serde_json::to_string_pretty(&meta)?;
-                Ok(serde_json::to_value(McpToolResult {
-                    content: vec![McpTextContent { content_type: "text".to_string(), text }],
-                    is_error: None,
-                })?)
-            }
-            "view_session_lines" => {
+            "view_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).context("Missing start_line")? as usize;
                 let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).context("Missing end_line")? as usize;
-                let text = view::view_session_lines(filepath, start_line, end_line)?;
+                let text = view::view_lines(filepath, start_line, end_line)?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,
                 })?)
             }
-            "apply_line_edits" => {
+            "edit_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let edits_val = arguments.get("edits").context("Missing edits array")?;
                 let edits: Vec<edit::LineEdit> = serde_json::from_value(edits_val.clone())?;
-                let text = edit::apply_line_edits(filepath, edits, parser_manager).await?;
+                let text = edit::edit_lines(filepath, edits, parser_manager).await?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

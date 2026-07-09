@@ -107,7 +107,8 @@ pub async fn edit_lines(
                     content.split('\n').collect()
                 };
                 
-                let (gap_start, gap_end) = if edit.op == "append" {
+                let is_empty_target = edit.target_id.as_ref().map_or(true, |s| s.is_empty());
+                let (gap_start, gap_end) = if edit.op == "append" || (edit.op == "insert_after" && is_empty_target) {
                     let last_order: Option<f64> = tx.query_row(
                         "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1",
                         [&session_id],
@@ -115,7 +116,7 @@ pub async fn edit_lines(
                     ).ok().flatten();
                     let start = last_order.unwrap_or(0.0);
                     (start, start + 1000.0)
-                } else if edit.op == "prepend" {
+                } else if edit.op == "prepend" || (edit.op == "insert_before" && is_empty_target) {
                     let first_order: Option<f64> = tx.query_row(
                         "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1",
                         [&session_id],
@@ -1094,10 +1095,10 @@ mod tests {
         let metadata = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 1);
 
-        // Call insert_after with target_id = None
+        // Call update with target_id = None
         let edits = vec![
             LineEdit {
-                op: "insert_after".to_string(),
+                op: "update".to_string(),
                 target_id: None,
                 content: Some("pub fn bar() {}".to_string()),
                 ..Default::default()
@@ -1107,7 +1108,7 @@ mod tests {
         let result = apply_line_edits(filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("CHECKSUM_ERROR: Missing target_id for insert_after operation"));
+        assert!(err_msg.contains("Missing target_id for update op"));
 
         Ok(())
     }
@@ -1220,12 +1221,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_edit_lines_jit_initialization() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("test_jit_edit");
         
         let file_path = env.dir.join("code.txt");
         fs::write(&file_path, "line 1\nline 2\n")?;
         let filepath_str = file_path.to_str().unwrap();
+
+        // Ensure no stale session exists in DB from previous test runs
+        if let Ok(conn) = get_db_connection() {
+            let _ = conn.execute("DELETE FROM sessions WHERE filepath = ?1", [filepath_str]);
+            let _ = conn.execute("DELETE FROM lines WHERE session_id IN (SELECT session_id FROM sessions WHERE filepath = ?1)", [filepath_str]);
+        }
 
         // Call edit_lines directly without calling init_edit_session.
         // We can append a line. Since it's append, target_id is ignored.

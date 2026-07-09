@@ -231,13 +231,13 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         }
     }
 
-    // Footnote JIT tips recommending apply_line_edits or view_session_lines
+    // Footnote JIT tips recommending edit_lines or view_lines
     let mut jit_footnote = None;
     if !matches.is_empty() {
         let footnote = if args.include_code.unwrap_or(true) {
-            "Tip: You can apply edits to this file using the 'apply_line_edits' tool with the line IDs shown in the definition block."
+            "Tip: You can apply edits to this file using the 'edit_lines' tool with the line IDs shown in the definition block."
         } else {
-            "Tip: You can view line IDs for this file using the 'view_session_lines' tool."
+            "Tip: You can view line IDs for this file using the 'view_lines' tool."
         };
         jit_footnote = Some(footnote.to_string());
     }

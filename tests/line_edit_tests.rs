@@ -1,7 +1,7 @@
-use tree_sitter_inspector::tools::session_db;
-use tree_sitter_inspector::tools::view;
-use tree_sitter_inspector::tools::edit;
-use tree_sitter_inspector::parser::ParserManager;
+use ast_editor::tools::session_db;
+use ast_editor::tools::view;
+use ast_editor::tools::edit;
+use ast_editor::parser::ParserManager;
 use std::fs;
 use std::path::PathBuf;
 
@@ -35,7 +35,7 @@ fn create_test_parser_manager() -> ParserManager {
     let cache_dir = tmp.join("cache");
     let compiler_path = tmp.join("compiler");
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let wasm_dir = manifest_dir.parent().unwrap().join("resources").join("wasm");
+    let wasm_dir = manifest_dir.join("resources").join("wasm");
     
     let _ = fs::create_dir_all(&cache_dir);
     let _ = fs::create_dir_all(&compiler_path);
@@ -44,7 +44,7 @@ fn create_test_parser_manager() -> ParserManager {
 }
 
 fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
-    match tree_sitter_inspector::tools::TEST_DB_LOCK.lock() {
+    match ast_editor::tools::TEST_DB_LOCK.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }

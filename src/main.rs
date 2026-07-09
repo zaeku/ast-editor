@@ -1,5 +1,5 @@
-use tree_sitter_inspector::parser::ParserManager;
-use tree_sitter_inspector::mcp::{McpServer, JsonRpcRequest};
+use ast_editor::parser::ParserManager;
+use ast_editor::mcp::{McpServer, JsonRpcRequest};
 use tracing::{info, error, debug};
 use tracing_subscriber::EnvFilter;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, BufReader, AsyncWriteExt};

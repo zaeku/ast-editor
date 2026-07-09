@@ -51,6 +51,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "ast-editor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cc",
+ "dirs",
+ "log",
+ "once_cell",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tree-sitter",
+ "wasmtime",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1397,26 +1419,6 @@ dependencies = [
  "streaming-iterator",
  "tree-sitter-language",
  "wasmtime-c-api-impl",
-]
-
-[[package]]
-name = "tree-sitter-inspector"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dirs",
- "log",
- "once_cell",
- "rusqlite",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tree-sitter",
- "wasmtime",
 ]
 
 [[package]]

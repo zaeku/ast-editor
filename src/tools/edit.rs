@@ -416,7 +416,7 @@ mod tests {
 
             // Copy real rust wasm so parsing/compilation succeeds
             let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-            let real_wasm_path = manifest_dir.parent().unwrap().join("resources").join("wasm").join("tree-sitter-rust.wasm");
+            let real_wasm_path = manifest_dir.join("resources").join("wasm").join("tree-sitter-rust.wasm");
             let target_wasm_path = wasm_dir.join("tree-sitter-rust.wasm");
             if real_wasm_path.exists() {
                 fs::copy(&real_wasm_path, &target_wasm_path).unwrap();

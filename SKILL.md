@@ -1,16 +1,87 @@
 ---
 name: ast-editor
 description: >
-  Inspects code structure and finds target lines using Tree-sitter S-expression queries. Resilient to syntax errors.
+  Inspects code structure, finds target lines, and performs transactionally-validated line-level code edits using Tree-sitter. Resilient to syntax errors.
 ---
 
 # AST-based Code Editor and Inspector Skill
 
-This skill allows agents to analyze source code structures and identify specific lines of interest using Tree-sitter S-expression queries. It is highly resilient to syntax errors, supports multiple languages, and operates as a Model Context Protocol (MCP) server to eliminate terminal command execution warnings.
+This skill provides a powerful **general-purpose line-level text editing framework** for all text files (including Markdown, plain text, etc.), while **additionally** providing robust Abstract Syntax Tree (AST) query and syntax validation tools for 21 supported programming and configuration languages. It operates as a Model Context Protocol (MCP) server to eliminate terminal command execution warnings.
 
-## Supported Languages
+---
 
-The following languages and file extensions are currently supported out-of-the-box:
+## 1. General-Purpose Line-Level Editing
+
+The tool can be used to view and edit **any text file** on the filesystem. When editing files that are not in the supported languages list, the tool functions as a general line-level editor (skipping AST syntax validation but preserving transactional and concurrency safety).
+
+### The Editing Lifecycle
+The editing workflow follows a structured 2-step transaction cycle:
+$$\text{View Lines} \rightarrow \text{Edit Lines}$$
+
+*Note: Session initialization is completely handled JIT (Just-in-Time) behind the scenes, so there is no need for a manual session opening step.*
+
+#### A. `view_lines`
+Retrieves lines along with their persistent unique Line IDs for a given file range. If no session exists for the file, it automatically JIT-initializes the session.
+*   **Arguments**:
+    *   `filepath` (string, required): Absolute path to the file.
+    *   `start_line` (integer, required): 1-indexed starting line.
+    *   `end_line` (integer, required): 1-indexed ending line.
+
+#### B. `edit_lines`
+Transactionally applies one or more line-level edits, runs AST-based syntax validation (if supported), validates file concurrency, updates the file on disk, and returns a +/- 2 line context preview. If no session exists, it JIT-initializes the session.
+*   **Arguments**:
+    *   `filepath` (string, required): Absolute path to the file.
+    *   `edits` (array of objects, required): A list of line edit operations.
+
+---
+
+### LineEdit Operations Schema
+Each element in the `edits` array of `edit_lines` is an object representing a single edit operation.
+
+*   `op` (string, required): The operation to perform. Supported values:
+    *   `"insert_before"`: Insert new line(s) before a target line. If `target_id` is omitted/empty, it prepends content to the top of the file.
+    *   `"insert_after"`: Insert new line(s) after a target line. If `target_id` is omitted/empty, it appends content to the end of the file.
+    *   `"update"`: Replace the content of a target line.
+    *   `"delete"`: Delete a target line.
+    *   `"replace_range"`: Replace a range of lines.
+    *   `"move"`: Move a line or a block of lines to a new position.
+*   `target_id` (string): The sequence/hash identifier of the target line (e.g. `"1#fa89"`), obtained from `view_lines` or `inspect_ast`. Required for `update`, `delete`, `replace_range`, and `move`. Optional/omitted for `insert_before` and `insert_after`.
+*   `content` (string): The text content to insert or update. Required for `insert_before`, `insert_after`, `update`, and `replace_range`. Can contain multiple lines separated by `\n`.
+*   `end_target_id` (string): The ending target line ID of the range. Required for `replace_range`.
+*   `dest_target_id` (string): The line ID where the moved block should be placed. Required for `move`.
+*   `move_position` (string): Position relative to the destination line for moved blocks: `"before"`, `"after"`, `"prepend"`, or `"append"`. Required for `move`.
+
+---
+
+### JSON Output Format
+Tools returning line lists (`view_lines` and `edit_lines` previews) return a structured, type-safe, self-documenting JSON array format with explicit columns metadata:
+
+```json
+{
+  "columns": ["n", "id", "content"],
+  "lines": [
+    [1, "1#9d33", "use anyhow::{Result, Context};"],
+    [2, "2#c3b3", "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"],
+    [3, "3#da39", ""]
+  ],
+  "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
+}
+```
+*   `columns`: Describes the array schema (`"n"` is line number, `"id"` is line ID, `"content"` is code content).
+*   `lines`: An array of JSON arrays, where each entry matches the columns order.
+
+---
+
+### Concurrency Protection
+When a session is initialized JIT, the file's modification time (`mtime`) is cached. During `edit_lines`, the current filesystem `mtime` is checked. If it is different from the cached `mtime`, it indicates that the file was modified externally. The edit is rejected to prevent overwriting third-party or concurrent changes.
+
+---
+
+## 2. AST-based Syntax Inspection & Validation
+
+For 21 supported programming and configuration languages, the tool provides additional structural analysis tools and automatic syntax validation.
+
+### Supported Languages
 *   **Python** (`.py`)
 *   **JavaScript / TypeScript / TSX** (`.js`, `.jsx`, `.ts`, `.tsx`)
 *   **Go** (`.go`)
@@ -24,153 +95,59 @@ The following languages and file extensions are currently supported out-of-the-b
 *   **TOML** (`.toml`)
 *   **Swift** (`.swift`)
 
-## Setup and Dependencies
+### Inspection Tools
 
-This skill is powered by a Rust-based MCP server using `wasmtime` (WebAssembly) and precompiled `.wasm` grammars with native AOT caching for optimal performance.
-
-### Registering the MCP Server
-To enable this skill, you must register it in your `mcp_config.json` configuration file:
-
-```json
-{
-  "mcpServers": {
-    "ast-editor": {
-      "command": "/Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/ast-editor/scripts/ast-editor",
-      "args": []
-    }
-  }
-}
-```
-
-Once registered, the MCP server will run in the background and expose the `inspect_ast` tool directly to the agent without requiring command approval prompts.
-
-## Execution Instructions
-
-This skill exposes two primary tools: `inspect_ast` and `dump_ast`.
-
-### 1. `inspect_ast`
-
+#### A. `inspect_ast`
 Use this tool to find targeted syntax structures using Tree-sitter queries.
+*   **Arguments**:
+    *   `file` (string, required): Absolute or relative path to the file to inspect.
+    *   `query` (string, optional): Tree-sitter S-expression query. If omitted, falls back to outline templates.
+    *   `template` (string, optional): Predefined query template: `"functions"`, `"classes"`, or `"imports"`.
+    *   `include_code` (boolean, optional, default: `true`): Whether to include the source code of the enclosing definition (returns compact columns + lines format).
+    *   `code_format` (string, optional, default: `"lines"`): Format of the returned code.
+    *   `output_file` (boolean, optional, default: `false`): If `true`, saves matches payload to a file in outputs folder to bypass token limits.
 
-#### Arguments
-*   `file` (string, required): Absolute or relative path to the file to inspect.
-*   `query` (string, optional): Tree-sitter S-expression query. If omitted, falls back to the default outline query (classes and functions).
-*   `template` (string, optional): Predefined query template. Choose from:
-    *   `functions`: Extract only functions and methods.
-    *   `classes`: Extract classes, structs, enums, interfaces, etc.
-    *   `imports`: Extract all import statements.
-*   `include_code` (boolean, optional, default: `true`): Whether to include the source code of the enclosing definition.
-*   `code_format` (string, optional, default: `"lines"`): Format of the returned code. Options:
-    *   `"lines"`: Prefixes each line with its 1-indexed line number (e.g. `40: def my_func():`), compatible with `view_file`.
-    *   `"raw"`: Returns the raw code string without line number prefixes.
-*   `output_file` (boolean, optional, default: `false`): If `true`, saves the full matches JSON payload to a file in the plugin's outputs directory and returns only a lightweight summary. Highly recommended for large source files to avoid context/token overflow and bypass platform redirects.
+#### B. `dump_ast`
+Use this tool to view the hierarchical AST structure of a file to design custom queries.
+*   **Arguments**:
+    *   `file` (string, required): Path to the file.
+    *   `max_depth` (integer, optional, default: `3`): Maximum depth to traverse.
+    *   `start_line` (integer, optional): 1-indexed start line.
+    *   `end_line` (integer, optional): 1-indexed end line.
 
-#### Common Tree-sitter S-Expression Queries (for manual query override)
+> [!TIP]
+> **JIT Edit Session Caching**: 
+> Running `inspect_ast` on a file automatically initializes the editing session under the hood in the background. Therefore, after calling `inspect_ast`, you can immediately invoke `view_lines` or `edit_lines` on the same file without needing to call any initialization tool.
 
-##### Python
+---
+
+### Syntax Validation & Automatic Rollback
+For supported languages, after applying edits in the database session, the resulting code is passed to the WebAssembly tree-sitter parser. If any new `ERROR` or `MISSING` nodes are detected in the AST, the edit is aborted, the SQLite transaction is rolled back, and the tool returns a validation error detailing the syntax problem.
+
+---
+
+## Common Tree-sitter S-Expression Queries
+
+### Python
 *   **List All Functions/Methods**: `(function_definition name: (identifier) @function)`
 *   **List All Classes**: `(class_definition name: (identifier) @class)`
 
-##### JavaScript / TypeScript
+### JavaScript / TypeScript
 *   **List All Functions**: `[(function_declaration) @func (arrow_function) @func (method_definition) @func]`
 
-##### HTML
+### HTML
 *   **List All Imports**: `[(element (start_tag (tag_name) @tag (#eq? @tag "link"))) @import (script_element) @import]`
 
-##### JSON
+### JSON
 *   **List All Keys**: `(pair key: (string) @key)`
 
-##### YAML
+### YAML
 *   **List All Mapping Keys**: `(block_mapping_pair key: (flow_node) @key)`
 
-##### TOML
+### TOML
 *   **List All Tables and Keys**: `[(table (bare_key) @table) (pair (bare_key) @key)]`
 
-##### Swift
+### Swift
 *   **List All Classes/Structs/Enums/Protocols**: `[(class_declaration name: (type_identifier) @class) (protocol_declaration name: (type_identifier) @protocol)]`
 *   **List All Functions**: `(function_declaration name: (simple_identifier) @function)`
 *   **List All Imports**: `(import_declaration) @import`
-
-### 2. `dump_ast`
-
-Use this tool to view the hierarchical AST structure of a file. It is especially useful for inspecting node types before writing custom queries.
-
-#### Arguments
-*   `file` (string, required): Path to the file.
-*   `max_depth` (integer, optional): Maximum depth to traverse (default: `3`).
-*   `start_line` (integer, optional): Start line number (1-indexed) to locate a specific node.
-*   `end_line` (integer, optional): End line number (1-indexed) to locate a specific node. If omitted, defaults to `start_line`.
-
-## Output Interpretation
-
-### `inspect_ast` Output
-The tool outputs structured JSON containing:
-- `status`: `"success"` or `"error"`.
-- `has_syntax_errors`: `true` if tree-sitter detected syntax errors (but it still parsed the file).
-- `matches`: A list of matches sorted by line number.
-  - `start_line` (1-indexed)
-  - `end_line` (1-indexed)
-  - `text` (matched code string, typically the identifier/name node)
-  - `capture_name` (name assigned in query via `@`)
-  - `definition`: Enclosing block definition metadata:
-    - `type` (syntax node type, e.g., `function_definition`, `export_statement`)
-    - `start_line` (1-indexed start line of definition)
-    - `end_line` (1-indexed end line of definition)
-    - `block_hash` (8-character short MD5 hash of the raw block text for optimistic concurrency control)
-    - `text` (formatted or raw code text of the definition, included if `include_code` is `true`)
-
-Use the `definition` field's `text` directly to view the definition code without requiring a separate `view_file` call.
-
-### Large File Optimization & CLI Pipeline Filtering (`output_file: true`)
-
-If `output_file` is set to `true`, the MCP tool will write the query result to a unique file under the plugin's `outputs/` folder and return a compact summary in the following structure over Stdio:
-```json
-{
-  "status": "success",
-  "filepath": "/path/to/target_file.rs",
-  "language": "rust",
-  "has_syntax_errors": false,
-  "match_count": 42,
-  "saved_to_file": "/Users/zaeku/.../outputs/inspect_output_1783504233_b7feac63.json",
-  "hint": "The full query result has been saved to the file specified in 'saved_to_file'. You can analyze it using jq, jc, or ripgrep."
-}
-```
-
-Since the full list of matches is saved directly to the disk, calling agents should leverage **high-performance CLI tools** like `jq` or `ripgrep` directly on the `saved_to_file` path to query details rather than loading the entire JSON file into the context window.
-
-#### Filtering Examples (파이프라인 활용 모범 사례)
-1. **Find Start/End Lines of a Specific Function (특정 함수의 시작/끝 라인 추출)**
-   ```bash
-   jq '.matches[] | select(.text == "main") | {start_line, end_line}' <saved_to_file>
-   ```
-2. **Extract All Matched Function Names (매칭된 함수명 전체 목록화)**
-   ```bash
-   jq -r '.matches[].text' <saved_to_file>
-   ```
-3. **Filter Matches for Syntax Errors (구문 에러 유무 단일값 파싱)**
-   ```bash
-   jq '.has_syntax_errors' <saved_to_file>
-   ```
-4. **Locate Specific Captures with ripgrep (빠른 문자열 탐색)**
-   ```bash
-   rg '"definition"' <saved_to_file>
-   ```
-
-Using these CLI pipelines ensures **O(1) memory and token consumption** for the agent, letting you query files of arbitrary sizes in milliseconds.
-
-## Handling Unsupported Languages (지원하지 않는 언어 대응 지침)
-
-If you attempt to use this tool on a file extension that is not currently supported, the tool will return an `Unsupported file extension` error. In this case, follow these fallback steps:
-
-1. **Fallback to `grep_search`**: Use regex-based grep to search for declarations (e.g. `class `, `def `, `func ` etc.) to find the starting line numbers.
-2. **Fallback to `view_file`**: Read the file in chunks or view key sections to manually locate classes/functions.
-3. **Do NOT block the task**: Proceed with the task using standard tools; do not get stuck trying to force tree-sitter queries.
-
-## Requesting Language Support Extension (새로운 언어 지원 추가 요청 방법)
-
-If you need to analyze a language that is not currently supported (e.g., Kotlin, PHP, C#), you do NOT need to recompile the binary or edit the source code.
-
-For reference (for the User to extend support):
-1. Obtain the precompiled `tree-sitter-<lang>.wasm` file (compiled with ABI version 13 to 15, ideally using `tree-sitter-cli v0.26` or compatible).
-2. Place the `.wasm` file in the plugin's [resources/wasm/](file:///Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/ast-editor/resources/wasm) directory.
-3. Register the file extension and parser mapping in the plugin's [languages.json](file:///Users/zaeku/.gemini/config/plugins/custom-developer-plugin/skills/ast-editor/resources/wasm/languages.json) (e.g., `"kotlin": { "extensions": [".kt"], "wasm_file": "tree-sitter-kotlin.wasm" }`).

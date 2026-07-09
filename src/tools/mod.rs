@@ -95,7 +95,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "init_edit_session",
-                "description": "Initializes a line-level editing session for a file, saving it into local SQLite cache. Returns file metadata and status.",
+                "description": "Initializes a line-level editing session for any text file (including source code, markdown, config, or plain text). Returns file metadata.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -113,7 +113,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "view_session_lines",
-                "description": "Retrieves code lines along with their persistent unique Line IDs for the specified range of an initialized file session.",
+                "description": "Retrieves lines along with their persistent unique Line IDs for any text file (including markdown or plain text). Useful for target line selection.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -135,7 +135,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "apply_line_edits",
-                "description": "Applies a structured batch of line edits (insert_after, insert_before, append, prepend, update, delete, replace_range, move) transactionally, validates syntax, and writes back to disk.",
+                "description": "Applies a structured batch of line edits (insert_after, insert_before, append, prepend, update, delete, replace_range, move) transactionally to any text file. Performs syntax validation for supported programming languages.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -169,7 +169,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
-        Some("Unsupported file format. Syntax validation is disabled.".to_string())
+        Some("This file type is not supported for AST syntax validation. However, you can still view and edit it safely using line-level editing tools (view_session_lines and apply_line_edits). All line sequence IDs are fully active!".to_string())
     } else {
         None
     };

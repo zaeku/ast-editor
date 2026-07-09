@@ -5,13 +5,18 @@ use ast_editor::parser::ParserManager;
 use std::fs;
 use std::path::PathBuf;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+static TEST_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 struct TestFile {
     path: PathBuf,
 }
 
 impl TestFile {
     fn new(name: &str, content: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("ts_inspect_int_{}", name));
+        let pid = std::process::id();
+        let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!("ts_inspect_int_{}_{}_{}", pid, counter, name));
         if path.exists() {
             let _ = fs::remove_file(&path);
         }
@@ -68,8 +73,6 @@ async fn test_sqlite_session_lifecycle() {
 async fn test_view_lines_lazy_hashing() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("lazy.rs", "fn main() {\n    println!(\"hello\");\n}\n");
-
-    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
     
     // Retrieve lines (this triggers lazy hashing for range)
     let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
@@ -88,8 +91,6 @@ async fn test_edit_operations_and_ast_validation() {
     let file = TestFile::new("edit.rs", "fn main() {\n    let a = 1;\n}\n");
 
     let pm = create_test_parser_manager();
-    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
-    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &meta.session_id, 1, 3).unwrap();
 
     // Fetch the correct target ID for line 2
     let view_res = view::view_lines(file.path_str(), 2, 2).unwrap();
@@ -136,8 +137,6 @@ async fn test_transactional_deletes_and_inserts() {
     let file = TestFile::new("trans_ops.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
 
     let pm = create_test_parser_manager();
-    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
-    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &meta.session_id, 1, 4).unwrap();
 
     // Get Line IDs
     let view_res = view::view_lines(file.path_str(), 1, 4).unwrap();
@@ -197,8 +196,6 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     let file = TestFile::new("concurrency.rs", "fn main() {\n    let a = 1;\n}\n");
 
     let pm = create_test_parser_manager();
-    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
-    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &meta.session_id, 1, 3).unwrap();
 
     // Get line ID
     let view_res = view::view_lines(file.path_str(), 2, 2).unwrap();
@@ -229,7 +226,6 @@ async fn test_integration_append_operation() {
     let file = TestFile::new("append_integration.rs", "fn main() {\n    let a = 1;\n}\n");
 
     let pm = create_test_parser_manager();
-    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
 
     // Perform append
     let edits = vec![edit::LineEdit {
@@ -252,8 +248,6 @@ async fn test_integration_advanced_operations() {
     let file = TestFile::new("advanced_int.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
 
     let pm = create_test_parser_manager();
-    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
-    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &_meta.session_id, 1, 4).unwrap();
 
     // 1. Get IDs for lines
     let view_res = view::view_lines(file.path_str(), 1, 4).unwrap();
@@ -278,10 +272,6 @@ async fn test_integration_advanced_operations() {
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
 
-    // Refresh session
-    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
-    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &_meta.session_id, 1, 3).unwrap();
-
     // Get new IDs
     let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
@@ -303,4 +293,40 @@ async fn test_integration_advanced_operations() {
 
     let content_move = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content_move, "    let val = 100;\nfn main() {\n}\n");
+}
+
+#[tokio::test]
+async fn test_integration_insert_without_target_id() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("insert_jit_no_target.rs", "fn main() {\n    let a = 1;\n}\n");
+
+    let pm = create_test_parser_manager();
+
+    // 1. Perform insert_before with target_id = None (should prepend to the beginning of the file)
+    let edits_before = vec![edit::LineEdit {
+        op: "insert_before".to_string(),
+        target_id: None,
+        content: Some("// Prepend header".to_string()),
+        ..Default::default()
+    }];
+
+    let preview1 = edit::edit_lines(file.path_str(), edits_before, &pm).await.unwrap();
+    assert!(preview1.contains("// Prepend header"));
+    
+    let content1 = fs::read_to_string(file.path_str()).unwrap();
+    assert!(content1.starts_with("// Prepend header\nfn main() {"), "content1 was: {:?}", content1);
+
+    // 2. Perform insert_after with target_id = Some("") (should append to the end of the file)
+    let edits_after = vec![edit::LineEdit {
+        op: "insert_after".to_string(),
+        target_id: Some("".to_string()),
+        content: Some("// Append footer".to_string()),
+        ..Default::default()
+    }];
+
+    let preview2 = edit::edit_lines(file.path_str(), edits_after, &pm).await.unwrap();
+    assert!(preview2.contains("// Append footer"));
+
+    let content2 = fs::read_to_string(file.path_str()).unwrap();
+    assert!(content2.ends_with("// Append footer\n"), "content2 was: {:?}", content2);
 }

@@ -1,27 +1,32 @@
-# Task 3 Report: Update Path References & Verify Build
+# Task 3 Report: Test suite updates and full verification
 
-## Status: DONE
+## What was implemented
+1. **Removed Manual Session Init in Integration Tests:**
+   - Removed all redundant calls to `session_db::init_edit_session` and `session_db::ensure_hashes_for_range` in the integration test suite ([tests/line_edit_tests.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/tests/line_edit_tests.rs)) except inside the lifecycle-specific test.
+   - This verified that both `view_lines` and `edit_lines` correctly perform JIT session caching and lazy hash initialization on-demand when called directly.
 
-## Commit Details
-- **Message:** `refactor: rename remaining inspector string references to ast-editor`
-- **Files Modified:**
-  - `src/main.rs`
-  - `src/mcp.rs`
+2. **Added Missing Target ID Insertion Tests:**
+   - Created a new integration test `test_integration_insert_without_target_id` verifying the JIT caching and alignment of operations without a `target_id`.
+   - Verified that `insert_before` with `target_id: None` correctly prepends content to the beginning of the file.
+   - Verified that `insert_after` with `target_id: Some("")` correctly appends content to the end of the file.
 
-## Compilation and Test Summary
-- **Cargo Check:** Checked successfully with zero errors.
-- **Cargo Test:** Ran `cargo test -- --test-threads=1` and all 35 tests passed cleanly.
-  - Unit tests in `src/lib.rs`: 30 passed
-  - Unit tests in `src/main.rs`: 0 passed
-  - Integration tests in `tests/line_edit_tests.rs`: 5 passed
-- **Strict Check:** Validation succeeded with zero errors/warnings.
+3. **Resolved Parallel Testing Concurrency Errors:**
+   - Modified `TestFile::new` to incorporate the process ID (`std::process::id()`) into temporary test filenames.
+   - This prevents stale SQLite DB records from previous test executions (or parallel execution binaries) from causing `CONCURRENCY_ERROR` (mtime mismatches).
 
-## Changes Implemented
-1. **`src/main.rs`**:
-   - Updated logging string on line 15: `"Bootstrapping tree-sitter-inspector-rs..."` -> `"Bootstrapping ast-editor..."`
-   - Updated logging string on line 63: `"tree-sitter-inspector-rs Stdio stream closed."` -> `"ast-editor Stdio stream closed."`
-2. **`src/mcp.rs`**:
-   - Updated server name in initialisation handshake on line 102: `"tree-sitter-inspector-rs"` -> `"ast-editor"`
+## Compile/test verification results
+- Cargo builds and compiles with no errors.
+- Run result of `cargo test`:
+  - **Unit tests:** 38 passed, 0 failed.
+  - **Integration tests:** 8 passed, 0 failed.
+  - Total 46 tests successfully passed.
 
-## Concerns / Risks
-- None. All tests passed, and the changes strictly targeted the specified logging and initialization strings.
+## Files changed
+- [tests/line_edit_tests.rs](file:///Users/zaeku/workspace/Tools for Agents/ast-editor/tests/line_edit_tests.rs)
+
+## Self-review findings
+- Removing the manual setup boilerplate shows how clean the two-step (`view_lines` -> `edit_lines`) workflow is.
+- Incorporating `std::process::id()` into integration test filenames is a robust pattern to avoid SQLite mtime check collision, especially since `cargo test` runs the unit test bin and the integration test bin in parallel processes sharing the `/tmp/line-editor-test/sessions.db` database.
+
+## Concerns
+- None.

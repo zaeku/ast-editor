@@ -12,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
         .init();
 
-    info!("Bootstrapping tree-sitter-inspector-rs...");
+    info!("Bootstrapping ast-editor...");
     let parser_manager = ParserManager::new()?;
     let mcp_server = McpServer::new(parser_manager);
     info!("McpServer & Headless Wasmtime initialized successfully.");
@@ -60,6 +60,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    info!("tree-sitter-inspector-rs Stdio stream closed.");
+    info!("ast-editor Stdio stream closed.");
     Ok(())
 }

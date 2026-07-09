@@ -99,7 +99,7 @@ impl McpServer {
                         "tools": {}
                     },
                     "serverInfo": {
-                        "name": "tree-sitter-inspector-rs",
+                        "name": "ast-editor",
                         "version": env!("CARGO_PKG_VERSION")
                     }
                 });

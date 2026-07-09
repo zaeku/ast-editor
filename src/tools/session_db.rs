@@ -672,9 +672,9 @@ mod tests {
         let line1 = lines[1].as_array().unwrap();
         let line2 = lines[2].as_array().unwrap();
 
-        assert!(line0[1].as_str().unwrap().starts_with("1#"));
-        assert!(line1[1].as_str().unwrap().starts_with("2#"));
-        assert!(line2[1].as_str().unwrap().starts_with("3#"));
+        assert!(line0[0].as_str().unwrap().starts_with("1#"));
+        assert!(line1[0].as_str().unwrap().starts_with("2#"));
+        assert!(line2[0].as_str().unwrap().starts_with("3#"));
         assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
         assert_eq!(line1[2].as_str().unwrap(), "    println!(\"Hello!\");");
         assert_eq!(line2[2].as_str().unwrap(), "}");
@@ -685,7 +685,7 @@ mod tests {
         let sub_lines = sub_val["lines"].as_array().unwrap();
         assert_eq!(sub_lines.len(), 1);
         let sub_line0 = sub_lines[0].as_array().unwrap();
-        assert!(sub_line0[1].as_str().unwrap().starts_with("2#"));
+        assert!(sub_line0[0].as_str().unwrap().starts_with("2#"));
 
         // 4. Test bounds validation
         assert!(crate::tools::view::view_lines(filepath_str, 0, 3).is_err());

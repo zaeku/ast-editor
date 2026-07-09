@@ -386,15 +386,15 @@ fn format_definition_table(
         let line_hash = line_hash_opt.unwrap_or_else(|| crate::tools::session_db::compute_line_hash(&content));
         let hex_seq = format!("{:x}", seq_id);
         items.push(serde_json::json!([
-            current_idx,
             format!("{}#{}", hex_seq, line_hash),
+            current_idx,
             content
         ]));
         current_idx += 1;
     }
 
     let result_val = serde_json::json!({
-        "columns": ["n", "id", "content"],
+        "columns": ["id", "n", "content"],
         "lines": items
     });
     let output = serde_json::to_string_pretty(&result_val)?;

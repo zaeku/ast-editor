@@ -691,14 +691,14 @@ pub async fn edit_lines(
         let (seq, hash, content, _) = &sorted_lines[idx];
         let hex_seq = format!("{:x}", seq);
         items.push(serde_json::json!([
-            idx + 1,
             format!("{}#{}", hex_seq, hash),
+            idx + 1,
             content
         ]));
     }
 
     let result_val = serde_json::json!({
-        "columns": ["n", "id", "content"],
+        "columns": ["id", "n", "content"],
         "lines": items,
         "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
     });
@@ -776,7 +776,7 @@ mod tests {
             let line_arr = line.as_array().unwrap();
             let code = line_arr[2].as_str().unwrap();
             if code.contains(pattern) {
-                return line_arr[1].as_str().unwrap().to_string();
+                return line_arr[0].as_str().unwrap().to_string();
             }
         }
         String::new()

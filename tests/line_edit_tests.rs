@@ -330,3 +330,69 @@ async fn test_integration_insert_without_target_id() {
     let content2 = fs::read_to_string(file.path_str()).unwrap();
     assert!(content2.ends_with("// Append footer\n"), "content2 was: {:?}", content2);
 }
+
+
+#[tokio::test]
+async fn test_integration_create_lines_flow() {
+    let _lock = acquire_db_lock();
+    let pm = create_test_parser_manager();
+
+    let pid = std::process::id();
+    let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let temp_file_path = std::env::temp_dir().join(format!("ts_inspect_int_{}_{}_create_flow.rs", pid, counter));
+    if temp_file_path.exists() {
+        let _ = fs::remove_file(&temp_file_path);
+    }
+    let filepath_str = temp_file_path.to_str().unwrap().to_string();
+
+    // 1. Create the new file via calling `create_lines` tool logic
+    let initial_content = "fn main() {\n    let x = 42;\n}\n";
+    let create_res = view::create_lines(&filepath_str, initial_content).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
+
+    assert_eq!(val["status"], "success");
+    let lines = val["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 3);
+
+    // 2. Assert that the returned line IDs are correct
+    let line0 = lines[0].as_array().unwrap();
+    let line1 = lines[1].as_array().unwrap();
+    let line2 = lines[2].as_array().unwrap();
+
+    let id0 = line0[0].as_str().unwrap();
+    let id1 = line1[0].as_str().unwrap();
+    let id2 = line2[0].as_str().unwrap();
+
+    assert!(id0.contains('#'));
+    assert!(id1.contains('#'));
+    assert!(id2.contains('#'));
+
+    assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
+    assert_eq!(line1[2].as_str().unwrap(), "    let x = 42;");
+    assert_eq!(line2[2].as_str().unwrap(), "}");
+
+    // 3. Try calling `create_lines` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
+    let dup_res = view::create_lines(&filepath_str, "different content");
+    assert!(dup_res.is_err());
+    let dup_err = dup_res.unwrap_err().to_string();
+    assert!(dup_err.contains("FILE_ALREADY_EXISTS"));
+
+    // 4. Modify the newly created file using `edit_lines` and verify the modified contents on disk
+    let edits = vec![edit::LineEdit {
+        op: "update".to_string(),
+        target_id: Some(id1.to_string()),
+        content: Some("    let x = 100;".to_string()),
+        ..Default::default()
+    }];
+
+    let edit_res = edit::edit_lines(&filepath_str, edits, &pm).await.unwrap();
+    assert!(edit_res.contains("let x = 100;"));
+
+    // Verify modified contents on disk
+    let disk_content = fs::read_to_string(&filepath_str).unwrap();
+    assert!(disk_content.contains("let x = 100;"));
+    assert!(!disk_content.contains("let x = 42;"));
+
+    // Clean up
+    let _ = fs::remove_file(&temp_file_path);
+}

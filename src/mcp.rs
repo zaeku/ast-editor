@@ -324,13 +324,14 @@ mod tests {
 
         let result = resp.result.unwrap();
         let tools = result.get("tools").unwrap().as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
         
         let tool_names: Vec<&str> = tools.iter().map(|t| t.get("name").unwrap().as_str().unwrap()).collect();
         assert!(tool_names.contains(&"inspect_ast"));
         assert!(tool_names.contains(&"dump_ast"));
         assert!(tool_names.contains(&"view_lines"));
         assert!(tool_names.contains(&"edit_lines"));
+        assert!(tool_names.contains(&"create_lines"));
     }
 
     #[tokio::test]

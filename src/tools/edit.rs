@@ -3,10 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use crate::tools::session_db::{get_db_connection, compute_line_hash};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct LineEdit {
     pub op: String,
     pub target_id: Option<String>,
+    pub end_target_id: Option<String>,
+    pub dest_target_id: Option<String>,
+    pub move_position: Option<String>,
     pub content: Option<String>,
 }
 
@@ -87,7 +90,7 @@ pub async fn apply_line_edits(
 
     for edit in edits {
         match edit.op.as_str() {
-            "insert_after" | "insert_before" | "append" => {
+            "insert_after" | "insert_before" | "append" | "prepend" => {
                 let content = edit.content.clone().unwrap_or_default();
                 let lines_to_insert: Vec<&str> = if content.is_empty() {
                     vec![""]
@@ -103,6 +106,14 @@ pub async fn apply_line_edits(
                     ).ok().flatten();
                     let start = last_order.unwrap_or(0.0);
                     (start, start + 1000.0)
+                } else if edit.op == "prepend" {
+                    let first_order: Option<f64> = tx.query_row(
+                        "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1",
+                        [&session_id],
+                        |row| row.get(0)
+                    ).ok().flatten();
+                    let end = first_order.unwrap_or(1000.0);
+                    (end - 1000.0, end)
                 } else {
                     let target_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
                         .context(format!("CHECKSUM_ERROR: Missing target_id for {} operation", edit.op))?;
@@ -245,6 +256,309 @@ pub async fn apply_line_edits(
 
                 tx.execute("DELETE FROM lines WHERE id = ?1;", [db_id])?;
                 deleted_orders.push(sort_order);
+            }
+            "replace_range" => {
+                let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                    .context("CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op")?;
+                let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty())
+                    .context("CHECKSUM_ERROR: Missing end_target_id for replace_range op")?;
+                let content = edit.content.as_ref().unwrap_or(&String::new()).clone();
+
+                let (start_seq, start_hash) = parse_line_id(start_id)?;
+                let (end_seq, end_hash) = parse_line_id(end_id)?;
+
+                // Resolve start line details
+                let (start_hash_opt, start_order): (Option<String>, f64) = tx.query_row(
+                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                    rusqlite::params![session_id, start_seq],
+                    |row| Ok((row.get(0)?, row.get(1)?))
+                ).context(format!("Start line not found for target_id={}", start_id))?;
+
+                let db_start_hash = match start_hash_opt {
+                    Some(h) => h,
+                    None => {
+                        let line_content: String = tx.query_row(
+                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                            rusqlite::params![session_id, start_seq],
+                            |row| row.get(0)
+                        )?;
+                        let h = compute_line_hash(&line_content);
+                        tx.execute(
+                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
+                            rusqlite::params![h, session_id, start_seq],
+                        )?;
+                        h
+                    }
+                };
+                if db_start_hash != start_hash {
+                    bail!("CHECKSUM_ERROR: Start line hash mismatch for target_id={}. Edit rejected.", start_id);
+                }
+
+                // Resolve end line details
+                let (end_hash_opt, end_order): (Option<String>, f64) = tx.query_row(
+                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                    rusqlite::params![session_id, end_seq],
+                    |row| Ok((row.get(0)?, row.get(1)?))
+                ).context(format!("End line not found for end_target_id={}", end_id))?;
+
+                let db_end_hash = match end_hash_opt {
+                    Some(h) => h,
+                    None => {
+                        let line_content: String = tx.query_row(
+                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                            rusqlite::params![session_id, end_seq],
+                            |row| row.get(0)
+                        )?;
+                        let h = compute_line_hash(&line_content);
+                        tx.execute(
+                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
+                            rusqlite::params![h, session_id, end_seq],
+                        )?;
+                        h
+                    }
+                };
+                if db_end_hash != end_hash {
+                    bail!("CHECKSUM_ERROR: End line hash mismatch for end_target_id={}. Edit rejected.", end_id);
+                }
+
+                if start_order > end_order {
+                    bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for replace_range.");
+                }
+
+                // Retrieve context limits
+                let prev_order: Option<f64> = tx.query_row(
+                    "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2",
+                    rusqlite::params![session_id, start_order],
+                    |row| row.get(0)
+                ).ok().flatten();
+                let gap_start = prev_order.unwrap_or(start_order - 1000.0);
+
+                let next_order: Option<f64> = tx.query_row(
+                    "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2",
+                    rusqlite::params![session_id, end_order],
+                    |row| row.get(0)
+                ).ok().flatten();
+                let gap_end = next_order.unwrap_or(end_order + 1000.0);
+
+                // Add to deleted_orders for preview context rendering
+                let mut stmt = tx.prepare("SELECT sort_order FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3")?;
+                let mut rows = stmt.query(rusqlite::params![session_id, start_order, end_order])?;
+                while let Some(row) = rows.next()? {
+                    deleted_orders.push(row.get(0)?);
+                }
+
+                // Delete the lines in the range
+                tx.execute(
+                    "DELETE FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3",
+                    rusqlite::params![session_id, start_order, end_order]
+                )?;
+
+                // Split and insert new content lines in the gap
+                let lines_to_insert: Vec<&str> = if content.is_empty() {
+                    vec![""]
+                } else {
+                    content.split('\n').collect()
+                };
+
+                let max_seq: i64 = tx.query_row(
+                    "SELECT COALESCE(MAX(sequence_id), 0) FROM lines WHERE session_id = ?1",
+                    [&session_id],
+                    |row| row.get(0)
+                )?;
+
+                let gap = gap_end - gap_start;
+                let step = gap / (lines_to_insert.len() as f64 + 1.0);
+
+                for (ins_idx, ins_line) in lines_to_insert.iter().enumerate() {
+                    let new_seq = max_seq + 1 + (ins_idx as i64);
+                    let hash = compute_line_hash(ins_line);
+                    let current_order = gap_start + step * ((ins_idx + 1) as f64);
+                    tx.execute(
+                        "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, ?3, ?4, ?5);",
+                        rusqlite::params![session_id, new_seq, hash, ins_line, current_order]
+                    )?;
+                    newly_modified_ids.push((new_seq, hash));
+                }
+            }
+            "move" => {
+                let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                    .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
+                let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty()).unwrap_or(start_id);
+                let move_pos = edit.move_position.as_ref().map(|s| s.as_str()).unwrap_or("after");
+
+                let (start_seq, start_hash) = parse_line_id(start_id)?;
+                let (end_seq, end_hash) = parse_line_id(end_id)?;
+
+                // Verify start line
+                let (start_hash_opt, start_order): (Option<String>, f64) = tx.query_row(
+                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                    rusqlite::params![session_id, start_seq],
+                    |row| Ok((row.get(0)?, row.get(1)?))
+                ).context(format!("Start line not found for target_id={}", start_id))?;
+                let db_start_hash = match start_hash_opt {
+                    Some(h) => h,
+                    None => {
+                        let line_content: String = tx.query_row(
+                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                            rusqlite::params![session_id, start_seq],
+                            |row| row.get(0)
+                        )?;
+                        let h = compute_line_hash(&line_content);
+                        tx.execute(
+                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
+                            rusqlite::params![h, session_id, start_seq],
+                        )?;
+                        h
+                    }
+                };
+                if db_start_hash != start_hash {
+                    bail!("CHECKSUM_ERROR: Start line hash mismatch for target_id={}. Edit rejected.", start_id);
+                }
+
+                // Verify end line
+                let (end_hash_opt, end_order): (Option<String>, f64) = tx.query_row(
+                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                    rusqlite::params![session_id, end_seq],
+                    |row| Ok((row.get(0)?, row.get(1)?))
+                ).context(format!("End line not found for end_target_id={}", end_id))?;
+                let db_end_hash = match end_hash_opt {
+                    Some(h) => h,
+                    None => {
+                        let line_content: String = tx.query_row(
+                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                            rusqlite::params![session_id, end_seq],
+                            |row| row.get(0)
+                        )?;
+                        let h = compute_line_hash(&line_content);
+                        tx.execute(
+                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
+                            rusqlite::params![h, session_id, end_seq],
+                        )?;
+                        h
+                    }
+                };
+                if db_end_hash != end_hash {
+                    bail!("CHECKSUM_ERROR: End line hash mismatch for end_target_id={}. Edit rejected.", end_id);
+                }
+
+                if start_order > end_order {
+                    bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
+                }
+
+                // Get all moved lines sorted by sort_order
+                struct MovedLine {
+                    id: i64,
+                    seq: i64,
+                    hash: String,
+                }
+                let mut moved_lines = Vec::new();
+                {
+                    let mut stmt = tx.prepare("SELECT id, sequence_id, COALESCE(line_hash, '') FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3 ORDER BY sort_order")?;
+                    let mut rows = stmt.query(rusqlite::params![session_id, start_order, end_order])?;
+                    while let Some(row) = rows.next()? {
+                        let id: i64 = row.get(0)?;
+                        let seq: i64 = row.get(1)?;
+                        let mut hash: String = row.get(2)?;
+                        if hash.is_empty() {
+                            let line_content: String = tx.query_row(
+                                "SELECT content FROM lines WHERE id = ?1",
+                                [id],
+                                |r| r.get(0)
+                            )?;
+                            hash = compute_line_hash(&line_content);
+                            tx.execute(
+                                "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
+                                rusqlite::params![hash, id],
+                            )?;
+                        }
+                        moved_lines.push(MovedLine { id, seq, hash });
+                    }
+                }
+
+                let (gap_start, gap_end) = match move_pos {
+                    "prepend" => {
+                        let first_non_moved: Option<f64> = tx.query_row(
+                            "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND (sort_order < ?2 OR sort_order > ?3)",
+                            rusqlite::params![session_id, start_order, end_order],
+                            |row| row.get(0)
+                        ).ok().flatten();
+                        let end = first_non_moved.unwrap_or(1000.0);
+                        (end - 1000.0, end)
+                    }
+                    "append" => {
+                        let last_non_moved: Option<f64> = tx.query_row(
+                            "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND (sort_order < ?2 OR sort_order > ?3)",
+                            rusqlite::params![session_id, start_order, end_order],
+                            |row| row.get(0)
+                        ).ok().flatten();
+                        let start = last_non_moved.unwrap_or(0.0);
+                        (start, start + 1000.0)
+                    }
+                    "before" | "after" => {
+                        let dest_id = edit.dest_target_id.as_ref().filter(|s| !s.is_empty())
+                            .context("CHECKSUM_ERROR: Missing dest_target_id for move before/after operation")?;
+                        let (dest_seq, dest_hash) = parse_line_id(dest_id)?;
+
+                        let (db_dest_hash_opt, dest_order): (Option<String>, f64) = tx.query_row(
+                            "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                            rusqlite::params![session_id, dest_seq],
+                            |row| Ok((row.get(0)?, row.get(1)?))
+                        ).context(format!("Destination line not found for dest_target_id={}", dest_id))?;
+                        let db_dest_hash = match db_dest_hash_opt {
+                            Some(h) => h,
+                            None => {
+                                let line_content: String = tx.query_row(
+                                    "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
+                                    rusqlite::params![session_id, dest_seq],
+                                    |row| row.get(0)
+                                )?;
+                                let h = compute_line_hash(&line_content);
+                                 tx.execute(
+                                    "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
+                                    rusqlite::params![h, session_id, dest_seq],
+                                )?;
+                                h
+                            }
+                        };
+                        if db_dest_hash != dest_hash {
+                            bail!("CHECKSUM_ERROR: Destination line hash mismatch for dest_target_id={}. Edit rejected.", dest_id);
+                        }
+
+                        if dest_order >= start_order && dest_order <= end_order {
+                            bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_target_id lies within source range).");
+                        }
+
+                        if move_pos == "before" {
+                            let prev_non_moved: Option<f64> = tx.query_row(
+                                "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2 AND (sort_order < ?3 OR sort_order > ?4)",
+                                rusqlite::params![session_id, dest_order, start_order, end_order],
+                                |row| row.get(0)
+                            ).ok().flatten();
+                            (prev_non_moved.unwrap_or(dest_order - 1000.0), dest_order)
+                        } else {
+                            let next_non_moved: Option<f64> = tx.query_row(
+                                "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2 AND (sort_order < ?3 OR sort_order > ?4)",
+                                rusqlite::params![session_id, dest_order, start_order, end_order],
+                                |row| row.get(0)
+                            ).ok().flatten();
+                            (dest_order, next_non_moved.unwrap_or(dest_order + 1000.0))
+                        }
+                    }
+                    other => bail!("Unknown move position: {}", other),
+                };
+
+                // Space the moved lines in the destination gap
+                let gap = gap_end - gap_start;
+                let step = gap / (moved_lines.len() as f64 + 1.0);
+
+                for (idx, line) in moved_lines.iter().enumerate() {
+                    let current_order = gap_start + step * ((idx + 1) as f64);
+                    tx.execute(
+                        "UPDATE lines SET sort_order = ?1 WHERE id = ?2;",
+                        rusqlite::params![current_order, line.id]
+                    )?;
+                    newly_modified_ids.push((line.seq, line.hash.clone()));
+                }
             }
             other => bail!("Unknown edit operation: {}", other),
         }
@@ -458,6 +772,7 @@ mod tests {
                 op: "update".to_string(),
                 target_id: Some(target_id.clone()),
                 content: Some("    let a = 42;".to_string()),
+                ..Default::default()
             }
         ];
         let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
@@ -481,6 +796,7 @@ mod tests {
                 op: "insert_after".to_string(),
                 target_id: Some(new_target_id.clone()),
                 content: Some("    let b = 2;".to_string()),
+                ..Default::default()
             }
         ];
         let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
@@ -504,6 +820,7 @@ mod tests {
                 op: "delete".to_string(),
                 target_id: Some(b_id.clone()),
                 content: None,
+                ..Default::default()
             }
         ];
         let _preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
@@ -532,6 +849,7 @@ mod tests {
                 op: "insert_after".to_string(),
                 target_id: None,
                 content: Some("// fail".to_string()),
+                ..Default::default()
             }
         ];
 
@@ -559,6 +877,7 @@ mod tests {
                 op: "update".to_string(),
                 target_id: Some("1#9999".to_string()), // Invalid hash prefix
                 content: Some("fn main() { // updated }".to_string()),
+                ..Default::default()
             }
         ];
 
@@ -598,6 +917,7 @@ mod tests {
                 op: "update".to_string(),
                 target_id: Some(target_id),
                 content: Some("    let a = {;".to_string()), // Syntax error
+                ..Default::default()
             }
         ];
 
@@ -638,6 +958,7 @@ mod tests {
                 op: "append".to_string(),
                 target_id: None,
                 content: Some("fn main() {\n}".to_string()),
+                ..Default::default()
             }
         ];
 
@@ -678,6 +999,7 @@ mod tests {
                 op: "delete".to_string(),
                 target_id: Some(b_id.clone()),
                 content: None,
+                ..Default::default()
             }
         ];
 
@@ -709,6 +1031,7 @@ mod tests {
                 op: "append".to_string(),
                 target_id: None,
                 content: Some("pub fn foo() {}".to_string()),
+                ..Default::default()
             }
         ];
 
@@ -736,6 +1059,7 @@ mod tests {
                 op: "append".to_string(),
                 target_id: None,
                 content: Some("pub fn bar() -> i32 {\n    42\n}".to_string()),
+                ..Default::default()
             }
         ];
 
@@ -765,6 +1089,7 @@ mod tests {
                 op: "insert_after".to_string(),
                 target_id: None,
                 content: Some("pub fn bar() {}".to_string()),
+                ..Default::default()
             }
         ];
 
@@ -772,6 +1097,113 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
         assert!(err_msg.contains("CHECKSUM_ERROR: Missing target_id for insert_after operation"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepend_operation() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("prepend");
+
+        let file_path = env.dir.join("code.rs");
+        fs::write(&file_path, "pub fn hello() {}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let _metadata = init_edit_session(filepath_str, false)?;
+
+        let edits = vec![
+            LineEdit {
+                op: "prepend".to_string(),
+                target_id: None,
+                content: Some("use std::collections::HashMap;\n".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        assert!(preview.contains("use std::collections::HashMap;"));
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "use std::collections::HashMap;\n\npub fn hello() {}\n"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_replace_range_operation() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("replace_range");
+
+        let file_path = env.dir.join("code.rs");
+        fs::write(&file_path, "pub fn foo() {\n    let a = 1;\n    let b = 2;\n}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let _metadata = init_edit_session(filepath_str, false)?;
+
+        // Find IDs for lines 2 and 3
+        let lines_view = crate::tools::view::view_session_lines(filepath_str, 2, 3)?;
+        let lines: Vec<&str> = lines_view.lines().collect();
+        let id_2: String = lines[1].split('|').nth(1).unwrap().trim().to_string();
+        let id_3: String = lines[2].split('|').nth(1).unwrap().trim().to_string();
+
+        let edits = vec![
+            LineEdit {
+                op: "replace_range".to_string(),
+                target_id: Some(id_2),
+                end_target_id: Some(id_3),
+                content: Some("    let val = 42;".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        assert!(preview.contains("let val = 42;"));
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "pub fn foo() {\n    let val = 42;\n}\n"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_move_operation() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("move_ops");
+
+        let file_path = env.dir.join("code.rs");
+        fs::write(&file_path, "pub fn main() {\n    foo();\n}\npub fn foo() {}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let _metadata = init_edit_session(filepath_str, false)?;
+
+        // Get target ID for lines 4 (pub fn foo() {})
+        let lines_view = crate::tools::view::view_session_lines(filepath_str, 4, 4)?;
+        let foo_id: String = lines_view.lines().nth(1).unwrap().split('|').nth(1).unwrap().trim().to_string();
+
+        // Get target ID for line 1 (pub fn main() {)
+        let lines_view_main = crate::tools::view::view_session_lines(filepath_str, 1, 1)?;
+        let main_id: String = lines_view_main.lines().nth(1).unwrap().split('|').nth(1).unwrap().trim().to_string();
+
+        // Move 'foo' function before 'main' function
+        let edits = vec![
+            LineEdit {
+                op: "move".to_string(),
+                target_id: Some(foo_id),
+                dest_target_id: Some(main_id),
+                move_position: Some("before".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        assert!(preview.contains("pub fn foo() {}"));
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "pub fn foo() {}\npub fn main() {\n    foo();\n}\n"
+        );
 
         Ok(())
     }

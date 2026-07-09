@@ -135,7 +135,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "apply_line_edits",
-                "description": "Applies a structured batch of line edits (insert_after, insert_before, append, update, delete) transactionally, validates syntax, and writes back to disk.",
+                "description": "Applies a structured batch of line edits (insert_after, insert_before, append, prepend, update, delete, replace_range, move) transactionally, validates syntax, and writes back to disk.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -150,16 +150,29 @@ impl ToolDispatcher {
                                 "properties": {
                                     "op": {
                                         "type": "string",
-                                        "enum": ["update", "insert_after", "insert_before", "delete", "append"],
+                                        "enum": ["update", "insert_after", "insert_before", "delete", "append", "prepend", "replace_range", "move"],
                                         "description": "The edit operation to perform."
                                     },
                                     "target_id": {
                                         "type": "string",
-                                        "description": "Target line ID (e.g. 1#a5c7). Required for update, delete, insert_before, insert_after. Omitted/ignored for append."
+                                        "description": "Target line ID (e.g. 1#a5c7). Required for update, delete, insert_before, insert_after, replace_range, move. Omitted/ignored for append, prepend."
+                                    },
+                                    "end_target_id": {
+                                        "type": "string",
+                                        "description": "Optional ending target line ID for block range (e.g. 5#7f1c). Required for replace_range, optional for move."
+                                    },
+                                    "dest_target_id": {
+                                        "type": "string",
+                                        "description": "Optional destination target line ID (e.g. 10#e9c4). Required for move operations with 'before' or 'after' move_position."
+                                    },
+                                    "move_position": {
+                                        "type": "string",
+                                        "enum": ["before", "after", "prepend", "append"],
+                                        "description": "Optional relative position for move operations ('before', 'after', 'prepend', 'append')."
                                     },
                                     "content": {
                                         "type": "string",
-                                        "description": "The new content to insert/update. Omitted/ignored for delete."
+                                        "description": "The new content to insert/update/replace. Omitted/ignored for delete, move."
                                     }
                                 },
                                 "required": ["op"]

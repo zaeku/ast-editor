@@ -99,6 +99,7 @@ async fn test_edit_operations_and_ast_validation() {
         op: "update".to_string(),
         target_id: Some(target_id.clone()),
         content: Some("let a = ;".to_string()), // missing value
+        ..Default::default()
     }];
     let edit_res = edit::apply_line_edits(file.path_str(), invalid_edits, &pm).await;
     
@@ -118,6 +119,7 @@ async fn test_edit_operations_and_ast_validation() {
         op: "update".to_string(),
         target_id: Some(target_id),
         content: Some("    let a = 2;".to_string()),
+        ..Default::default()
     }];
     let edit_res = edit::apply_line_edits(file.path_str(), valid_edits, &pm).await.unwrap();
     assert!(edit_res.contains("let a = 2;"));
@@ -158,11 +160,13 @@ async fn test_transactional_deletes_and_inserts() {
             op: "delete".to_string(),
             target_id: Some(id_b),
             content: None,
+            ..Default::default()
         },
         edit::LineEdit {
             op: "insert_after".to_string(),
             target_id: Some(id_a),
             content: Some("    let c = 3;".to_string()),
+            ..Default::default()
         }
     ];
 
@@ -206,6 +210,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
         op: "update".to_string(),
         target_id: Some(target_id),
         content: Some("    let a = 3;".to_string()),
+        ..Default::default()
     }];
 
     let edit_res = edit::apply_line_edits(file.path_str(), edits, &pm).await;
@@ -227,6 +232,7 @@ async fn test_integration_append_operation() {
         op: "append".to_string(),
         target_id: None,
         content: Some("fn additional() {\n}".to_string()),
+        ..Default::default()
     }];
 
     let preview = edit::apply_line_edits(file.path_str(), edits, &pm).await.unwrap();
@@ -234,4 +240,61 @@ async fn test_integration_append_operation() {
     
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert!(content.contains("fn main() {\n    let a = 1;\n}\nfn additional() {\n}\n"));
+}
+
+#[tokio::test]
+async fn test_integration_advanced_operations() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("advanced_int.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
+
+    let pm = create_test_parser_manager();
+    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &_meta.session_id, 1, 4).unwrap();
+
+    // 1. Get IDs for lines
+    let view_res = view::view_session_lines(file.path_str(), 1, 4).unwrap();
+    let lines: Vec<&str> = view_res.lines().collect();
+    let _id_main = lines[1].split('|').nth(1).unwrap().trim().to_string();
+    let id_a = lines[2].split('|').nth(1).unwrap().trim().to_string();
+    let id_b = lines[3].split('|').nth(1).unwrap().trim().to_string();
+
+    // 2. Perform replace_range replacing let a = 1 and let b = 2 with let val = 100
+    let edits = vec![edit::LineEdit {
+        op: "replace_range".to_string(),
+        target_id: Some(id_a.clone()),
+        end_target_id: Some(id_b.clone()),
+        content: Some("    let val = 100;".to_string()),
+        ..Default::default()
+    }];
+
+    let preview = edit::apply_line_edits(file.path_str(), edits, &pm).await.unwrap();
+    assert!(preview.contains("let val = 100;"));
+    
+    let content = fs::read_to_string(file.path_str()).unwrap();
+    assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
+
+    // Refresh session
+    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    session_db::ensure_hashes_for_range(&session_db::get_db_connection().unwrap(), &_meta.session_id, 1, 3).unwrap();
+
+    // Get new IDs
+    let view_res = view::view_session_lines(file.path_str(), 1, 3).unwrap();
+    let lines: Vec<&str> = view_res.lines().collect();
+    let id_main_new = lines[1].split('|').nth(1).unwrap().trim().to_string();
+    let id_val_new = lines[2].split('|').nth(1).unwrap().trim().to_string();
+
+    // 3. Move let val = 100; before fn main() {
+    let edits_move = vec![edit::LineEdit {
+        op: "move".to_string(),
+        target_id: Some(id_val_new),
+        dest_target_id: Some(id_main_new),
+        move_position: Some("before".to_string()),
+        ..Default::default()
+    }];
+
+    let preview_move = edit::apply_line_edits(file.path_str(), edits_move, &pm).await.unwrap();
+    assert!(preview_move.contains("let val = 100;"));
+
+    let content_move = fs::read_to_string(file.path_str()).unwrap();
+    assert_eq!(content_move, "    let val = 100;\nfn main() {\n}\n");
 }

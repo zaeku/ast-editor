@@ -633,8 +633,7 @@ pub async fn apply_line_edits(
         }
     }
 
-    let mut output = String::new();
-    output.push_str("LINE | LINE ID | CODE\n");
+    let mut items = Vec::new();
     
     // Find modified rows and show context around them
     let mut indices_to_show = std::collections::BTreeSet::new();
@@ -681,11 +680,19 @@ pub async fn apply_line_edits(
     for idx in indices_to_show {
         let (seq, hash, content, _) = &sorted_lines[idx];
         let hex_seq = format!("{:x}", seq);
-        output.push_str(&format!("{} | {}#{} | {}\n", idx + 1, hex_seq, hash, content));
+        items.push(serde_json::json!({
+            "n": idx + 1,
+            "id": format!("{}#{}", hex_seq, hash),
+            "c": content
+        }));
     }
 
-    output.push_str("\n> [TIP] Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above.\n");
+    let result_val = serde_json::json!({
+        "lines": items,
+        "tip": "Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above."
+    });
 
+    let output = serde_json::to_string_pretty(&result_val)?;
     Ok(output)
 }
 
@@ -742,6 +749,18 @@ mod tests {
         }
     }
 
+    fn find_line_id(lines_json: &str, pattern: &str) -> String {
+        let val: serde_json::Value = serde_json::from_str(lines_json).unwrap();
+        let lines = val["lines"].as_array().unwrap();
+        for line in lines {
+            let code = line["c"].as_str().unwrap();
+            if code.contains(pattern) {
+                return line["id"].as_str().unwrap().to_string();
+            }
+        }
+        String::new()
+    }
+
     #[tokio::test]
     async fn test_apply_line_edits_insert_update_delete() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap();
@@ -756,14 +775,7 @@ mod tests {
 
         // Get the line IDs by viewing
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
-        // Find line 2: target a = 1
-        let mut target_id = String::new();
-        for line in lines_view.lines() {
-            if line.contains("let a = 1;") {
-                let parts: Vec<&str> = line.split('|').collect();
-                target_id = parts[1].trim().to_string();
-            }
-        }
+        let target_id = find_line_id(&lines_view, "let a = 1;");
         assert!(!target_id.is_empty());
 
         // 1. Test update
@@ -782,13 +794,8 @@ mod tests {
         // Refresh metadata/session
         let _metadata = init_edit_session(filepath_str, false)?;
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
-        let mut new_target_id = String::new();
-        for line in lines_view.lines() {
-            if line.contains("let a = 42;") {
-                let parts: Vec<&str> = line.split('|').collect();
-                new_target_id = parts[1].trim().to_string();
-            }
-        }
+        let new_target_id = find_line_id(&lines_view, "let a = 42;");
+        assert!(!new_target_id.is_empty());
 
         // 2. Test insert_after
         let edits = vec![
@@ -806,13 +813,8 @@ mod tests {
         // Refresh session to get latest target IDs
         let _ = init_edit_session(filepath_str, false)?;
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 4)?;
-        let mut b_id = String::new();
-        for line in lines_view.lines() {
-            if line.contains("let b = 2;") {
-                let parts: Vec<&str> = line.split('|').collect();
-                b_id = parts[1].trim().to_string();
-            }
-        }
+        let b_id = find_line_id(&lines_view, "let b = 2;");
+        assert!(!b_id.is_empty());
 
         // 3. Test delete
         let edits = vec![
@@ -903,13 +905,8 @@ mod tests {
 
         // Find the line 2 ID
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
-        let mut target_id = String::new();
-        for line in lines_view.lines() {
-            if line.contains("let a = 1;") {
-                let parts: Vec<&str> = line.split('|').collect();
-                target_id = parts[1].trim().to_string();
-            }
-        }
+        let target_id = find_line_id(&lines_view, "let a = 1;");
+        assert!(!target_id.is_empty());
 
         // Apply edit that introduces syntax error (e.g. mismatched braces / parsing error)
         let edits = vec![
@@ -984,13 +981,7 @@ mod tests {
 
         // Get the line IDs by viewing
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 5)?;
-        let mut b_id = String::new();
-        for line in lines_view.lines() {
-            if line.contains("let b = 2;") {
-                let parts: Vec<&str> = line.split('|').collect();
-                b_id = parts[1].trim().to_string();
-            }
-        }
+        let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
 
         // Test delete on .RS file (verifies lowercase lookup/delegation works for uppercase extensions too)
@@ -1144,9 +1135,8 @@ mod tests {
 
         // Find IDs for lines 2 and 3
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 2, 3)?;
-        let lines: Vec<&str> = lines_view.lines().collect();
-        let id_2: String = lines[1].split('|').nth(1).unwrap().trim().to_string();
-        let id_3: String = lines[2].split('|').nth(1).unwrap().trim().to_string();
+        let id_2 = find_line_id(&lines_view, "let a = 1;");
+        let id_3 = find_line_id(&lines_view, "let b = 2;");
 
         let edits = vec![
             LineEdit {
@@ -1181,11 +1171,11 @@ mod tests {
 
         // Get target ID for lines 4 (pub fn foo() {})
         let lines_view = crate::tools::view::view_session_lines(filepath_str, 4, 4)?;
-        let foo_id: String = lines_view.lines().nth(1).unwrap().split('|').nth(1).unwrap().trim().to_string();
+        let foo_id = find_line_id(&lines_view, "pub fn foo() {}");
 
         // Get target ID for line 1 (pub fn main() {)
         let lines_view_main = crate::tools::view::view_session_lines(filepath_str, 1, 1)?;
-        let main_id: String = lines_view_main.lines().nth(1).unwrap().split('|').nth(1).unwrap().trim().to_string();
+        let main_id = find_line_id(&lines_view_main, "pub fn main() {");
 
         // Move 'foo' function before 'main' function
         let edits = vec![

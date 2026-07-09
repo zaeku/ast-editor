@@ -664,19 +664,22 @@ mod tests {
         let output = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
         
         // Verify structure
-        assert!(output.contains("LINE | LINE ID | CODE"));
-        assert!(output.contains("1 | 1#"));
-        assert!(output.contains("2 | 2#"));
-        assert!(output.contains("3 | 3#"));
-        assert!(output.contains("fn main() {"));
-        assert!(output.contains("println!(\"Hello!\");"));
-        assert!(output.contains("}"));
+        let val: serde_json::Value = serde_json::from_str(&output)?;
+        let lines = val["lines"].as_array().unwrap();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0]["id"].as_str().unwrap().starts_with("1#"));
+        assert!(lines[1]["id"].as_str().unwrap().starts_with("2#"));
+        assert!(lines[2]["id"].as_str().unwrap().starts_with("3#"));
+        assert_eq!(lines[0]["c"].as_str().unwrap(), "fn main() {");
+        assert_eq!(lines[1]["c"].as_str().unwrap(), "    println!(\"Hello!\");");
+        assert_eq!(lines[2]["c"].as_str().unwrap(), "}");
 
         // 3. View sub-range (2 to 2)
         let sub_output = crate::tools::view::view_session_lines(filepath_str, 2, 2)?;
-        assert!(sub_output.contains("2 | 2#"));
-        assert!(!sub_output.contains("1 | 1#"));
-        assert!(!sub_output.contains("3 | 3#"));
+        let sub_val: serde_json::Value = serde_json::from_str(&sub_output)?;
+        let sub_lines = sub_val["lines"].as_array().unwrap();
+        assert_eq!(sub_lines.len(), 1);
+        assert!(sub_lines[0]["id"].as_str().unwrap().starts_with("2#"));
 
         // 4. Test bounds validation
         assert!(crate::tools::view::view_session_lines(filepath_str, 0, 3).is_err());

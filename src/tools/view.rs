@@ -25,8 +25,7 @@ pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) ->
     )?;
 
     let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
-    let mut output = String::new();
-    output.push_str("LINE | LINE ID | CODE\n");
+    let mut items = Vec::new();
 
     let mut current_idx = start_line;
     while let Some(row) = rows.next()? {
@@ -36,11 +35,19 @@ pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) ->
         
         let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
         let hex_seq = format!("{:x}", seq_id);
-        output.push_str(&format!("{} | {}#{} | {}\n", current_idx, hex_seq, line_hash, content));
+        items.push(serde_json::json!({
+            "n": current_idx,
+            "id": format!("{}#{}", hex_seq, line_hash),
+            "c": content
+        }));
         current_idx += 1;
     }
 
-    output.push_str("\n> [TIP] Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above.\n");
+    let result_val = serde_json::json!({
+        "lines": items,
+        "tip": "Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above."
+    });
 
+    let output = serde_json::to_string_pretty(&result_val)?;
     Ok(output)
 }

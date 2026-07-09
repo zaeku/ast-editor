@@ -1,140 +1,53 @@
-# Task 4 Report: apply_line_edits and AST Validation
+# Task 4 Report: Global MCP Configuration & Schemas Migration
 
-## What Was Implemented
+## Overview
+This report details the execution of **Task 4: Global MCP Configuration & Schemas Migration** as part of the ast-editor migration project.
 
-1. **LineEdit Input Structures**:
-   - Defined `LineEdit` struct in `src/tools/edit.rs` representing the input operation, target line ID, and content block.
-   - Implemented `parse_line_id` to decode sequence ID (from hex format) and line hash.
+All steps defined in [task-4-brief.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/tree-sitter-inspector-rs/.superpowers/sdd/task-4-brief.md) have been successfully executed and verified.
 
-2. **AST Syntax Validation**:
-   - Implemented `validate_syntax` which utilizes the headless `ParserManager` to parse the merged virtual file contents into a Tree-sitter AST.
-   - Scans the AST S-expression representation for syntax errors (`ERROR` / `MISSING` nodes). If found, aborts/rolls back the database transaction and aborts the disk update.
-   - Bypasses syntax validation for unsupported file types (i.e. those without active language support).
+---
 
-3. **Transactional Database Operations**:
-   - SQLite transactions are used (`BEGIN TRANSACTION`/`COMMIT`/`ROLLBACK`) to guarantee atomicity. Any failure during validation or checksum check rolls back database state.
-   - Implemented a robust **concurrency check**: the file's current filesystem `mtime` is compared against the session's recorded `mtime` to detect external modifications and prevent conflict.
-   - Added robust on-the-fly checksum verification to validate the line hash for target nodes, recalculating and caching hashes on demand if they were previously uncomputed.
+## Migration Steps Executed
 
-4. **Midpoint Sort Order Logic**:
-   - Improved the midpoint sort calculation. Rather than using static step sizes, the gap between sorting keys (e.g. between target line and next line, or target line and prev line) is dynamically divided by `(N + 1)` for a block of `N` lines.
-   - This ensures all inserted lines are guaranteed to fit strictly within their sorted bounds without overlapping with adjacent lines.
+### Step 1: Rename lazy schema folder and tool files
+Renamed the global MCP schema directory and tool definition files from `tree-sitter-inspector` to `ast-editor` branding:
+- Moved directory `/Users/zaeku/.gemini/antigravity/mcp/tree-sitter-inspector` to `/Users/zaeku/.gemini/antigravity/mcp/ast-editor`
+- Renamed schema `tree_sitter_dump_tree.json` to `dump_ast.json`
+- Renamed schema `tree_sitter_inspect.json` to `inspect_ast.json`
 
-5. **Recalculated output rendering**:
-   - Generates a preview consisting of modified lines and 2 context lines of surrounding context.
-   - Recalculates 1-indexed output row numbers from the sorted database view.
-   - Resolves all line IDs correctly with updated line hashes.
+### Step 2: Update tool name references inside JSON schema files
+Updated the `"name"` property inside the JSON schemas:
+- `dump_ast.json`: `"tree_sitter_dump_tree"` -> `"dump_ast"`
+- `inspect_ast.json`: `"tree_sitter_inspect"` -> `"inspect_ast"`
 
-## Test Strategy & Results
+### Step 3: Update permission grants in config.json
+Executed Python 3 script to replace permission entries in `/Users/zaeku/.gemini/config/config.json`:
+- Removed legacy `tree-sitter-inspector` grants.
+- Added updated tool-specific permission grants for:
+  - `mcp(ast-editor/dump_ast)`
+  - `mcp(ast-editor/inspect_ast)`
+  - `mcp(ast-editor/init_edit_session)`
+  - `mcp(ast-editor/view_session_lines)`
+  - `mcp(ast-editor/apply_line_edits)`
 
-We wrote 5 comprehensive unit tests inside `src/tools/edit.rs` covering:
-- **`test_apply_line_edits_insert_update_delete`**: End-to-end flow of multiple edits (updates, insertions, deletions) on a dummy rust source file.
-- **`test_concurrency_error`**: Ensures editing fails and raises `CONCURRENCY_ERROR` when the filesystem file has been modified externally.
-- **`test_checksum_error`**: Assures that checksum verification detects hash mismatch and halts transaction with `CHECKSUM_ERROR`.
-- **`test_syntax_validation_error_rolls_back`**: Verifies that formatting or parser errors trigger an AST error detection which aborts disk write and successfully rolls back the SQLite changes.
-- **`test_insert_into_empty_file`**: Validates inserting code into an empty file where `target_id` is not present.
+### Step 4: Update permission grants in projects configuration
+Executed Python 3 script to update the workspace configuration file `/Users/zaeku/.gemini/config/projects/2488810a-3f80-46e2-9710-44e7cee5c83c.json`:
+- Updated project name to `"TOOL:ast-editor"`.
+- Replaced occurrences of `tree-sitter-inspector` with `ast-editor` in project resource paths and filesystem write/read permissions.
 
-To prevent flaky tests or database locked errors due to asynchronous test execution, we introduced a global `TEST_DB_LOCK` static mutex in `src/tools/mod.rs` to synchronize database access during tests.
+---
 
-### Test Output
+## Verification Results
 
-```
-running 28 tests
-test mcp::tests::test_mcp_tools_list ... ok
-test mcp::tests::test_mcp_initialize ... ok
-test mcp::tests::test_mcp_tools_call_missing_languages_config ... ok
-test mcp::tests::test_mcp_stateless_gc_behavior ... ok
-test mcp::tests::test_mcp_tools_call_inspect_missing_wasm ... ok
-test parser::tests::test_parse_code_success ... ok
-test mcp::tests::test_mcp_tools_call_inspect_success ... ok
-test tools::session_db::tests::test_check_language_supported ... ok
-test tools::edit::tests::test_apply_line_edits_insert_update_delete ... ok
-test tools::session_db::tests::test_compute_sha256 ... ok
-test tools::edit::tests::test_checksum_error ... ok
-test mcp::tests::test_mcp_tools_call_inspect_unsupported_template_warning ... ok
-test mcp::tests::test_mcp_tools_call_inspect_invalid_query_error ... ok
-test mcp::tests::test_mcp_tools_call_inspect_output_file_success ... ok
-test tools::edit::tests::test_concurrency_error ... ok
-test tools::edit::tests::test_insert_into_empty_file ... ok
-test tools::session_db::tests::test_is_binary_file ... ok
-test tools::edit::tests::test_syntax_validation_error_rolls_back ... ok
-test tools::session_db::tests::test_background_hash_worker ... ok
-test tools::session_db::tests::test_cleanup_stale_sessions ... ok
-test tools::session_db::tests::test_create_tables_in_memory ... ok
-test tools::session_db::tests::test_get_db_path ... ok
-test tools::session_db::tests::test_init_edit_session_binary_file ... ok
-test tools::session_db::tests::test_init_edit_session_lifecycle ... ok
-test tools::session_db::tests::test_init_edit_session_nonexistent_file ... ok
-test tools::session_db::tests::test_init_edit_session_unsupported_language ... ok
-test tools::session_db::tests::test_line_hashing_and_lazy_populating ... ok
-test tools::session_db::tests::test_view_session_lines ... ok
+Verified that all modified and renamed JSON configuration files are syntactically valid using `python3 -m json.tool`:
+- `/Users/zaeku/.gemini/antigravity/mcp/ast-editor/dump_ast.json` (Valid JSON)
+- `/Users/zaeku/.gemini/antigravity/mcp/ast-editor/inspect_ast.json` (Valid JSON)
+- `/Users/zaeku/.gemini/config/config.json` (Valid JSON)
+- `/Users/zaeku/.gemini/config/projects/2488810a-3f80-46e2-9710-44e7cee5c83c.json` (Valid JSON)
 
-test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.49s
-```
+---
 
-## Files Changed
-
-- `tree-sitter-inspector/src/tools/edit.rs` (created)
-- `tree-sitter-inspector/src/tools/mod.rs` (modified)
-- `tree-sitter-inspector/src/tools/session_db.rs` (modified)
-
-## Self-Review Findings
-
-- **Midpoint sorting**: Robustly resolves insertion order without static increment assumptions. Uses `N+1` division for multiple line insertions to guarantee order.
-- **Rollback reliability**: Statements and transaction lifetime are properly bounded, ensuring transaction rollback occurs on any syntax or validation failure, with correct database and file cleanup.
-- **Test stability**: Thread synchronization through `TEST_DB_LOCK` completely eliminates parallel test interference.
-
-## Concerns
-
-- None.
-
-## Reviewer Feedback Improvements (Task 4 Fixes)
-
-We addressed the following feedback points:
-1. **Output Preview Context for Deletion Operations**:
-   - Recorded the `sort_order` of deleted lines prior to calling database `DELETE`.
-   - In the preview step, computed the remaining line index in `sorted_lines` closest to each recorded deleted `sort_order`.
-   - Added these indices and their `+/- 2` context lines to the generated preview.
-2. **Case-insensitive Extension in validate_syntax**:
-   - Converted the extension `ext` in `validate_syntax` to lowercase using `.to_ascii_lowercase()` prior to querying/delegating.
-
-### New Test and Test Output
-A new unit test `test_case_insensitive_validation_and_deletion_preview` was added to verify both requirements. It tests syntax validation and deletion context preview on an uppercase extension `.RS` file.
-
-All 29 tests passed:
-```
-running 29 tests
-test mcp::tests::test_mcp_tools_call_missing_languages_config ... ok
-test mcp::tests::test_mcp_tools_list ... ok
-test mcp::tests::test_mcp_initialize ... ok
-test mcp::tests::test_mcp_stateless_gc_behavior ... ok
-test parser::tests::test_parse_code_success ... ok
-test mcp::tests::test_mcp_tools_call_inspect_missing_wasm ... ok
-test mcp::tests::test_mcp_tools_call_inspect_invalid_query_error ... ok
-test mcp::tests::test_mcp_tools_call_inspect_unsupported_template_warning ... ok
-test tools::session_db::tests::test_check_language_supported ... ok
-test mcp::tests::test_mcp_tools_call_inspect_success ... ok
-test mcp::tests::test_mcp_tools_call_inspect_output_file_success ... ok
-test tools::session_db::tests::test_compute_sha256 ... ok
-test tools::edit::tests::test_apply_line_edits_insert_update_delete ... ok
-test tools::edit::tests::test_case_insensitive_validation_and_deletion_preview ... ok
-test tools::edit::tests::test_checksum_error ... ok
-test tools::edit::tests::test_concurrency_error ... ok
-test tools::edit::tests::test_insert_into_empty_file ... ok
-test tools::session_db::tests::test_is_binary_file ... ok
-test tools::edit::tests::test_syntax_validation_error_rolls_back ... ok
-test tools::session_db::tests::test_background_hash_worker ... ok
-test tools::session_db::tests::test_cleanup_stale_sessions ... ok
-test tools::session_db::tests::test_create_tables_in_memory ... ok
-test tools::session_db::tests::test_get_db_path ... ok
-test tools::session_db::tests::test_init_edit_session_binary_file ... ok
-test tools::session_db::tests::test_init_edit_session_lifecycle ... ok
-test tools::session_db::tests::test_init_edit_session_nonexistent_file ... ok
-test tools::session_db::tests::test_init_edit_session_unsupported_language ... ok
-test tools::session_db::tests::test_line_hashing_and_lazy_populating ... ok
-test tools::session_db::tests::test_view_session_lines ... ok
-
-test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.67s
-```
-
-**New Commit Hash**: `f99143720d5df6c8b8126380774e35567596f692`
+## Status Summary
+- **Status**: DONE
+- **Commits Created**: None (changes were made to global configuration and schema files outside of the repository)
+- **Concerns**: None

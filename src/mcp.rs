@@ -674,12 +674,14 @@ mod tests {
         assert_eq!(matches.len(), 1);
         let def = matches[0].get("definition").unwrap();
         let def_text = def.get("text").unwrap().as_str().unwrap();
-        assert!(def_text.contains("LINE | LINE ID | CODE"));
-        assert!(def_text.contains("1 | 1#"));
-        assert!(def_text.contains("2 | 2#"));
-        assert!(def_text.contains("3 | 3#"));
-        assert!(def_text.contains("pub fn hello() {"));
-        assert!(def_text.contains("let x = 1;"));
+        let val: serde_json::Value = serde_json::from_str(def_text).unwrap();
+        let lines = val["lines"].as_array().unwrap();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0]["id"].as_str().unwrap().starts_with("1#"));
+        assert!(lines[1]["id"].as_str().unwrap().starts_with("2#"));
+        assert!(lines[2]["id"].as_str().unwrap().starts_with("3#"));
+        assert_eq!(lines[0]["c"].as_str().unwrap(), "pub fn hello() {");
+        assert_eq!(lines[1]["c"].as_str().unwrap(), "    let x = 1;");
 
         // 2. Call inspect_ast with include_code: false
         let req_no_code = JsonRpcRequest {

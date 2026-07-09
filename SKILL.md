@@ -41,11 +41,15 @@ $$\text{(Create Lines } \lor \text{ View Lines)} \rightarrow \text{Edit Lines}$$
 
 #### A. `create_lines`
 Creates a brand-new file with the initial content and initializes its line editing session. It returns the list of lines with unique IDs immediately, avoiding an extra view call.
-*   **Safety Features**: To prevent accidental overwriting, the tool fails if the file already exists (returns a error matching `FILE_ALREADY_EXISTS`).
+*   **Safety Features**: To prevent accidental overwriting, the tool fails if the file already exists (returns an error matching `FILE_ALREADY_EXISTS`).
 *   **Arguments**:
     *   `filepath` (string, required): Absolute path to the file.
     *   `content` (string, required): Initial text content of the file.
-*   **Output Format**: Returns a JSON object indicating the status, a success message, the column mapping, and the list of generated line items with their persistent Line IDs.
+*   **Response Safety Limits**:
+    *   **Line Count Cap**: Output lines are capped at a maximum of 800 lines.
+    *   **Response Capacity Cap**: Output payload size is limited to 45,000 bytes (approx. 44KB) to protect the context window.
+    *   **Line Length Cap**: Lines exceeding 2,048 characters are truncated in the returned view with a truncation notice and are given a `#TRUNC` suffix in their Line ID (e.g., `12#TRUNC`).
+*   **Output Format**: Returns a JSON object indicating the status, a success/warning message (containing truncation details if any limits were hit), the column mapping, the list of generated line items, and session metadata (`total_lines`, `total_bytes`, `showing_start`, `showing_end`).
 
 #### B. `view_lines`
 Retrieves lines along with their persistent unique Line IDs for a given file range. If no session exists for the file, it automatically JIT-initializes the session.
@@ -53,6 +57,10 @@ Retrieves lines along with their persistent unique Line IDs for a given file ran
     *   `filepath` (string, required): Absolute path to the file.
     *   `start_line` (integer, required): 1-indexed starting line.
     *   `end_line` (integer, required): 1-indexed ending line.
+*   **Response Safety Limits**:
+    *   **Line Count Cap**: Output lines are capped at a maximum of 800 lines per call. If the requested range is larger, it will be automatically clamped to 800 lines and a warning will be added.
+    *   **Response Capacity Cap**: Output payload size is limited to 45,000 bytes (approx. 44KB) to protect the context window. If the cumulative content length reaches this limit, lines are truncated and a warning is added.
+    *   **Line Length Cap**: Lines exceeding 2,048 characters are truncated in the returned view with a truncation notice (e.g., `... [TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]`) and are given a `#TRUNC` suffix in their Line ID (e.g., `3f#TRUNC`, where `3f` is the hexadecimal sequence ID).
 
 #### C. `edit_lines`
 Transactionally applies one or more line-level edits, runs AST-based syntax validation (if supported), validates file concurrency, updates the file on disk, and returns a +/- 2 line context preview. If no session exists, it JIT-initializes the session.
@@ -84,7 +92,7 @@ Each element in the `edits` array of `edit_lines` is an object representing a si
 Tools returning line lists return a structured, type-safe, self-documenting JSON format.
 
 #### `create_lines` Output Format
-Returns a confirmation status, a success message, and the full lines list:
+Returns a confirmation status, a success/warning message, lines list, and session metadata:
 ```json
 {
   "status": "success",
@@ -93,12 +101,16 @@ Returns a confirmation status, a success message, and the full lines list:
   "lines": [
     ["1#9d33", 1, "use anyhow::{Result, Context};"],
     ["2#c3b3", 2, "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"]
-  ]
+  ],
+  "total_lines": 2,
+  "total_bytes": 135,
+  "showing_start": 1,
+  "showing_end": 2
 }
 ```
 
 #### `view_lines` and `edit_lines` Output Format
-`view_lines` and `edit_lines` previews return a structured layout with explicit columns metadata and a helpful tip:
+`view_lines` and `edit_lines` previews return a structured layout with explicit columns metadata, session statistics, and warnings if any capacity/line limits were reached:
 ```json
 {
   "columns": ["id", "n", "content"],
@@ -107,16 +119,43 @@ Returns a confirmation status, a success message, and the full lines list:
     ["2#c3b3", 2, "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"],
     ["3#da39", 3, ""]
   ],
+  "total_lines": 3,
+  "total_bytes": 135,
+  "showing_start": 1,
+  "showing_end": 3,
   "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1#9d33) shown above."
 }
 ```
 *   `columns`: Describes the array schema (`"id"` is line ID, `"n"` is line number, `"content"` is code/text content).
 *   `lines`: An array of JSON arrays, where each entry matches the columns order `[id, n, content]`.
+*   `total_lines` (integer): The total number of lines in the file's current session.
+*   `total_bytes` (integer): The total size of the file on disk in bytes.
+*   `showing_start` (integer): The 1-indexed starting line number of the displayed slice.
+*   `showing_end` (integer): The 1-indexed actual ending line number of the displayed slice.
+*   `message` (string, optional): A warning message populated if limits are exceeded (e.g. `"Line count limit (800 lines max) exceeded. Output capped at 800 lines."` or `"Response truncated: cumulative response size limit (45,000 bytes) was reached."`).
 
 ---
 
 ### Concurrency Protection
 When a session is initialized JIT, the file's modification time (`mtime`) is cached. During `edit_lines`, the current filesystem `mtime` is checked. If it is different from the cached `mtime`, it indicates that the file was modified externally. The edit is rejected to prevent overwriting third-party or concurrent changes.
+
+---
+
+### Long Line Edit Protection
+
+To prevent accidental data corruption and token bloat, the tool prevents surgical updates (via `update` or `replace_range`) on any line whose content exceeds 2,048 characters, or whose Line ID ends with `#TRUNC`.
+
+#### The `LINE_TOO_LONG_ERROR`
+If you attempt to edit a line that is too long, the operation is rejected with the following error:
+```
+LINE_TOO_LONG_ERROR: Line is too long (N chars) and has been truncated in the view. Surgical updates on truncated lines are disabled to prevent accidental data loss. Please format the file using a code beautifier (e.g. prettier, black, or cargo fmt) to break it into multiple lines, or rewrite the file using create_lines/write_to_file.
+```
+
+#### Workflow to Resolve `LINE_TOO_LONG_ERROR`
+When this error occurs, you must not attempt to edit the line surgically. Instead, follow this workflow:
+1.  **Format the Code**: Run an appropriate code beautifier or formatter on the target file (e.g., `prettier --write` for JS/TS/HTML/JSON, `black` for Python, `cargo fmt` for Rust, etc.) to format and split the single long line into multiple smaller, manageable lines.
+2.  **Re-view and Edit**: Call `view_lines` again to obtain the updated Line IDs for the formatted code, and then apply your edits to the newly created multiple lines.
+3.  **Alternative (Whole File Re-write)**: If formatting is not suitable, you may rewrite the entire file using `create_lines` (with `Overwrite` if supported, or via standard file write tools like `write_to_file`) to replace the long lines completely.
 
 ---
 

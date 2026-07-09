@@ -76,8 +76,9 @@ async fn test_view_lines_lazy_hashing() {
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
-    assert!(lines[0]["id"].as_str().unwrap().starts_with("1#"));
-    assert_eq!(lines[0]["c"].as_str().unwrap(), "fn main() {");
+    let line0 = lines[0].as_array().unwrap();
+    assert!(line0[1].as_str().unwrap().starts_with("1#"));
+    assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
     assert!(val["tip"].as_str().unwrap().contains("Edit these lines by calling 'apply_line_edits'"));
 }
 
@@ -93,7 +94,7 @@ async fn test_edit_operations_and_ast_validation() {
     // Fetch the correct target ID for line 2
     let view_res = view::view_session_lines(file.path_str(), 2, 2).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
-    let target_id = val["lines"][0]["id"].as_str().unwrap().to_string();
+    let target_id = val["lines"][0].as_array().unwrap()[1].as_str().unwrap().to_string();
 
     // Perform invalid edit (Syntax error)
     let invalid_edits = vec![edit::LineEdit {
@@ -147,11 +148,12 @@ async fn test_transactional_deletes_and_inserts() {
     let mut id_a = String::new();
     let mut id_b = String::new();
     for line in lines_arr {
-        let code = line["c"].as_str().unwrap();
+        let line_arr = line.as_array().unwrap();
+        let code = line_arr[2].as_str().unwrap();
         if code.contains("let a = 1;") {
-            id_a = line["id"].as_str().unwrap().to_string();
+            id_a = line_arr[1].as_str().unwrap().to_string();
         } else if code.contains("let b = 2;") {
-            id_b = line["id"].as_str().unwrap().to_string();
+            id_b = line_arr[1].as_str().unwrap().to_string();
         }
     }
     assert!(!id_a.is_empty());
@@ -201,7 +203,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     // Get line ID
     let view_res = view::view_session_lines(file.path_str(), 2, 2).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
-    let target_id = val["lines"][0]["id"].as_str().unwrap().to_string();
+    let target_id = val["lines"][0].as_array().unwrap()[1].as_str().unwrap().to_string();
 
     // Modify the file externally on disk, changing its mtime
     tokio::time::sleep(tokio::time::Duration::from_millis(1100)).await;
@@ -257,9 +259,9 @@ async fn test_integration_advanced_operations() {
     let view_res = view::view_session_lines(file.path_str(), 1, 4).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
-    let _id_main = lines_arr[0]["id"].as_str().unwrap().to_string();
-    let id_a = lines_arr[1]["id"].as_str().unwrap().to_string();
-    let id_b = lines_arr[2]["id"].as_str().unwrap().to_string();
+    let _id_main = lines_arr[0].as_array().unwrap()[1].as_str().unwrap().to_string();
+    let id_a = lines_arr[1].as_array().unwrap()[1].as_str().unwrap().to_string();
+    let id_b = lines_arr[2].as_array().unwrap()[1].as_str().unwrap().to_string();
 
     // 2. Perform replace_range replacing let a = 1 and let b = 2 with let val = 100
     let edits = vec![edit::LineEdit {
@@ -284,8 +286,8 @@ async fn test_integration_advanced_operations() {
     let view_res = view::view_session_lines(file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
-    let id_main_new = lines_arr[0]["id"].as_str().unwrap().to_string();
-    let id_val_new = lines_arr[1]["id"].as_str().unwrap().to_string();
+    let id_main_new = lines_arr[0].as_array().unwrap()[1].as_str().unwrap().to_string();
+    let id_val_new = lines_arr[1].as_array().unwrap()[1].as_str().unwrap().to_string();
 
     // 3. Move let val = 100; before fn main() {
     let edits_move = vec![edit::LineEdit {

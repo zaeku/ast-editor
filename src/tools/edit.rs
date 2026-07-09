@@ -680,11 +680,11 @@ pub async fn apply_line_edits(
     for idx in indices_to_show {
         let (seq, hash, content, _) = &sorted_lines[idx];
         let hex_seq = format!("{:x}", seq);
-        items.push(serde_json::json!({
-            "n": idx + 1,
-            "id": format!("{}#{}", hex_seq, hash),
-            "c": content
-        }));
+        items.push(serde_json::json!([
+            idx + 1,
+            format!("{}#{}", hex_seq, hash),
+            content
+        ]));
     }
 
     let result_val = serde_json::json!({
@@ -753,9 +753,10 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(lines_json).unwrap();
         let lines = val["lines"].as_array().unwrap();
         for line in lines {
-            let code = line["c"].as_str().unwrap();
+            let line_arr = line.as_array().unwrap();
+            let code = line_arr[2].as_str().unwrap();
             if code.contains(pattern) {
-                return line["id"].as_str().unwrap().to_string();
+                return line_arr[1].as_str().unwrap().to_string();
             }
         }
         String::new()

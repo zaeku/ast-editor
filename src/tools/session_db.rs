@@ -667,19 +667,25 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(&output)?;
         let lines = val["lines"].as_array().unwrap();
         assert_eq!(lines.len(), 3);
-        assert!(lines[0]["id"].as_str().unwrap().starts_with("1#"));
-        assert!(lines[1]["id"].as_str().unwrap().starts_with("2#"));
-        assert!(lines[2]["id"].as_str().unwrap().starts_with("3#"));
-        assert_eq!(lines[0]["c"].as_str().unwrap(), "fn main() {");
-        assert_eq!(lines[1]["c"].as_str().unwrap(), "    println!(\"Hello!\");");
-        assert_eq!(lines[2]["c"].as_str().unwrap(), "}");
+        
+        let line0 = lines[0].as_array().unwrap();
+        let line1 = lines[1].as_array().unwrap();
+        let line2 = lines[2].as_array().unwrap();
+
+        assert!(line0[1].as_str().unwrap().starts_with("1#"));
+        assert!(line1[1].as_str().unwrap().starts_with("2#"));
+        assert!(line2[1].as_str().unwrap().starts_with("3#"));
+        assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
+        assert_eq!(line1[2].as_str().unwrap(), "    println!(\"Hello!\");");
+        assert_eq!(line2[2].as_str().unwrap(), "}");
 
         // 3. View sub-range (2 to 2)
         let sub_output = crate::tools::view::view_session_lines(filepath_str, 2, 2)?;
         let sub_val: serde_json::Value = serde_json::from_str(&sub_output)?;
         let sub_lines = sub_val["lines"].as_array().unwrap();
         assert_eq!(sub_lines.len(), 1);
-        assert!(sub_lines[0]["id"].as_str().unwrap().starts_with("2#"));
+        let sub_line0 = sub_lines[0].as_array().unwrap();
+        assert!(sub_line0[1].as_str().unwrap().starts_with("2#"));
 
         // 4. Test bounds validation
         assert!(crate::tools::view::view_session_lines(filepath_str, 0, 3).is_err());

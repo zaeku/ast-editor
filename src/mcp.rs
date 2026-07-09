@@ -677,11 +677,14 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(def_text).unwrap();
         let lines = val["lines"].as_array().unwrap();
         assert_eq!(lines.len(), 3);
-        assert!(lines[0]["id"].as_str().unwrap().starts_with("1#"));
-        assert!(lines[1]["id"].as_str().unwrap().starts_with("2#"));
-        assert!(lines[2]["id"].as_str().unwrap().starts_with("3#"));
-        assert_eq!(lines[0]["c"].as_str().unwrap(), "pub fn hello() {");
-        assert_eq!(lines[1]["c"].as_str().unwrap(), "    let x = 1;");
+        let line0 = lines[0].as_array().unwrap();
+        let line1 = lines[1].as_array().unwrap();
+        let line2 = lines[2].as_array().unwrap();
+        assert!(line0[1].as_str().unwrap().starts_with("1#"));
+        assert!(line1[1].as_str().unwrap().starts_with("2#"));
+        assert!(line2[1].as_str().unwrap().starts_with("3#"));
+        assert_eq!(line0[2].as_str().unwrap(), "pub fn hello() {");
+        assert_eq!(line1[2].as_str().unwrap(), "    let x = 1;");
 
         // 2. Call inspect_ast with include_code: false
         let req_no_code = JsonRpcRequest {

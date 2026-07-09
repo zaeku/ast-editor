@@ -385,11 +385,11 @@ fn format_definition_table(
         
         let line_hash = line_hash_opt.unwrap_or_else(|| crate::tools::session_db::compute_line_hash(&content));
         let hex_seq = format!("{:x}", seq_id);
-        items.push(serde_json::json!({
-            "n": current_idx,
-            "id": format!("{}#{}", hex_seq, line_hash),
-            "c": content
-        }));
+        items.push(serde_json::json!([
+            current_idx,
+            format!("{}#{}", hex_seq, line_hash),
+            content
+        ]));
         current_idx += 1;
     }
 

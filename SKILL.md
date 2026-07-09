@@ -12,7 +12,26 @@ This skill provides a powerful **general-purpose line-level text editing framewo
 
 ## 1. General-Purpose Line-Level Editing
 
-The tool can be used to view and edit **any text file** on the filesystem. When editing files that are not in the supported languages list, the tool functions as a general line-level editor (skipping AST syntax validation but preserving transactional and concurrency safety).
+The tool can be used to view and edit **any text file** on the filesystem. When editing files that are not in the supported languages list (such as Markdown or plain text), the tool functions as a general line-level editor, skipping AST syntax validation but preserving transactional and concurrency safety.
+
+### Key Editing Concepts
+
+#### A. Shift-Invariant Targeting
+Unlike standard search-and-replace tools (e.g., `replace_file_content`), the `edit_lines` tool targets specific lines using stable sequence/hash IDs (e.g., `"1#dfca"`) and floating-point sort orders.
+*   **Immune to Line Shifting**: Inserting or deleting lines in one part of a file does not shift the Line IDs of other lines. Any line shifts will not invalidate your references or write changes to incorrect positions.
+*   **Safer than Content Matching**: When a file contains duplicate lines of code, search-and-replace tools might match and overwrite the wrong occurrence. By targeting precise, unique Line IDs, `edit_lines` guarantees that the exact intended line is modified, eliminating duplicate matching errors.
+
+#### B. Stateless Local Cache & Lock-Free Design
+To track Line IDs across editing operations, a SQLite database is maintained in the user directory as a stateless local cache.
+*   **No File Locks**: The database functions as a lightweight cache. Source files on disk are read, written, and closed instantly—exactly like standard stateless tools. There are no persistent file locks held on workspace files.
+*   **Markdown & Plain Text Compatibility**: Syntax validation is completely skipped for Markdown, plain text, and unsupported configuration files. Syntax validation omission or failure on these files **never blocks** updates; it simply bypasses the AST parser and writes the line edits cleanly to disk.
+
+#### C. Paragraph & Block-Level Suitability
+The tool is designed to be highly suitable for paragraph and block-level text editing.
+*   **Multi-Line Content Support**: The `content` field in line edit operations accepts multi-line strings (lines separated by `\n`). You can insert or update entire multi-line blocks of text in a single operation.
+*   **Paragraph Replacements**: Use the `"replace_range"` operation with a start `target_id` and an end `end_target_id` to replace an entire paragraph or block of lines securely, without having to calculate line offsets or issue separate line-by-line updates.
+
+---
 
 ### The Editing Lifecycle
 The editing workflow follows a structured 2-step transaction cycle:
@@ -58,17 +77,17 @@ Tools returning line lists (`view_lines` and `edit_lines` previews) return a str
 
 ```json
 {
-  "columns": ["n", "id", "content"],
+  "columns": ["id", "n", "content"],
   "lines": [
-    [1, "1#9d33", "use anyhow::{Result, Context};"],
-    [2, "2#c3b3", "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"],
-    [3, "3#da39", ""]
+    ["1#9d33", 1, "use anyhow::{Result, Context};"],
+    ["2#c3b3", 2, "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"],
+    ["3#da39", 3, ""]
   ],
-  "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
+  "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1#9d33) shown above."
 }
 ```
-*   `columns`: Describes the array schema (`"n"` is line number, `"id"` is line ID, `"content"` is code content).
-*   `lines`: An array of JSON arrays, where each entry matches the columns order.
+*   `columns`: Describes the array schema (`"id"` is line ID, `"n"` is line number, `"content"` is code/text content).
+*   `lines`: An array of JSON arrays, where each entry matches the columns order `[id, n, content]`.
 
 ---
 

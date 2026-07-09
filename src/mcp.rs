@@ -679,9 +679,9 @@ mod tests {
         let line0 = lines[0].as_array().unwrap();
         let line1 = lines[1].as_array().unwrap();
         let line2 = lines[2].as_array().unwrap();
-        assert!(line0[1].as_str().unwrap().starts_with("1#"));
-        assert!(line1[1].as_str().unwrap().starts_with("2#"));
-        assert!(line2[1].as_str().unwrap().starts_with("3#"));
+        assert!(line0[0].as_str().unwrap().starts_with("1#"));
+        assert!(line1[0].as_str().unwrap().starts_with("2#"));
+        assert!(line2[0].as_str().unwrap().starts_with("3#"));
         assert_eq!(line0[2].as_str().unwrap(), "pub fn hello() {");
         assert_eq!(line1[2].as_str().unwrap(), "    let x = 1;");
 

@@ -34,8 +34,8 @@ The tool is designed to be highly suitable for paragraph and block-level text ed
 ---
 
 ### The Editing Lifecycle
-The editing workflow follows a structured 3-step transaction cycle:
-$$\text{Create Lines} \rightarrow \text{View Lines} \rightarrow \text{Edit Lines}$$
+The editing workflow follows a structured transaction cycle depending on whether the file is new or already exists:
+$$\text{(Create Lines } \lor \text{ View Lines)} \rightarrow \text{Edit Lines}$$
 
 *Note: Session initialization is handled automatically either JIT (Just-in-Time) behind the scenes or explicitly during file creation.*
 

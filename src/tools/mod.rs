@@ -163,6 +163,24 @@ impl ToolDispatcher {
                     },
                     "required": ["filepath", "edits"]
                 }
+            }),
+            serde_json::json!({
+                "name": "create_lines",
+                "description": "Create a new file with initial content and initialize its line editing session. Returns the line list with unique line IDs. Fails if the file already exists.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filepath": {
+                            "type": "string",
+                            "description": "Absolute path to the file."
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Initial text content of the file."
+                        }
+                    },
+                    "required": ["filepath", "content"]
+                }
             })
         ]
     }
@@ -193,6 +211,15 @@ impl ToolDispatcher {
                 let edits_val = arguments.get("edits").context("Missing edits array")?;
                 let edits: Vec<edit::LineEdit> = serde_json::from_value(edits_val.clone())?;
                 let text = edit::edit_lines(filepath, edits, parser_manager).await?;
+                Ok(serde_json::to_value(McpToolResult {
+                    content: vec![McpTextContent { content_type: "text".to_string(), text }],
+                    is_error: None,
+                })?)
+            }
+            "create_lines" => {
+                let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
+                let content = arguments.get("content").and_then(|v| v.as_str()).context("Missing content")?;
+                let text = view::create_lines(filepath, content)?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

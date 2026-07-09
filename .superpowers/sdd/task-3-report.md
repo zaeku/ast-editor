@@ -1,22 +1,22 @@
-# Task 3 Report: Test Suite Updates & Verification
+# Task 3 Report: Documentation Revision
 
 ## Status
-**DONE**
+DONE
 
-## Changes Made
-1. **MCP List Test Update**:
-   - Updated `test_mcp_tools_list` in [src/mcp.rs](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/src/mcp.rs) to assert `tools.len() == 5` and verify `"create_lines"` is included in the returned tool list.
-2. **Integration Test Addition**:
-   - Added `test_integration_create_lines_flow` in [tests/line_edit_tests.rs](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/tests/line_edit_tests.rs).
-   - The integration test successfully verifies:
-     - Creating a new file via `view::create_lines` logic.
-     - Asserting correctness of returned Line IDs.
-     - Verifying duplicate creation returns a `FILE_ALREADY_EXISTS` error.
-     - Updating the newly created file using `edit_lines` and verifying the modified contents on disk.
+## Actions Performed
+1. Updated `SKILL.md` under `create_lines` and `view_lines` sections to document:
+   - Max 800 lines limit per call.
+   - Cumulative 45KB response capacity limit.
+   - 2,048 character line length truncation and `#TRUNC` Line ID suffix.
+   - Updated JSON outputs including `total_lines`, `total_bytes`, `showing_start`, `showing_end`, and `message` warning fields.
+2. Added a new section `Long Line Edit Protection` detailing:
+   - `LINE_TOO_LONG_ERROR` rejection behavior when attempting updates or range replacements on lines exceeding 2,048 characters.
+   - Beautifier workflows (e.g., prettier, black, cargo fmt) to format code into multiple lines before editing.
+3. Verified documentation with `strict-validator/strict_check` (0 diagnostics).
+4. Ran `cargo test` verifying all 54 tests pass.
+5. Committed changes to git:
+   - Commit: `4c99994` ("docs: document line-level safety limits and edit protection in SKILL.md")
 
 ## Verification Results
-- Ran `cargo test`.
-- All **49 tests** (40 unit tests in `src/lib.rs` and 9 integration tests in `tests/line_edit_tests.rs`) compiled and passed successfully with 0 failures and 0 warnings.
-
-## Commits Created
-- `00b4155` - `feat(test): add create_lines integration test and update mcp list test`
+- `strict_check SKILL.md`: Successful (0 diagnostics)
+- `cargo test`: Successful (54 passed, 0 failed)

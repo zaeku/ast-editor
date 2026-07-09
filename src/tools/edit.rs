@@ -795,7 +795,7 @@ mod tests {
         assert_eq!(metadata.total_lines, 3);
 
         // Get the line IDs by viewing
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 1, 3)?;
         let target_id = find_line_id(&lines_view, "let a = 1;");
         assert!(!target_id.is_empty());
 
@@ -808,13 +808,13 @@ mod tests {
                 ..Default::default()
             }
         ];
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("let a = 42;"));
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n}\n");
 
         // Refresh metadata/session
         let _metadata = init_edit_session(filepath_str, false)?;
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 1, 3)?;
         let new_target_id = find_line_id(&lines_view, "let a = 42;");
         assert!(!new_target_id.is_empty());
 
@@ -827,13 +827,13 @@ mod tests {
                 ..Default::default()
             }
         ];
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("let b = 2;"));
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n    let b = 2;\n}\n");
 
         // Refresh session to get latest target IDs
         let _ = init_edit_session(filepath_str, false)?;
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 4)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 1, 4)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
 
@@ -846,7 +846,7 @@ mod tests {
                 ..Default::default()
             }
         ];
-        let _preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let _preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n}\n");
 
         Ok(())
@@ -876,7 +876,7 @@ mod tests {
             }
         ];
 
-        let res = apply_line_edits(filepath_str, edits, &env.pm).await;
+        let res = edit_lines(filepath_str, edits, &env.pm).await;
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(err_msg.contains("CONCURRENCY_ERROR"), "Expected concurrency error, got: {}", err_msg);
@@ -904,7 +904,7 @@ mod tests {
             }
         ];
 
-        let res = apply_line_edits(filepath_str, edits, &env.pm).await;
+        let res = edit_lines(filepath_str, edits, &env.pm).await;
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(err_msg.contains("CHECKSUM_ERROR"), "Expected checksum error, got: {}", err_msg);
@@ -925,7 +925,7 @@ mod tests {
         let _metadata = init_edit_session(filepath_str, false)?;
 
         // Find the line 2 ID
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 1, 3)?;
         let target_id = find_line_id(&lines_view, "let a = 1;");
         assert!(!target_id.is_empty());
 
@@ -939,7 +939,7 @@ mod tests {
             }
         ];
 
-        let res = apply_line_edits(filepath_str, edits, &env.pm).await;
+        let res = edit_lines(filepath_str, edits, &env.pm).await;
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(err_msg.contains("Validation error"), "Expected syntax validation error, got: {}", err_msg);
@@ -980,7 +980,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("fn main() {"));
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n}\n");
 
@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(metadata.total_lines, 5);
 
         // Get the line IDs by viewing
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 1, 5)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 1, 5)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
 
@@ -1015,7 +1015,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         
         // The deleted line was `let b = 2;`.
         // The remaining lines around it should be rendered in the preview.
@@ -1047,7 +1047,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("pub fn foo()"));
         assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\n");
 
@@ -1075,7 +1075,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("pub fn bar() -> i32"));
         assert!(preview.contains("42"));
         assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\npub fn bar() -> i32 {\n    42\n}\n");
@@ -1105,7 +1105,7 @@ mod tests {
             }
         ];
 
-        let result = apply_line_edits(filepath_str, edits, &env.pm).await;
+        let result = edit_lines(filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
         assert!(err_msg.contains("Missing target_id for update op"));
@@ -1133,7 +1133,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("use std::collections::HashMap;"));
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -1155,7 +1155,7 @@ mod tests {
         let _metadata = init_edit_session(filepath_str, false)?;
 
         // Find IDs for lines 2 and 3
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 2, 3)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 2, 3)?;
         let id_2 = find_line_id(&lines_view, "let a = 1;");
         let id_3 = find_line_id(&lines_view, "let b = 2;");
 
@@ -1169,7 +1169,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("let val = 42;"));
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -1191,11 +1191,11 @@ mod tests {
         let _metadata = init_edit_session(filepath_str, false)?;
 
         // Get target ID for lines 4 (pub fn foo() {})
-        let lines_view = crate::tools::view::view_session_lines(filepath_str, 4, 4)?;
+        let lines_view = crate::tools::view::view_lines(filepath_str, 4, 4)?;
         let foo_id = find_line_id(&lines_view, "pub fn foo() {}");
 
         // Get target ID for line 1 (pub fn main() {)
-        let lines_view_main = crate::tools::view::view_session_lines(filepath_str, 1, 1)?;
+        let lines_view_main = crate::tools::view::view_lines(filepath_str, 1, 1)?;
         let main_id = find_line_id(&lines_view_main, "pub fn main() {");
 
         // Move 'foo' function before 'main' function
@@ -1209,7 +1209,7 @@ mod tests {
             }
         ];
 
-        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
         assert!(preview.contains("pub fn foo() {}"));
         assert_eq!(
             fs::read_to_string(&file_path)?,

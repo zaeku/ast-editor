@@ -213,3 +213,25 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     let err_msg = edit_res.unwrap_err().to_string();
     assert!(err_msg.contains("CONCURRENCY_ERROR"));
 }
+
+#[tokio::test]
+async fn test_integration_append_operation() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("append_integration.rs", "fn main() {\n    let a = 1;\n}\n");
+
+    let pm = create_test_parser_manager();
+    let _meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+
+    // Perform append
+    let edits = vec![edit::LineEdit {
+        op: "append".to_string(),
+        target_id: None,
+        content: Some("fn additional() {\n}".to_string()),
+    }];
+
+    let preview = edit::apply_line_edits(file.path_str(), edits, &pm).await.unwrap();
+    assert!(preview.contains("fn additional() {"));
+    
+    let content = fs::read_to_string(file.path_str()).unwrap();
+    assert!(content.contains("fn main() {\n    let a = 1;\n}\nfn additional() {\n}\n"));
+}

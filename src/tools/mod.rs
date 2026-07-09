@@ -135,7 +135,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "apply_line_edits",
-                "description": "Applies a structured batch of line edits (insert_after, insert_before, update, delete) transactionally, validates syntax, and writes back to disk.",
+                "description": "Applies a structured batch of line edits (insert_after, insert_before, append, update, delete) transactionally, validates syntax, and writes back to disk.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -148,9 +148,19 @@ impl ToolDispatcher {
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "op": { "type": "string", "enum": ["update", "insert_after", "insert_before", "delete"] },
-                                    "target_id": { "type": "string", "nullable": true },
-                                    "content": { "type": "string", "nullable": true }
+                                    "op": {
+                                        "type": "string",
+                                        "enum": ["update", "insert_after", "insert_before", "delete", "append"],
+                                        "description": "The edit operation to perform."
+                                    },
+                                    "target_id": {
+                                        "type": "string",
+                                        "description": "Target line ID (e.g. 1#a5c7). Required for update, delete, insert_before, insert_after. Omitted/ignored for append."
+                                    },
+                                    "content": {
+                                        "type": "string",
+                                        "description": "The new content to insert/update. Omitted/ignored for delete."
+                                    }
                                 },
                                 "required": ["op"]
                             }

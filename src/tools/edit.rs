@@ -84,16 +84,10 @@ pub async fn apply_line_edits(
     let mut newly_modified_ids = Vec::new();
     let mut deleted_orders = Vec::new();
 
-    // Check if file is completely empty
-    let total_lines: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
-        [&session_id],
-        |row| row.get(0)
-    )?;
 
     for edit in edits {
         match edit.op.as_str() {
-            "insert_after" | "insert_before" => {
+            "insert_after" | "insert_before" | "append" => {
                 let content = edit.content.clone().unwrap_or_default();
                 let lines_to_insert: Vec<&str> = if content.is_empty() {
                     vec![""]
@@ -101,17 +95,18 @@ pub async fn apply_line_edits(
                     content.split('\n').collect()
                 };
                 
-                let (gap_start, gap_end) = if total_lines == 0 || edit.target_id.is_none() || edit.target_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                    // Empty file or no target specified -> Insert at start
-                    let first_order: Option<f64> = tx.query_row(
-                        "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1",
+                let (gap_start, gap_end) = if edit.op == "append" {
+                    let last_order: Option<f64> = tx.query_row(
+                        "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1",
                         [&session_id],
                         |row| row.get(0)
                     ).ok().flatten();
-                    (0.0, first_order.unwrap_or(1000.0))
+                    let start = last_order.unwrap_or(0.0);
+                    (start, start + 1000.0)
                 } else {
-                    let target_id = edit.target_id.clone().unwrap();
-                    let (target_seq, target_hash) = parse_line_id(&target_id)?;
+                    let target_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                        .context(format!("CHECKSUM_ERROR: Missing target_id for {} operation", edit.op))?;
+                    let (target_seq, target_hash) = parse_line_id(target_id)?;
                     
                     // Validate hash and retrieve db_order
                     let (db_hash_opt, db_order): (Option<String>, f64) = tx.query_row(
@@ -640,7 +635,7 @@ mod tests {
 
         let edits = vec![
             LineEdit {
-                op: "insert_after".to_string(),
+                op: "append".to_string(),
                 target_id: None,
                 content: Some("fn main() {\n}".to_string()),
             }
@@ -693,6 +688,90 @@ mod tests {
         assert!(preview.contains("let a = 1;"));
         assert!(preview.contains("let c = 3;"));
         assert!(!preview.contains("let b = 2;"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_append_operation_empty_file() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let env = TestEnvironment::new("append_empty");
+
+        let file_path = env.dir.join("code.rs");
+        fs::write(&file_path, "")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let metadata = init_edit_session(filepath_str, false)?;
+        assert_eq!(metadata.total_lines, 0);
+
+        let edits = vec![
+            LineEdit {
+                op: "append".to_string(),
+                target_id: None,
+                content: Some("pub fn foo() {}".to_string()),
+            }
+        ];
+
+        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        assert!(preview.contains("pub fn foo()"));
+        assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\n");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_append_operation_with_content() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("append_content");
+
+        let file_path = env.dir.join("code.rs");
+        fs::write(&file_path, "pub fn foo() {}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let metadata = init_edit_session(filepath_str, false)?;
+        assert_eq!(metadata.total_lines, 1);
+
+        let edits = vec![
+            LineEdit {
+                op: "append".to_string(),
+                target_id: None,
+                content: Some("pub fn bar() -> i32 {\n    42\n}".to_string()),
+            }
+        ];
+
+        let preview = apply_line_edits(filepath_str, edits, &env.pm).await?;
+        assert!(preview.contains("pub fn bar() -> i32"));
+        assert!(preview.contains("42"));
+        assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\npub fn bar() -> i32 {\n    42\n}\n");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_strict_target_id_validation() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("strict_validation");
+
+        let file_path = env.dir.join("code.rs");
+        fs::write(&file_path, "pub fn foo() {}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let metadata = init_edit_session(filepath_str, false)?;
+        assert_eq!(metadata.total_lines, 1);
+
+        // Call insert_after with target_id = None
+        let edits = vec![
+            LineEdit {
+                op: "insert_after".to_string(),
+                target_id: None,
+                content: Some("pub fn bar() {}".to_string()),
+            }
+        ];
+
+        let result = apply_line_edits(filepath_str, edits, &env.pm).await;
+        assert!(result.is_err());
+        let err_msg = result.err().unwrap().to_string();
+        assert!(err_msg.contains("CHECKSUM_ERROR: Missing target_id for insert_after operation"));
 
         Ok(())
     }

@@ -61,7 +61,7 @@ async fn validate_syntax(filepath: &str, content: &str, parser_manager: &crate::
     Ok(())
 }
 
-pub async fn apply_line_edits(
+pub async fn edit_lines(
     filepath: &str,
     edits: Vec<LineEdit>,
     parser_manager: &crate::parser::ParserManager,
@@ -69,11 +69,20 @@ pub async fn apply_line_edits(
     let mut conn = get_db_connection()?;
     let path = std::path::Path::new(filepath);
     
-    let (session_id, old_mtime, _file_hash) = conn.query_row(
+    let session_info = conn.query_row(
         "SELECT session_id, mtime, file_hash FROM sessions WHERE filepath = ?1",
         [filepath],
         |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
-    ).context("No active session found. Run init_edit_session first.")?;
+    );
+
+    let (session_id, old_mtime) = match session_info {
+        Ok((sid, mtime, _hash)) => (sid, mtime),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
+            (meta.session_id, meta.mtime)
+        }
+        Err(err) => return Err(anyhow::Error::from(err)),
+    };
 
     // Out-of-Sync Check
     let current_mtime = path.metadata()?.modified()?
@@ -690,11 +699,20 @@ pub async fn apply_line_edits(
     let result_val = serde_json::json!({
         "columns": ["n", "id", "content"],
         "lines": items,
-        "tip": "Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above."
+        "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
     });
 
     let output = serde_json::to_string_pretty(&result_val)?;
     Ok(output)
+}
+
+#[deprecated(since = "0.1.0", note = "use edit_lines instead")]
+pub async fn apply_line_edits(
+    filepath: &str,
+    edits: Vec<LineEdit>,
+    parser_manager: &crate::parser::ParserManager,
+) -> Result<String> {
+    edit_lines(filepath, edits, parser_manager).await
 }
 
 #[cfg(test)]
@@ -1197,6 +1215,35 @@ mod tests {
             "pub fn foo() {}\npub fn main() {\n    foo();\n}\n"
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_edit_lines_jit_initialization() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let env = TestEnvironment::new("test_jit_edit");
+        
+        let file_path = env.dir.join("code.txt");
+        fs::write(&file_path, "line 1\nline 2\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        // Call edit_lines directly without calling init_edit_session.
+        // We can append a line. Since it's append, target_id is ignored.
+        let edits = vec![
+            LineEdit {
+                op: "append".to_string(),
+                content: Some("line 3".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let preview = edit_lines(filepath_str, edits, &env.pm).await?;
+        assert!(preview.contains("line 3"));
+
+        let content = fs::read_to_string(&file_path)?;
+        assert_eq!(content, "line 1\nline 2\nline 3\n");
+
+        fs::remove_dir_all(&env.dir)?;
         Ok(())
     }
 }

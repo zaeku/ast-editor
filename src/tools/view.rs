@@ -1,7 +1,7 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};
 
-pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
+pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
     if start_line == 0 {
         anyhow::bail!("Invalid bounds: start_line must be greater than 0");
     }
@@ -11,9 +11,26 @@ pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) ->
 
     let conn = get_db_connection()?;
     
-    let mut stmt = conn.prepare("SELECT session_id FROM sessions WHERE filepath = ?1")?;
-    let session_id: String = stmt.query_row([filepath], |row| row.get(0))
-        .context("No active session found. You must initialize session first.")?;
+    let session_id = match conn.prepare("SELECT session_id, mtime FROM sessions WHERE filepath = ?1")?
+        .query_row([filepath], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+    {
+        Ok((sid, old_mtime)) => {
+            let path = std::path::Path::new(filepath);
+            let current_mtime = path.metadata()?.modified()?
+                .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+            if current_mtime != old_mtime {
+                let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
+                meta.session_id
+            } else {
+                sid
+            }
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
+            meta.session_id
+        }
+        Err(err) => return Err(anyhow::Error::from(err)),
+    };
 
     ensure_hashes_for_range(&conn, &session_id, start_line, end_line)?;
 
@@ -46,9 +63,14 @@ pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) ->
     let result_val = serde_json::json!({
         "columns": ["n", "id", "content"],
         "lines": items,
-        "tip": "Edit these lines by calling 'apply_line_edits' with the line IDs (e.g. 1a#f8c9) shown above."
+        "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
     });
 
     let output = serde_json::to_string_pretty(&result_val)?;
     Ok(output)
+}
+
+#[deprecated(since = "0.1.0", note = "use view_lines instead")]
+pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
+    view_lines(filepath, start_line, end_line)
 }

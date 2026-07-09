@@ -169,7 +169,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
-        Some("This file type is not supported for AST syntax validation. However, you can still view and edit it safely using line-level editing tools (view_session_lines and apply_line_edits). All line sequence IDs are fully active!".to_string())
+        Some("This file type is not supported for AST syntax validation. However, you can still view and edit it safely using line-level editing tools (view_lines and edit_lines). All line sequence IDs are fully active!".to_string())
     } else {
         None
     };
@@ -645,7 +645,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_view_session_lines() -> Result<()> {
+    async fn test_view_lines() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap();
         let temp_dir = std::env::temp_dir().join("line-editor-test-view");
         if temp_dir.exists() {
@@ -661,7 +661,7 @@ mod tests {
         assert_eq!(metadata.total_lines, 3);
 
         // 2. View all lines (1 to 3)
-        let output = crate::tools::view::view_session_lines(filepath_str, 1, 3)?;
+        let output = crate::tools::view::view_lines(filepath_str, 1, 3)?;
         
         // Verify structure
         let val: serde_json::Value = serde_json::from_str(&output)?;
@@ -680,7 +680,7 @@ mod tests {
         assert_eq!(line2[2].as_str().unwrap(), "}");
 
         // 3. View sub-range (2 to 2)
-        let sub_output = crate::tools::view::view_session_lines(filepath_str, 2, 2)?;
+        let sub_output = crate::tools::view::view_lines(filepath_str, 2, 2)?;
         let sub_val: serde_json::Value = serde_json::from_str(&sub_output)?;
         let sub_lines = sub_val["lines"].as_array().unwrap();
         assert_eq!(sub_lines.len(), 1);
@@ -688,8 +688,32 @@ mod tests {
         assert!(sub_line0[1].as_str().unwrap().starts_with("2#"));
 
         // 4. Test bounds validation
-        assert!(crate::tools::view::view_session_lines(filepath_str, 0, 3).is_err());
-        assert!(crate::tools::view::view_session_lines(filepath_str, 3, 1).is_err());
+        assert!(crate::tools::view::view_lines(filepath_str, 0, 3).is_err());
+        assert!(crate::tools::view::view_lines(filepath_str, 3, 1).is_err());
+
+        fs::remove_dir_all(&temp_dir)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_view_lines_jit_initialization() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("line-editor-test-jit-view");
+        if temp_dir.exists() {
+            fs::remove_dir_all(&temp_dir)?;
+        }
+        fs::create_dir_all(&temp_dir)?;
+        let file_path = temp_dir.join("code.rs");
+        fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        // Call view_lines directly without calling init_edit_session
+        let output = crate::tools::view::view_lines(filepath_str, 1, 3)?;
+        
+        let val: serde_json::Value = serde_json::from_str(&output)?;
+        let lines = val["lines"].as_array().unwrap();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].as_array().unwrap()[2].as_str().unwrap(), "fn main() {");
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())

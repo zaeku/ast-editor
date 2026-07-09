@@ -83,6 +83,10 @@ async fn test_view_lines_lazy_hashing() {
     assert!(line0[0].as_str().unwrap().starts_with("1#"));
     assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
     assert!(val["tip"].as_str().unwrap().contains("edit_lines"));
+    assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
+    assert_eq!(val["showing_start"].as_u64().unwrap(), 1);
+    assert_eq!(val["showing_end"].as_u64().unwrap(), 3);
+    assert!(val["total_bytes"].as_u64().is_some());
 }
 
 #[tokio::test]
@@ -351,6 +355,10 @@ async fn test_integration_create_lines_flow() {
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
 
     assert_eq!(val["status"], "success");
+    assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
+    assert_eq!(val["showing_start"].as_u64().unwrap(), 1);
+    assert_eq!(val["showing_end"].as_u64().unwrap(), 3);
+    assert!(val["total_bytes"].as_u64().is_some());
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
 
@@ -395,4 +403,70 @@ async fn test_integration_create_lines_flow() {
 
     // Clean up
     let _ = fs::remove_file(&temp_file_path);
+}
+
+
+#[tokio::test]
+async fn test_integration_view_lines_truncation_and_protection() {
+    let _lock = acquire_db_lock();
+    let pm = create_test_parser_manager();
+
+    let long_line = "a".repeat(2500);
+    let content = format!("fn first() {{\n{}\n}}\n", long_line);
+    let file = TestFile::new("truncation_protection.rs", &content);
+
+    let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
+
+    assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
+    let expected_bytes = std::fs::metadata(file.path_str()).unwrap().len();
+    assert_eq!(val["total_bytes"].as_u64().unwrap(), expected_bytes);
+
+    let lines = val["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 3);
+    let line1_arr = lines[1].as_array().unwrap();
+    let line1_id = line1_arr[0].as_str().unwrap();
+    let line1_content = line1_arr[2].as_str().unwrap();
+    assert!(line1_id.ends_with("#TRUNC"));
+    assert!(line1_content.contains("[TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]"));
+
+    let edits = vec![edit::LineEdit {
+        op: "update".to_string(),
+        target_id: Some(line1_id.to_string()),
+        content: Some("    let x = 1;".to_string()),
+        ..Default::default()
+    }];
+    let edit_res = edit::edit_lines(file.path_str(), edits, &pm).await;
+    assert!(edit_res.is_err());
+    let err_msg = edit_res.unwrap_err().to_string();
+    assert!(err_msg.contains("LINE_TOO_LONG_ERROR"));
+    assert!(err_msg.contains("prettier"));
+    assert!(err_msg.contains("black"));
+    assert!(err_msg.contains("cargo fmt"));
+
+    let disk_content = std::fs::read_to_string(file.path_str()).unwrap();
+    assert_eq!(disk_content, content);
+}
+
+#[tokio::test]
+async fn test_integration_view_lines_capacity_cap() {
+    let _lock = acquire_db_lock();
+
+    let line_content = "x".repeat(1000);
+    let mut lines = Vec::new();
+    for _ in 0..50 {
+        lines.push(line_content.clone());
+    }
+    let content = lines.join("\n");
+    let file = TestFile::new("capacity_cap.txt", &content);
+
+    let view_res = view::view_lines(file.path_str(), 1, 50).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
+
+    let returned_lines = val["lines"].as_array().unwrap();
+    assert_eq!(returned_lines.len(), 45);
+    assert_eq!(val["showing_end"].as_u64().unwrap(), 45);
+
+    let warning_msg = val["message"].as_str().unwrap();
+    assert!(warning_msg.contains("cumulative response size limit"));
 }

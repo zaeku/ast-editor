@@ -28,7 +28,7 @@ fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
     }
 }
 
-fn create_test_parser_manager(tmp: &PathBuf) -> ParserManager {
+fn create_test_parser_manager(tmp: &std::path::Path) -> ParserManager {
     let cache_dir = tmp.join("cache");
     let compiler_path = tmp.join("compiler");
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -41,6 +41,7 @@ fn create_test_parser_manager(tmp: &PathBuf) -> ParserManager {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn generate_readme() {
     let _lock = acquire_db_lock();
 

@@ -3,6 +3,7 @@ pub mod dump;
 pub mod session_db;
 pub mod view;
 pub mod edit;
+pub mod metadata;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
@@ -95,7 +96,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "view_lines",
-                "description": "Retrieves lines along with their persistent unique Line IDs for any text file (including source code, markdown, configuration, or plain text). Useful for target line selection.",
+                "description": metadata::get_tool_description("view_lines"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -117,7 +118,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "edit_lines",
-                "description": "Applies a structured batch of line edits (insert_after, insert_before, update, delete, replace_range, move) transactionally to any text file (including source code, markdown, configuration, or plain text). Performs syntax validation for supported programming languages.",
+                "description": metadata::get_tool_description("edit_lines"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {

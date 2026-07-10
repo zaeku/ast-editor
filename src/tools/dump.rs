@@ -98,7 +98,12 @@ pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Re
         line_range_end
     );
     
-    let final_text = format!("{}{}", header, formatted_tree);
+    let tip = crate::tools::metadata::get_tool_tip("dump_ast");
+    let final_text = if !tip.is_empty() {
+        format!("{}{}\n{}", header, formatted_tree, tip)
+    } else {
+        format!("{}{}", header, formatted_tree)
+    };
 
     Ok(serde_json::to_value(McpToolResult {
         content: vec![McpTextContent {

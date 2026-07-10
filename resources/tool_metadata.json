@@ -1,0 +1,22 @@
+{
+  "inspect_ast": {
+    "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",
+    "tip": "Tip: Use templates like 'functions' or 'classes' for quick navigation."
+  },
+  "dump_ast": {
+    "description": "Dumps the complete AST syntax tree of a file as S-expression text.",
+    "tip": "Tip: For larger files, prefer using 'inspect_ast' with specific templates/queries to reduce token usage and focus on target blocks."
+  },
+  "view_lines": {
+    "description": "Retrieves lines along with their persistent unique Line IDs for any text file (including source code, markdown, configuration, or plain text). Useful for target line selection.",
+    "tip": "Tip: Specify start_line and end_line range to view only relevant chunks."
+  },
+  "edit_lines": {
+    "description": "Applies a structured batch of line edits (insert_after, insert_before, update, delete, replace_range, move) transactionally to any text file (including source code, markdown, configuration, or plain text). Performs syntax validation for supported programming languages.",
+    "tip": "Tip: Always verify Line IDs before applying edits to prevent conflict."
+  },
+  "create_lines": {
+    "description": "Create a new file with initial content and initialize its line editing session. Returns the line list with unique line IDs. Fails if the file already exists.",
+    "tip": ""
+  }
+}

@@ -20,6 +20,7 @@ The tool can be used to view and edit **any text file** on the filesystem. When 
 Unlike standard search-and-replace tools (e.g., `replace_file_content`), the `edit_lines` tool targets specific lines using stable sequence/hash IDs (e.g., `"1#dfca"`) and floating-point sort orders.
 *   **Immune to Line Shifting**: Inserting or deleting lines in one part of a file does not shift the Line IDs of other lines. Any line shifts will not invalidate your references or write changes to incorrect positions.
 *   **Safer than Content Matching**: When a file contains duplicate lines of code, search-and-replace tools might match and overwrite the wrong occurrence. By targeting precise, unique Line IDs, `edit_lines` guarantees that the exact intended line is modified, eliminating duplicate matching errors.
+*   **Hash Reuse Optimization (Double-turn Avoidance)**: If the content of a line has not changed, its Line ID and hash remain stable and invariant. You can reuse previous Line IDs directly in subsequent edits without calling `view_lines` again. This avoids redundant round-trips and saves context tokens.
 
 #### B. Stateless Local Cache & Lock-Free Design
 To track Line IDs across editing operations, a SQLite database is maintained in the user directory as a stateless local cache.

@@ -46,7 +46,7 @@ impl ToolDispatcher {
         vec![
             serde_json::json!({
                 "name": "inspect_ast",
-                "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",
+                "description": metadata::get_tool_description("inspect_ast"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -82,7 +82,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "dump_ast",
-                "description": "Dumps the complete AST syntax tree of a file as S-expression text.",
+                "description": metadata::get_tool_description("dump_ast"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -167,7 +167,7 @@ impl ToolDispatcher {
             }),
             serde_json::json!({
                 "name": "create_lines",
-                "description": "Create a new file with initial content and initialize its line editing session. Returns the line list with unique line IDs. Fails if the file already exists.",
+                "description": metadata::get_tool_description("create_lines"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {

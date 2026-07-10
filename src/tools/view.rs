@@ -1,72 +1,5 @@
 use anyhow::Result;
-use crate::tools::session_db::{
-    compute_line_hash, SessionRepository,
-};
-
-fn fetch_and_format_lines(
-    repository: &impl SessionRepository,
-    session_id: &str,
-    start_line: usize,
-    end_line: usize,
-    only_ids: bool,
-) -> Result<(serde_json::Value, usize, Option<String>)> {
-    repository.ensure_hashes_range(session_id, start_line, end_line)?;
-
-    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
-    let mut items = Vec::new();
-
-    let mut current_idx = start_line;
-    let mut actual_end_line = start_line.saturating_sub(1);
-    let mut cumulative_bytes = 0;
-    let mut capacity_truncated = false;
-
-    for (seq_id, line_hash_opt, content) in lines {
-        let (final_content, line_id) = if content.chars().count() > 2048 {
-            let truncated: String = content.chars().take(2048).collect();
-            let final_content = format!("{}... [TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]", truncated);
-            let line_id = format!("{:x}#TRUNC", seq_id);
-            (final_content, line_id)
-        } else {
-            let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
-            let line_id = format!("{:x}#{}", seq_id, line_hash);
-            (content, line_id)
-        };
-
-        let line_len = if only_ids {
-            line_id.len() + 10
-        } else {
-            final_content.len()
-        };
-        if cumulative_bytes + line_len > 45000 {
-            capacity_truncated = true;
-            break;
-        }
-
-        cumulative_bytes += line_len;
-        if only_ids {
-            items.push(serde_json::json!([
-                line_id,
-                current_idx
-            ]));
-        } else {
-            items.push(serde_json::json!([
-                line_id,
-                current_idx,
-                final_content
-            ]));
-        }
-        actual_end_line = current_idx;
-        current_idx += 1;
-    }
-
-    let warning_msg = if capacity_truncated {
-        Some("Response truncated: cumulative response size limit (45,000 bytes) was reached.".to_string())
-    } else {
-        None
-    };
-
-    Ok((serde_json::Value::Array(items), actual_end_line, warning_msg))
-}
+use crate::tools::session_db::SessionRepository;
 
 pub fn view_lines(
     repository: &impl SessionRepository,
@@ -99,13 +32,21 @@ pub fn view_lines(
     let total_bytes = std::path::Path::new(filepath).metadata()?.len();
 
     let only_ids_bool = only_ids.unwrap_or(false);
-    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &session_id, start_line, capped_end_line, only_ids_bool)?;
+    let config = crate::tools::metadata::get_config();
+    let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
+        repository,
+        &session_id,
+        start_line,
+        capped_end_line,
+        only_ids_bool,
+        config.only_ids_wrap_trigger_length,
+    )?;
 
     let mut message = None;
     if line_count_capped {
         message = Some("Line count limit (800 lines max) exceeded. Output capped at 800 lines.".to_string());
     }
-    if let Some(ref cap_msg) = capacity_warning {
+    if let Some(ref cap_msg) = formatted_res.warning_msg {
         if let Some(existing_msg) = message {
             message = Some(format!("{}; {}", existing_msg, cap_msg));
         } else {
@@ -119,30 +60,15 @@ pub fn view_lines(
         vec!["id", "n", "content"]
     };
 
-    let items_array = items
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Expected items to be a JSON array"))?;
-
-    let mut lines_strs = Vec::new();
-    for item in items_array {
-        lines_strs.push(serde_json::to_string(item)?);
-    }
-
-    let lines_formatted = if only_ids_bool {
-        format!("[{}]", lines_strs.join(", "))
-    } else {
-        format!("[\n    {}\n  ]", lines_strs.join(",\n    "))
-    };
-
     let mut parts = Vec::new();
     parts.push(format!("  \"columns\": {}", serde_json::to_string(&columns)?));
-    parts.push(format!("  \"lines\": {}", lines_formatted));
+    parts.push(format!("  \"lines\": {}", formatted_res.lines_json));
     if let Some(msg) = message {
         parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
     }
-    parts.push(format!("  \"showing_end\": {}", actual_end_line));
+    parts.push(format!("  \"showing_end\": {}", formatted_res.actual_end_line));
     parts.push(format!("  \"showing_start\": {}", start_line));
-    parts.push(format!("  \"tip\": \"Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above.\""));
+    parts.push(format!("  \"tip\": {}", serde_json::to_string(&config.view_lines_response_tip)?));
     parts.push(format!("  \"total_bytes\": {}", total_bytes));
     parts.push(format!("  \"total_lines\": {}", total_lines));
 
@@ -180,16 +106,24 @@ pub fn create_lines(
 
     let return_ids_bool = return_ids.unwrap_or(false);
 
-    let setup_db_and_fetch = || -> Result<(Option<serde_json::Value>, Option<String>, usize, u64)> {
+    let setup_db_and_fetch = || -> Result<(Option<String>, Option<String>, usize, u64)> {
         let meta = repository.init_session(filepath, false)?;
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if return_ids_bool {
             if meta.total_lines > 0 {
                 let end_line = if meta.total_lines > 800 { 800 } else { meta.total_lines };
-                let (items, _actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &meta.session_id, 1, end_line, true)?;
-                Ok((Some(items), capacity_warning, meta.total_lines, total_bytes))
+                let config = crate::tools::metadata::get_config();
+                let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
+                    repository,
+                    &meta.session_id,
+                    1,
+                    end_line,
+                    true,
+                    config.only_ids_wrap_trigger_length,
+                )?;
+                Ok((Some(formatted_res.lines_json), formatted_res.warning_msg, meta.total_lines, total_bytes))
             } else {
-                Ok((Some(serde_json::json!([])), None, 0, total_bytes))
+                Ok((Some("[]".to_string()), None, 0, total_bytes))
             }
         } else {
             Ok((None, None, meta.total_lines, total_bytes))
@@ -221,6 +155,7 @@ pub fn create_lines(
 
             if return_ids_bool {
                 let ids: Vec<String> = items_opt
+                    .and_then(|json_str| serde_json::from_str::<serde_json::Value>(&json_str).ok())
                     .and_then(|val| val.as_array().cloned())
                     .map(|arr| {
                         arr.iter()

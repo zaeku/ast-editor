@@ -358,32 +358,19 @@ fn format_definition_table(
     start_line: usize,
     end_line: usize,
 ) -> Result<String> {
-    repository.ensure_hashes_range(session_id, start_line, end_line)?;
-
-    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
-    let mut items = Vec::new();
-
-    let mut current_idx = start_line;
-    for (seq_id, line_hash_opt, content) in lines {
-        let line_hash = line_hash_opt.unwrap_or_else(|| crate::tools::session_db::compute_line_hash(&content));
-        let hex_seq = format!("{:x}", seq_id);
-        items.push(serde_json::json!([
-            format!("{}#{}", hex_seq, line_hash),
-            current_idx,
-            content
-        ]));
-        current_idx += 1;
-    }
-
-    let mut lines_strs = Vec::new();
-    for item in items {
-        lines_strs.push(serde_json::to_string(&item)?);
-    }
-    let lines_formatted = format!("[\n    {}\n  ]", lines_strs.join(",\n    "));
+    let config = crate::tools::metadata::get_config();
+    let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
+        repository,
+        session_id,
+        start_line,
+        end_line,
+        false,
+        config.only_ids_wrap_trigger_length,
+    )?;
 
     let output = format!(
         "{{\n  \"columns\": [\n    \"id\",\n    \"n\",\n    \"content\"\n  ],\n  \"lines\": {}\n}}",
-        lines_formatted
+        formatted_res.lines_json
     );
     Ok(output)
 }

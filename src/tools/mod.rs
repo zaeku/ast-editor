@@ -210,7 +210,7 @@ impl ToolDispatcher {
             "edit_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let edits_val = arguments.get("edits").context("Missing edits array")?;
-                let edits: Vec<edit::LineEdit> = serde_json::from_value(edits_val.clone())?;
+                let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
                 let text = edit::edit_lines(filepath, edits, parser_manager).await?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],

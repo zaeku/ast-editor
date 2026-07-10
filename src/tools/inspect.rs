@@ -8,6 +8,7 @@ use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use std::hash::{Hash, Hasher};
 
 use crate::parser::ParserManager;
+use crate::tools::session_db::{SessionRepository, SqliteSessionRepository};
 use crate::tools::{McpTextContent, McpToolResult};
 
 #[derive(Debug, Deserialize)]
@@ -102,20 +103,12 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     let has_syntax_errors = root_node.has_error();
 
     // JIT edit session pre-caching
-    let mut session_conn = None;
+    let repository = SqliteSessionRepository;
     let mut session_id_opt = None;
-    match crate::tools::session_db::init_edit_session(&args.file, false) {
+    match repository.init_session(&args.file, false) {
         Ok(meta) => {
             crate::tools::session_db::start_background_hash_worker(meta.session_id.clone());
             session_id_opt = Some(meta.session_id);
-            match crate::tools::session_db::get_db_connection() {
-                Ok(conn) => {
-                    session_conn = Some(conn);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to open DB connection for inspect pre-caching: {:?}", e);
-                }
-            }
         }
         Err(e) => {
             tracing::warn!("Failed to initialize edit session for inspect pre-caching: {:?}", e);
@@ -179,8 +172,8 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                             let end_line = end_position.row + 1;
 
                             if args.include_code.unwrap_or(true) {
-                                if let (Some(ref conn), Some(ref session_id)) = (&session_conn, &session_id_opt) {
-                                    match format_definition_table(conn, session_id, start_line, end_line) {
+                                if let Some(ref session_id) = session_id_opt {
+                                    match format_definition_table(&repository, session_id, start_line, end_line) {
                                         Ok(table_text) => {
                                             text_val = table_text;
                                         }
@@ -360,29 +353,18 @@ pub(crate) async fn run_gc(outputs_dir: std::path::PathBuf) {
 }
 
 fn format_definition_table(
-    conn: &rusqlite::Connection,
+    repository: &impl crate::tools::session_db::SessionRepository,
     session_id: &str,
     start_line: usize,
     end_line: usize,
 ) -> Result<String> {
-    crate::tools::session_db::ensure_hashes_for_range(conn, session_id, start_line, end_line)?;
+    repository.ensure_hashes_range(session_id, start_line, end_line)?;
 
-    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
-    let offset = start_line.saturating_sub(1);
-
-    let mut stmt = conn.prepare(
-        "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
-    )?;
-
-    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
+    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
     let mut items = Vec::new();
 
     let mut current_idx = start_line;
-    while let Some(row) = rows.next()? {
-        let seq_id: i64 = row.get(0)?;
-        let line_hash_opt: Option<String> = row.get(1)?;
-        let content: String = row.get(2)?;
-        
+    for (seq_id, line_hash_opt, content) in lines {
         let line_hash = line_hash_opt.unwrap_or_else(|| crate::tools::session_db::compute_line_hash(&content));
         let hex_seq = format!("{:x}", seq_id);
         items.push(serde_json::json!([

@@ -1,27 +1,9 @@
 use anyhow::{Result, Context, bail};
-use serde::{Deserialize, Serialize};
 use std::fs;
-use crate::tools::session_db::{get_db_connection, compute_line_hash};
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct LineEdit {
-    pub op: String,
-    pub target_id: Option<String>,
-    pub end_target_id: Option<String>,
-    pub dest_target_id: Option<String>,
-    pub move_position: Option<String>,
-    pub content: Option<String>,
-}
-
-fn parse_line_id(id_str: &str) -> Result<(i64, String)> {
-    let parts: Vec<&str> = id_str.split('#').collect();
-    if parts.len() != 2 {
-        bail!("Invalid Line ID format: {}", id_str);
-    }
-    let seq = i64::from_str_radix(parts[0], 16)
-        .context("Failed to parse sequence ID hex")?;
-    Ok((seq, parts[1].to_string()))
-}
+pub use crate::tools::session_db::LineEdit;
+use crate::tools::session_db::{
+    compute_line_hash, parse_line_id, SessionRepository, SqliteSessionRepository,
+};
 
 fn check_language_supported(path: &str) -> bool {
     let ext = std::path::Path::new(path)
@@ -66,30 +48,20 @@ pub async fn edit_lines(
     edits: Vec<LineEdit>,
     parser_manager: &crate::parser::ParserManager,
 ) -> Result<String> {
-    let mut conn = get_db_connection()?;
+    let repository = SqliteSessionRepository;
     let path = std::path::Path::new(filepath);
     
-    let session_info = conn.query_row(
-        "SELECT session_id, mtime, file_hash FROM sessions WHERE filepath = ?1",
-        [filepath],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
-    );
-
-    let (session_id, old_mtime) = match session_info {
-        Ok((sid, mtime, _hash)) => (sid, mtime),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
-            (meta.session_id, meta.mtime)
-        }
-        Err(err) => return Err(anyhow::Error::from(err)),
-    };
-
     // Out-of-Sync Check
-    let current_mtime = path.metadata()?.modified()?
-        .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
-    if current_mtime != old_mtime {
-        bail!("CONCURRENCY_ERROR: File has been modified externally. Re-initialize the session.");
+    if let Some(old_mtime) = repository.get_session_mtime(filepath)? {
+        let current_mtime = path.metadata()?.modified()?
+            .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+        if current_mtime != old_mtime {
+            bail!("CONCURRENCY_ERROR: File has been modified externally. Re-initialize the session.");
+        }
     }
+
+    let meta = repository.init_session(filepath, false)?;
+    let session_id = meta.session_id;
 
     // Long Line Edit Protection Check
     for edit in &edits {
@@ -102,527 +74,39 @@ pub async fn edit_lines(
             if !target_id.is_empty() {
                 let ends_with_trunc = target_id.ends_with("#TRUNC");
                 let (seq, _) = parse_line_id(target_id)?;
-                let db_content_res: Result<String, rusqlite::Error> = conn.query_row(
-                    "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, seq],
-                    |row| row.get(0)
-                );
-                match db_content_res {
-                    Ok(content) => {
-                        let char_count = content.chars().count();
-                        if ends_with_trunc || char_count > 2048 {
-                            bail!(
-                                "LINE_TOO_LONG_ERROR: Line is too long ({} chars) and has been truncated in the view. Surgical updates on truncated lines are disabled to prevent accidental data loss. Please format the file using a code beautifier (e.g. prettier, black, or cargo fmt) to break it into multiple lines, or rewrite the file using create_lines/write_to_file.",
-                                char_count
-                            );
-                        }
+                if let Some(content) = repository.get_line_content(&session_id, seq)? {
+                    let char_count = content.chars().count();
+                    if ends_with_trunc || char_count > 2048 {
+                        bail!(
+                            "LINE_TOO_LONG_ERROR: Line is too long ({} chars) and has been truncated in the view. Surgical updates on truncated lines are disabled to prevent accidental data loss. Please format the file using a code beautifier (e.g. prettier, black, or cargo fmt) to break it into multiple lines, or rewrite the file using create_lines/write_to_file.",
+                            char_count
+                        );
                     }
-                    Err(rusqlite::Error::QueryReturnedNoRows) => {}
-                    Err(err) => return Err(anyhow::Error::from(err)),
                 }
             }
         }
     }
 
-    let tx = conn.transaction()?;
+    // Make a backup of the current lines in case syntax validation fails
+    let total_lines = repository.get_total_lines(&session_id)?;
+    let backup_lines = repository.fetch_lines_range(&session_id, 1, total_lines)?;
 
-    let mut newly_modified_ids = Vec::new();
-    let mut deleted_orders = Vec::new();
+    // Apply the edits using the repository
+    let newly_modified_ids = repository.apply_line_edits(filepath, &session_id, &edits)?;
 
-
-    for edit in edits {
-        match edit.op.as_str() {
-            "insert_after" | "insert_before" | "append" | "prepend" => {
-                let content = edit.content.clone().unwrap_or_default();
-                let lines_to_insert: Vec<&str> = if content.is_empty() {
-                    vec![""]
-                } else {
-                    content.split('\n').collect()
-                };
-                
-                let is_empty_target = edit.target_id.as_ref().map_or(true, |s| s.is_empty());
-                let (gap_start, gap_end) = if edit.op == "append" || (edit.op == "insert_after" && is_empty_target) {
-                    let last_order: Option<f64> = tx.query_row(
-                        "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1",
-                        [&session_id],
-                        |row| row.get(0)
-                    ).ok().flatten();
-                    let start = last_order.unwrap_or(0.0);
-                    (start, start + 1000.0)
-                } else if edit.op == "prepend" || (edit.op == "insert_before" && is_empty_target) {
-                    let first_order: Option<f64> = tx.query_row(
-                        "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1",
-                        [&session_id],
-                        |row| row.get(0)
-                    ).ok().flatten();
-                    let end = first_order.unwrap_or(1000.0);
-                    (end - 1000.0, end)
-                } else {
-                    let target_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                        .context(format!("CHECKSUM_ERROR: Missing target_id for {} operation", edit.op))?;
-                    let (target_seq, target_hash) = parse_line_id(target_id)?;
-                    
-                    // Validate hash and retrieve db_order
-                    let (db_hash_opt, db_order): (Option<String>, f64) = tx.query_row(
-                        "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, target_seq],
-                        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, f64>(1)?))
-                    ).context(format!("Target line not found for target_id={}", target_id))?;
-
-                    let db_hash = match db_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                rusqlite::params![session_id, target_seq],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                rusqlite::params![h, session_id, target_seq],
-                            )?;
-                            h
-                        }
-                    };
-
-                    if db_hash != target_hash {
-                        bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                    }
-
-                    if edit.op == "insert_after" {
-                        let next_order: Option<f64> = tx.query_row(
-                            "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2",
-                            rusqlite::params![session_id, db_order],
-                            |row| row.get(0)
-                        ).ok().flatten();
-                        (db_order, next_order.unwrap_or(db_order + 1000.0))
-                    } else {
-                        let prev_order: Option<f64> = tx.query_row(
-                            "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2",
-                            rusqlite::params![session_id, db_order],
-                            |row| row.get(0)
-                        ).ok().flatten();
-                        (prev_order.unwrap_or(0.0), db_order)
-                    }
-                };
-
-                let max_seq: i64 = tx.query_row(
-                    "SELECT COALESCE(MAX(sequence_id), 0) FROM lines WHERE session_id = ?1",
-                    [&session_id],
-                    |row| row.get(0)
-                )?;
-
-                let gap = gap_end - gap_start;
-                let step = gap / (lines_to_insert.len() as f64 + 1.0);
-
-                for (ins_idx, ins_line) in lines_to_insert.iter().enumerate() {
-                    let new_seq = max_seq + 1 + (ins_idx as i64);
-                    let hash = compute_line_hash(ins_line);
-                    let current_order = gap_start + step * ((ins_idx + 1) as f64);
-                    tx.execute(
-                        "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, ?3, ?4, ?5);",
-                        rusqlite::params![session_id, new_seq, hash, ins_line, current_order]
-                    )?;
-                    newly_modified_ids.push((new_seq, hash));
-                }
-            }
-            "update" => {
-                let target_id = edit.target_id.as_ref().context("Missing target_id for update op")?;
-                let (target_seq, target_hash) = parse_line_id(target_id)?;
-                let content = edit.content.as_ref().context("Missing content for update op")?;
-
-                let (db_hash_opt, db_id): (Option<String>, i64) = tx.query_row(
-                    "SELECT line_hash, id FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, target_seq],
-                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
-                ).context(format!("Target line not found for target_id={}", target_id))?;
-                
-                let db_hash = match db_hash_opt {
-                    Some(h) => h,
-                    None => {
-                        let line_content: String = tx.query_row(
-                            "SELECT content FROM lines WHERE id = ?1",
-                            rusqlite::params![db_id],
-                            |row| row.get(0)
-                        )?;
-                        let h = compute_line_hash(&line_content);
-                        tx.execute(
-                            "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                            rusqlite::params![h, db_id],
-                        )?;
-                        h
-                    }
-                };
-
-                if db_hash != target_hash {
-                    bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                }
-
-                let new_hash = compute_line_hash(content);
-                tx.execute(
-                    "UPDATE lines SET content = ?1, line_hash = ?2 WHERE id = ?3;",
-                    rusqlite::params![content, new_hash, db_id]
-                )?;
-                newly_modified_ids.push((target_seq, new_hash));
-            }
-            "delete" => {
-                let target_id = edit.target_id.as_ref().context("Missing target_id for delete op")?;
-                let (target_seq, target_hash) = parse_line_id(target_id)?;
-
-                let (db_hash_opt, db_id, sort_order): (Option<String>, i64, f64) = tx.query_row(
-                    "SELECT line_hash, id, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, target_seq],
-                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, f64>(2)?))
-                ).context(format!("Target line not found for target_id={}", target_id))?;
-                
-                let db_hash = match db_hash_opt {
-                    Some(h) => h,
-                    None => {
-                        let line_content: String = tx.query_row(
-                            "SELECT content FROM lines WHERE id = ?1",
-                            rusqlite::params![db_id],
-                            |row| row.get(0)
-                        )?;
-                        let h = compute_line_hash(&line_content);
-                        tx.execute(
-                            "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                            rusqlite::params![h, db_id],
-                        )?;
-                        h
-                    }
-                };
-
-                if db_hash != target_hash {
-                    bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                }
-
-                tx.execute("DELETE FROM lines WHERE id = ?1;", [db_id])?;
-                deleted_orders.push(sort_order);
-            }
-            "replace_range" => {
-                let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                    .context("CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op")?;
-                let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty())
-                    .context("CHECKSUM_ERROR: Missing end_target_id for replace_range op")?;
-                let content = edit.content.as_ref().unwrap_or(&String::new()).clone();
-
-                let (start_seq, start_hash) = parse_line_id(start_id)?;
-                let (end_seq, end_hash) = parse_line_id(end_id)?;
-
-                // Resolve start line details
-                let (start_hash_opt, start_order): (Option<String>, f64) = tx.query_row(
-                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, start_seq],
-                    |row| Ok((row.get(0)?, row.get(1)?))
-                ).context(format!("Start line not found for target_id={}", start_id))?;
-
-                let db_start_hash = match start_hash_opt {
-                    Some(h) => h,
-                    None => {
-                        let line_content: String = tx.query_row(
-                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, start_seq],
-                            |row| row.get(0)
-                        )?;
-                        let h = compute_line_hash(&line_content);
-                        tx.execute(
-                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                            rusqlite::params![h, session_id, start_seq],
-                        )?;
-                        h
-                    }
-                };
-                if db_start_hash != start_hash {
-                    bail!("CHECKSUM_ERROR: Start line hash mismatch for target_id={}. Edit rejected.", start_id);
-                }
-
-                // Resolve end line details
-                let (end_hash_opt, end_order): (Option<String>, f64) = tx.query_row(
-                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, end_seq],
-                    |row| Ok((row.get(0)?, row.get(1)?))
-                ).context(format!("End line not found for end_target_id={}", end_id))?;
-
-                let db_end_hash = match end_hash_opt {
-                    Some(h) => h,
-                    None => {
-                        let line_content: String = tx.query_row(
-                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, end_seq],
-                            |row| row.get(0)
-                        )?;
-                        let h = compute_line_hash(&line_content);
-                        tx.execute(
-                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                            rusqlite::params![h, session_id, end_seq],
-                        )?;
-                        h
-                    }
-                };
-                if db_end_hash != end_hash {
-                    bail!("CHECKSUM_ERROR: End line hash mismatch for end_target_id={}. Edit rejected.", end_id);
-                }
-
-                if start_order > end_order {
-                    bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for replace_range.");
-                }
-
-                // Retrieve context limits
-                let prev_order: Option<f64> = tx.query_row(
-                    "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2",
-                    rusqlite::params![session_id, start_order],
-                    |row| row.get(0)
-                ).ok().flatten();
-                let gap_start = prev_order.unwrap_or(start_order - 1000.0);
-
-                let next_order: Option<f64> = tx.query_row(
-                    "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2",
-                    rusqlite::params![session_id, end_order],
-                    |row| row.get(0)
-                ).ok().flatten();
-                let gap_end = next_order.unwrap_or(end_order + 1000.0);
-
-                // Add to deleted_orders for preview context rendering
-                let mut stmt = tx.prepare("SELECT sort_order FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3")?;
-                let mut rows = stmt.query(rusqlite::params![session_id, start_order, end_order])?;
-                while let Some(row) = rows.next()? {
-                    deleted_orders.push(row.get(0)?);
-                }
-
-                // Delete the lines in the range
-                tx.execute(
-                    "DELETE FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3",
-                    rusqlite::params![session_id, start_order, end_order]
-                )?;
-
-                // Split and insert new content lines in the gap
-                let lines_to_insert: Vec<&str> = if content.is_empty() {
-                    vec![""]
-                } else {
-                    content.split('\n').collect()
-                };
-
-                let max_seq: i64 = tx.query_row(
-                    "SELECT COALESCE(MAX(sequence_id), 0) FROM lines WHERE session_id = ?1",
-                    [&session_id],
-                    |row| row.get(0)
-                )?;
-
-                let gap = gap_end - gap_start;
-                let step = gap / (lines_to_insert.len() as f64 + 1.0);
-
-                for (ins_idx, ins_line) in lines_to_insert.iter().enumerate() {
-                    let new_seq = max_seq + 1 + (ins_idx as i64);
-                    let hash = compute_line_hash(ins_line);
-                    let current_order = gap_start + step * ((ins_idx + 1) as f64);
-                    tx.execute(
-                        "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, ?3, ?4, ?5);",
-                        rusqlite::params![session_id, new_seq, hash, ins_line, current_order]
-                    )?;
-                    newly_modified_ids.push((new_seq, hash));
-                }
-            }
-            "move" => {
-                let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                    .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
-                let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty()).unwrap_or(start_id);
-                let move_pos = edit.move_position.as_ref().map(|s| s.as_str()).unwrap_or("after");
-
-                let (start_seq, start_hash) = parse_line_id(start_id)?;
-                let (end_seq, end_hash) = parse_line_id(end_id)?;
-
-                // Verify start line
-                let (start_hash_opt, start_order): (Option<String>, f64) = tx.query_row(
-                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, start_seq],
-                    |row| Ok((row.get(0)?, row.get(1)?))
-                ).context(format!("Start line not found for target_id={}", start_id))?;
-                let db_start_hash = match start_hash_opt {
-                    Some(h) => h,
-                    None => {
-                        let line_content: String = tx.query_row(
-                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, start_seq],
-                            |row| row.get(0)
-                        )?;
-                        let h = compute_line_hash(&line_content);
-                        tx.execute(
-                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                            rusqlite::params![h, session_id, start_seq],
-                        )?;
-                        h
-                    }
-                };
-                if db_start_hash != start_hash {
-                    bail!("CHECKSUM_ERROR: Start line hash mismatch for target_id={}. Edit rejected.", start_id);
-                }
-
-                // Verify end line
-                let (end_hash_opt, end_order): (Option<String>, f64) = tx.query_row(
-                    "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                    rusqlite::params![session_id, end_seq],
-                    |row| Ok((row.get(0)?, row.get(1)?))
-                ).context(format!("End line not found for end_target_id={}", end_id))?;
-                let db_end_hash = match end_hash_opt {
-                    Some(h) => h,
-                    None => {
-                        let line_content: String = tx.query_row(
-                            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, end_seq],
-                            |row| row.get(0)
-                        )?;
-                        let h = compute_line_hash(&line_content);
-                        tx.execute(
-                            "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                            rusqlite::params![h, session_id, end_seq],
-                        )?;
-                        h
-                    }
-                };
-                if db_end_hash != end_hash {
-                    bail!("CHECKSUM_ERROR: End line hash mismatch for end_target_id={}. Edit rejected.", end_id);
-                }
-
-                if start_order > end_order {
-                    bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
-                }
-
-                // Get all moved lines sorted by sort_order
-                struct MovedLine {
-                    id: i64,
-                    seq: i64,
-                    hash: String,
-                }
-                let mut moved_lines = Vec::new();
-                {
-                    let mut stmt = tx.prepare("SELECT id, sequence_id, COALESCE(line_hash, '') FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3 ORDER BY sort_order")?;
-                    let mut rows = stmt.query(rusqlite::params![session_id, start_order, end_order])?;
-                    while let Some(row) = rows.next()? {
-                        let id: i64 = row.get(0)?;
-                        let seq: i64 = row.get(1)?;
-                        let mut hash: String = row.get(2)?;
-                        if hash.is_empty() {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE id = ?1",
-                                [id],
-                                |r| r.get(0)
-                            )?;
-                            hash = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                                rusqlite::params![hash, id],
-                            )?;
-                        }
-                        moved_lines.push(MovedLine { id, seq, hash });
-                    }
-                }
-
-                let (gap_start, gap_end) = match move_pos {
-                    "prepend" => {
-                        let first_non_moved: Option<f64> = tx.query_row(
-                            "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND (sort_order < ?2 OR sort_order > ?3)",
-                            rusqlite::params![session_id, start_order, end_order],
-                            |row| row.get(0)
-                        ).ok().flatten();
-                        let end = first_non_moved.unwrap_or(1000.0);
-                        (end - 1000.0, end)
-                    }
-                    "append" => {
-                        let last_non_moved: Option<f64> = tx.query_row(
-                            "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND (sort_order < ?2 OR sort_order > ?3)",
-                            rusqlite::params![session_id, start_order, end_order],
-                            |row| row.get(0)
-                        ).ok().flatten();
-                        let start = last_non_moved.unwrap_or(0.0);
-                        (start, start + 1000.0)
-                    }
-                    "before" | "after" => {
-                        let dest_id = edit.dest_target_id.as_ref().filter(|s| !s.is_empty())
-                            .context("CHECKSUM_ERROR: Missing dest_target_id for move before/after operation")?;
-                        let (dest_seq, dest_hash) = parse_line_id(dest_id)?;
-
-                        let (db_dest_hash_opt, dest_order): (Option<String>, f64) = tx.query_row(
-                            "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, dest_seq],
-                            |row| Ok((row.get(0)?, row.get(1)?))
-                        ).context(format!("Destination line not found for dest_target_id={}", dest_id))?;
-                        let db_dest_hash = match db_dest_hash_opt {
-                            Some(h) => h,
-                            None => {
-                                let line_content: String = tx.query_row(
-                                    "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                    rusqlite::params![session_id, dest_seq],
-                                    |row| row.get(0)
-                                )?;
-                                let h = compute_line_hash(&line_content);
-                                 tx.execute(
-                                    "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                    rusqlite::params![h, session_id, dest_seq],
-                                )?;
-                                h
-                            }
-                        };
-                        if db_dest_hash != dest_hash {
-                            bail!("CHECKSUM_ERROR: Destination line hash mismatch for dest_target_id={}. Edit rejected.", dest_id);
-                        }
-
-                        if dest_order >= start_order && dest_order <= end_order {
-                            bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_target_id lies within source range).");
-                        }
-
-                        if move_pos == "before" {
-                            let prev_non_moved: Option<f64> = tx.query_row(
-                                "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2 AND (sort_order < ?3 OR sort_order > ?4)",
-                                rusqlite::params![session_id, dest_order, start_order, end_order],
-                                |row| row.get(0)
-                            ).ok().flatten();
-                            (prev_non_moved.unwrap_or(dest_order - 1000.0), dest_order)
-                        } else {
-                            let next_non_moved: Option<f64> = tx.query_row(
-                                "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2 AND (sort_order < ?3 OR sort_order > ?4)",
-                                rusqlite::params![session_id, dest_order, start_order, end_order],
-                                |row| row.get(0)
-                            ).ok().flatten();
-                            (dest_order, next_non_moved.unwrap_or(dest_order + 1000.0))
-                        }
-                    }
-                    other => bail!("Unknown move position: {}", other),
-                };
-
-                // Space the moved lines in the destination gap
-                let gap = gap_end - gap_start;
-                let step = gap / (moved_lines.len() as f64 + 1.0);
-
-                for (idx, line) in moved_lines.iter().enumerate() {
-                    let current_order = gap_start + step * ((idx + 1) as f64);
-                    tx.execute(
-                        "UPDATE lines SET sort_order = ?1 WHERE id = ?2;",
-                        rusqlite::params![current_order, line.id]
-                    )?;
-                    newly_modified_ids.push((line.seq, line.hash.clone()));
-                }
-            }
-            other => bail!("Unknown edit operation: {}", other),
-        }
-    }
-
-    // Build the final content
-    let final_content = {
-        let mut stmt = tx.prepare("SELECT content FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
-        let mut rows = stmt.query([&session_id])?;
-        let mut contents = Vec::new();
-        while let Some(row) = rows.next()? {
-            let line_content: String = row.get(0)?;
-            contents.push(line_content);
-        }
-        contents.join("\n") + "\n"
-    };
+    // Reconstruct the final content
+    let new_total_lines = repository.get_total_lines(&session_id)?;
+    let new_lines = repository.fetch_lines_range(&session_id, 1, new_total_lines)?;
+    let final_content = new_lines.iter().map(|(_, _, content)| content.as_str()).collect::<Vec<_>>().join("\n") + "\n";
 
     // Validate syntax
-    validate_syntax(filepath, &final_content, parser_manager).await?;
+    if let Err(err) = validate_syntax(filepath, &final_content, parser_manager).await {
+        // Rollback: restore backup lines
+        repository.restore_session_lines(&session_id, &backup_lines)?;
+        return Err(err);
+    }
 
-    // If syntax passes, save to disk
+    // Save to disk
     fs::write(filepath, &final_content)?;
     
     // Update session timestamp and file hash/mtime
@@ -632,99 +116,37 @@ pub async fn edit_lines(
     let new_file_hash = format!("{:x}", hasher.finalize());
     let new_mtime = path.metadata()?.modified()?
         .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
+    repository.update_session_metadata(&session_id, &new_file_hash, new_mtime)?;
 
-    tx.execute(
-        "UPDATE sessions SET file_hash = ?1, mtime = ?2, last_accessed_at = ?3 WHERE session_id = ?4;",
-        rusqlite::params![new_file_hash, new_mtime, now, session_id]
-    )?;
-
-    tx.commit()?;
-
-    // Generate output preview: read the current sorted lines from DB
-    let mut sorted_lines = Vec::new();
-    let mut missing_hashes = Vec::new();
-    {
-        let mut stmt = conn.prepare("SELECT id, sequence_id, line_hash, content, sort_order FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
-        let mut rows = stmt.query([&session_id])?;
-        
-        while let Some(row) = rows.next()? {
-            let db_id: i64 = row.get(0)?;
-            let seq: i64 = row.get(1)?;
-            let hash_opt: Option<String> = row.get(2)?;
-            let content: String = row.get(3)?;
-            let sort_order: f64 = row.get(4)?;
-            
-            let hash = match hash_opt {
-                Some(h) => h,
-                None => {
-                    let h = compute_line_hash(&content);
-                    missing_hashes.push((db_id, h.clone()));
-                    h
-                }
-            };
-            sorted_lines.push((seq, hash, content, sort_order));
-        }
-    }
-    
-    // Save any newly computed hashes back to the database
-    if !missing_hashes.is_empty() {
-        let mut update_stmt = conn.prepare("UPDATE lines SET line_hash = ?1 WHERE id = ?2;")?;
-        for (db_id, hash) in missing_hashes {
-            update_stmt.execute(rusqlite::params![hash, db_id])?;
-        }
-    }
-
+    // Generate output preview
     let mut items = Vec::new();
-    
-    // Find modified rows and show context around them
     let mut indices_to_show = std::collections::BTreeSet::new();
-    for (line_idx, (seq, hash, _, _)) in sorted_lines.iter().enumerate() {
-        if newly_modified_ids.iter().any(|(m_seq, m_hash)| m_seq == seq && m_hash == hash) {
-            // Show modified row plus 2 rows before and 2 rows after
+    for (line_idx, (seq, hash_opt, content)) in new_lines.iter().enumerate() {
+        let hash = hash_opt.clone().unwrap_or_else(|| compute_line_hash(content));
+        let line_id = format!("{:x}#{}", seq, hash);
+        if newly_modified_ids.contains(&line_id) {
             let start = line_idx.saturating_sub(2);
-            let end = std::cmp::min(line_idx + 2, sorted_lines.len().saturating_sub(1));
+            let end = std::cmp::min(line_idx + 2, new_lines.len().saturating_sub(1));
             for i in start..=end {
                 indices_to_show.insert(i);
             }
         }
     }
 
-    // Find closest lines to deleted ones and show context around them
-    for &del_order in &deleted_orders {
-        if sorted_lines.is_empty() {
-            continue;
-        }
-        let mut min_diff = f64::MAX;
-        let mut closest_idx = 0;
-        for (line_idx, (_, _, _, line_order)) in sorted_lines.iter().enumerate() {
-            let diff = (line_order - del_order).abs();
-            if diff < min_diff {
-                min_diff = diff;
-                closest_idx = line_idx;
-            }
-        }
-        let start = closest_idx.saturating_sub(2);
-        let end = std::cmp::min(closest_idx + 2, sorted_lines.len().saturating_sub(1));
-        for i in start..=end {
-            indices_to_show.insert(i);
-        }
-    }
-
     // Default to last 5 lines if no modification ids were gathered (e.g. all deletions)
     if indices_to_show.is_empty() {
-        let start = sorted_lines.len().saturating_sub(5);
-        for i in start..sorted_lines.len() {
+        let start = new_lines.len().saturating_sub(5);
+        for i in start..new_lines.len() {
             indices_to_show.insert(i);
         }
     }
 
     for idx in indices_to_show {
-        let (seq, hash, content, _) = &sorted_lines[idx];
-        let hex_seq = format!("{:x}", seq);
+        let (seq, hash_opt, content) = &new_lines[idx];
+        let hash = hash_opt.clone().unwrap_or_else(|| compute_line_hash(content));
+        let line_id = format!("{:x}#{}", seq, hash);
         items.push(serde_json::json!([
-            format!("{}#{}", hex_seq, hash),
+            line_id,
             idx + 1,
             content
         ]));
@@ -981,13 +403,10 @@ mod tests {
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
 
         // Verify DB content was rolled back (re-query content of line 2)
-        let conn = get_db_connection()?;
-        let content: String = conn.query_row(
-            "SELECT content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT 1 OFFSET 1",
-            [&_metadata.session_id],
-            |row| row.get(0)
-        )?;
-        assert_eq!(content.trim(), "let a = 1;");
+        let repository = SqliteSessionRepository;
+        let lines = repository.fetch_lines_range(&_metadata.session_id, 2, 2)?;
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].2.trim(), "let a = 1;");
 
         Ok(())
     }
@@ -1262,10 +681,8 @@ mod tests {
         let filepath_str = file_path.to_str().unwrap();
 
         // Ensure no stale session exists in DB from previous test runs
-        if let Ok(conn) = get_db_connection() {
-            let _ = conn.execute("DELETE FROM sessions WHERE filepath = ?1", [filepath_str]);
-            let _ = conn.execute("DELETE FROM lines WHERE session_id IN (SELECT session_id FROM sessions WHERE filepath = ?1)", [filepath_str]);
-        }
+        let repository = SqliteSessionRepository;
+        let _ = repository.delete_session(filepath_str);
 
         // Call edit_lines directly without calling init_edit_session.
         // We can append a line. Since it's append, target_id is ignored.

@@ -1,22 +1,17 @@
 use anyhow::Result;
-use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};
+use crate::tools::session_db::{
+    compute_line_hash, SessionRepository, SqliteSessionRepository,
+};
 
 fn fetch_and_format_lines(
+    repository: &impl SessionRepository,
     session_id: &str,
     start_line: usize,
     end_line: usize,
 ) -> Result<(serde_json::Value, usize, Option<String>)> {
-    let conn = get_db_connection()?;
-    ensure_hashes_for_range(&conn, session_id, start_line, end_line)?;
+    repository.ensure_hashes_range(session_id, start_line, end_line)?;
 
-    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
-    let offset = start_line.saturating_sub(1);
-
-    let mut stmt = conn.prepare(
-        "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
-    )?;
-
-    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
+    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
     let mut items = Vec::new();
 
     let mut current_idx = start_line;
@@ -24,11 +19,7 @@ fn fetch_and_format_lines(
     let mut cumulative_bytes = 0;
     let mut capacity_truncated = false;
 
-    while let Some(row) = rows.next()? {
-        let seq_id: i64 = row.get(0)?;
-        let line_hash_opt: Option<String> = row.get(1)?;
-        let content: String = row.get(2)?;
-
+    for (seq_id, line_hash_opt, content) in lines {
         let (final_content, line_id) = if content.chars().count() > 2048 {
             let truncated: String = content.chars().take(2048).collect();
             let final_content = format!("{}... [TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]", truncated);
@@ -73,28 +64,10 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
         anyhow::bail!("Invalid bounds: start_line ({}) cannot be greater than end_line ({})", start_line, end_line);
     }
 
-    let conn = get_db_connection()?;
+    let repository = SqliteSessionRepository;
     
-    let session_id = match conn.prepare("SELECT session_id, mtime FROM sessions WHERE filepath = ?1")?
-        .query_row([filepath], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
-    {
-        Ok((sid, old_mtime)) => {
-            let path = std::path::Path::new(filepath);
-            let current_mtime = path.metadata()?.modified()?
-                .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
-            if current_mtime != old_mtime {
-                let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
-                meta.session_id
-            } else {
-                sid
-            }
-        }
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
-            meta.session_id
-        }
-        Err(err) => return Err(anyhow::Error::from(err)),
-    };
+    let meta = repository.init_session(filepath, false)?;
+    let session_id = meta.session_id;
 
     let requested_len = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
     let capped_end_line = if requested_len > 800 {
@@ -103,17 +76,13 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
         end_line
     };
 
-    let total_lines: usize = conn.query_row(
-        "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
-        rusqlite::params![session_id],
-        |row| row.get(0)
-    )?;
+    let total_lines = repository.get_total_lines(&session_id)?;
 
     let line_count_capped = requested_len > 800 && total_lines > 800;
 
     let total_bytes = std::path::Path::new(filepath).metadata()?.len();
 
-    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(&session_id, start_line, capped_end_line)?;
+    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(&repository, &session_id, start_line, capped_end_line)?;
 
     let mut message = None;
     if line_count_capped {
@@ -162,12 +131,14 @@ pub fn create_lines(filepath: &str, content: &str) -> Result<String> {
 
     std::fs::write(filepath, content)?;
 
+    let repository = SqliteSessionRepository;
+
     let setup_db_and_fetch = || -> Result<(serde_json::Value, usize, Option<String>, usize, u64)> {
-        let meta = crate::tools::session_db::init_edit_session(filepath, false)?;
+        let meta = repository.init_session(filepath, false)?;
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if meta.total_lines > 0 {
             let end_line = if meta.total_lines > 800 { 800 } else { meta.total_lines };
-            let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(&meta.session_id, 1, end_line)?;
+            let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(&repository, &meta.session_id, 1, end_line)?;
             Ok((items, actual_end_line, capacity_warning, meta.total_lines, total_bytes))
         } else {
             Ok((serde_json::json!([]), 0, None, 0, total_bytes))

@@ -930,7 +930,7 @@ pub fn compute_line_hash(content: &str) -> String {
     hex[..4].to_string()
 }
 
-pub fn ensure_hashes_for_range(conn: &Connection, session_id: &str, start_line: usize, end_line: usize) -> Result<()> {
+fn ensure_hashes_for_range(conn: &Connection, session_id: &str, start_line: usize, end_line: usize) -> Result<()> {
     let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
     let offset = start_line.saturating_sub(1);
 

@@ -119,21 +119,34 @@ pub fn view_lines(
         vec!["id", "n", "content"]
     };
 
-    let mut result_val = serde_json::json!({
-        "columns": columns,
-        "lines": items,
-        "total_lines": total_lines,
-        "total_bytes": total_bytes,
-        "showing_start": start_line,
-        "showing_end": actual_end_line,
-        "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
-    });
+    let items_array = items
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Expected items to be a JSON array"))?;
 
-    if let Some(msg) = message {
-        result_val["message"] = serde_json::json!(msg);
+    let mut lines_strs = Vec::new();
+    for item in items_array {
+        lines_strs.push(serde_json::to_string(item)?);
     }
 
-    let output = serde_json::to_string_pretty(&result_val)?;
+    let lines_formatted = if only_ids_bool {
+        format!("[{}]", lines_strs.join(", "))
+    } else {
+        format!("[\n    {}\n  ]", lines_strs.join(",\n    "))
+    };
+
+    let mut parts = Vec::new();
+    parts.push(format!("  \"columns\": {}", serde_json::to_string(&columns)?));
+    parts.push(format!("  \"lines\": {}", lines_formatted));
+    if let Some(msg) = message {
+        parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
+    }
+    parts.push(format!("  \"showing_end\": {}", actual_end_line));
+    parts.push(format!("  \"showing_start\": {}", start_line));
+    parts.push(format!("  \"tip\": \"Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above.\""));
+    parts.push(format!("  \"total_bytes\": {}", total_bytes));
+    parts.push(format!("  \"total_lines\": {}", total_lines));
+
+    let output = format!("{{\n{}\n}}", parts.join(",\n"));
     Ok(output)
 }
 

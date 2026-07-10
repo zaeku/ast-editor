@@ -1,4 +1,5 @@
 use ast_editor::tools::session_db;
+use ast_editor::tools::session_db::SqliteSessionRepository;
 use ast_editor::tools::view;
 use ast_editor::tools::edit;
 use ast_editor::parser::ParserManager;
@@ -73,9 +74,10 @@ async fn test_sqlite_session_lifecycle() {
 async fn test_view_lines_lazy_hashing() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("lazy.rs", "fn main() {\n    println!(\"hello\");\n}\n");
+    let repository = SqliteSessionRepository;
     
     // Retrieve lines (this triggers lazy hashing for range)
-    let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
@@ -93,11 +95,12 @@ async fn test_view_lines_lazy_hashing() {
 async fn test_edit_operations_and_ast_validation() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("edit.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
 
     let pm = create_test_parser_manager();
 
     // Fetch the correct target ID for line 2
-    let view_res = view::view_lines(file.path_str(), 2, 2).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 2, 2).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -108,7 +111,7 @@ async fn test_edit_operations_and_ast_validation() {
         content: Some("let a = ;".to_string()), // missing value
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(file.path_str(), invalid_edits, &pm).await;
+    let edit_res = edit::edit_lines(&repository, file.path_str(), invalid_edits, &pm).await;
     
     if let Err(ref e) = edit_res {
         println!("DEBUG: invalid edit error = {:?}", e);
@@ -128,7 +131,7 @@ async fn test_edit_operations_and_ast_validation() {
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(file.path_str(), valid_edits, &pm).await.unwrap();
+    let edit_res = edit::edit_lines(&repository, file.path_str(), valid_edits, &pm).await.unwrap();
     assert!(edit_res.contains("let a = 2;"));
 
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -139,11 +142,12 @@ async fn test_edit_operations_and_ast_validation() {
 async fn test_transactional_deletes_and_inserts() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("trans_ops.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
+    let repository = SqliteSessionRepository;
 
     let pm = create_test_parser_manager();
 
     // Get Line IDs
-    let view_res = view::view_lines(file.path_str(), 1, 4).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 4).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     
@@ -178,7 +182,7 @@ async fn test_transactional_deletes_and_inserts() {
         }
     ];
 
-    let edit_preview = edit::edit_lines(file.path_str(), edits, &pm).await.unwrap();
+    let edit_preview = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
     
     // The final file should be:
     // fn main() {
@@ -198,11 +202,12 @@ async fn test_transactional_deletes_and_inserts() {
 async fn test_concurrency_error_out_of_sync_mtime() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("concurrency.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
 
     let pm = create_test_parser_manager();
 
     // Get line ID
-    let view_res = view::view_lines(file.path_str(), 2, 2).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 2, 2).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -218,7 +223,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
         ..Default::default()
     }];
 
-    let edit_res = edit::edit_lines(file.path_str(), edits, &pm).await;
+    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm).await;
     assert!(edit_res.is_err());
     let err_msg = edit_res.unwrap_err().to_string();
     assert!(err_msg.contains("CONCURRENCY_ERROR"));
@@ -228,6 +233,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
 async fn test_integration_append_operation() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("append_integration.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
 
     let pm = create_test_parser_manager();
 
@@ -239,7 +245,7 @@ async fn test_integration_append_operation() {
         ..Default::default()
     }];
 
-    let preview = edit::edit_lines(file.path_str(), edits, &pm).await.unwrap();
+    let preview = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
     assert!(preview.contains("fn additional() {"));
     
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -250,11 +256,12 @@ async fn test_integration_append_operation() {
 async fn test_integration_advanced_operations() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("advanced_int.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
+    let repository = SqliteSessionRepository;
 
     let pm = create_test_parser_manager();
 
     // 1. Get IDs for lines
-    let view_res = view::view_lines(file.path_str(), 1, 4).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 4).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let _id_main = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -270,14 +277,14 @@ async fn test_integration_advanced_operations() {
         ..Default::default()
     }];
 
-    let preview = edit::edit_lines(file.path_str(), edits, &pm).await.unwrap();
+    let preview = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
     assert!(preview.contains("let val = 100;"));
     
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
 
     // Get new IDs
-    let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let id_main_new = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -292,7 +299,7 @@ async fn test_integration_advanced_operations() {
         ..Default::default()
     }];
 
-    let preview_move = edit::edit_lines(file.path_str(), edits_move, &pm).await.unwrap();
+    let preview_move = edit::edit_lines(&repository, file.path_str(), edits_move, &pm).await.unwrap();
     assert!(preview_move.contains("let val = 100;"));
 
     let content_move = fs::read_to_string(file.path_str()).unwrap();
@@ -303,6 +310,7 @@ async fn test_integration_advanced_operations() {
 async fn test_integration_insert_without_target_id() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("insert_jit_no_target.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
 
     let pm = create_test_parser_manager();
 
@@ -314,7 +322,7 @@ async fn test_integration_insert_without_target_id() {
         ..Default::default()
     }];
 
-    let preview1 = edit::edit_lines(file.path_str(), edits_before, &pm).await.unwrap();
+    let preview1 = edit::edit_lines(&repository, file.path_str(), edits_before, &pm).await.unwrap();
     assert!(preview1.contains("// Prepend header"));
     
     let content1 = fs::read_to_string(file.path_str()).unwrap();
@@ -328,7 +336,7 @@ async fn test_integration_insert_without_target_id() {
         ..Default::default()
     }];
 
-    let preview2 = edit::edit_lines(file.path_str(), edits_after, &pm).await.unwrap();
+    let preview2 = edit::edit_lines(&repository, file.path_str(), edits_after, &pm).await.unwrap();
     assert!(preview2.contains("// Append footer"));
 
     let content2 = fs::read_to_string(file.path_str()).unwrap();
@@ -340,6 +348,7 @@ async fn test_integration_insert_without_target_id() {
 async fn test_integration_create_lines_flow() {
     let _lock = acquire_db_lock();
     let pm = create_test_parser_manager();
+    let repository = SqliteSessionRepository;
 
     let pid = std::process::id();
     let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -351,7 +360,7 @@ async fn test_integration_create_lines_flow() {
 
     // 1. Create the new file via calling `create_lines` tool logic
     let initial_content = "fn main() {\n    let x = 42;\n}\n";
-    let create_res = view::create_lines(&filepath_str, initial_content).unwrap();
+    let create_res = view::create_lines(&repository, &filepath_str, initial_content).unwrap();
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
 
     assert_eq!(val["status"], "success");
@@ -380,7 +389,7 @@ async fn test_integration_create_lines_flow() {
     assert_eq!(line2[2].as_str().unwrap(), "}");
 
     // 3. Try calling `create_lines` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
-    let dup_res = view::create_lines(&filepath_str, "different content");
+    let dup_res = view::create_lines(&repository, &filepath_str, "different content");
     assert!(dup_res.is_err());
     let dup_err = dup_res.unwrap_err().to_string();
     assert!(dup_err.contains("FILE_ALREADY_EXISTS"));
@@ -393,7 +402,7 @@ async fn test_integration_create_lines_flow() {
         ..Default::default()
     }];
 
-    let edit_res = edit::edit_lines(&filepath_str, edits, &pm).await.unwrap();
+    let edit_res = edit::edit_lines(&repository, &filepath_str, edits, &pm).await.unwrap();
     assert!(edit_res.contains("let x = 100;"));
 
     // Verify modified contents on disk
@@ -411,12 +420,13 @@ async fn test_integration_create_lines_flow() {
 async fn test_integration_view_lines_truncation_and_protection() {
     let _lock = acquire_db_lock();
     let pm = create_test_parser_manager();
+    let repository = SqliteSessionRepository;
 
     let long_line = "a".repeat(2500);
     let content = format!("fn first() {{\n{}\n}}\n", long_line);
     let file = TestFile::new("truncation_protection.rs", &content);
 
-    let view_res = view::view_lines(file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
@@ -437,7 +447,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
         content: Some("    let x = 1;".to_string()),
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(file.path_str(), edits, &pm).await;
+    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm).await;
     assert!(edit_res.is_err());
     let err_msg = edit_res.unwrap_err().to_string();
     assert!(err_msg.contains("LINE_TOO_LONG_ERROR"));
@@ -452,6 +462,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
 #[tokio::test]
 async fn test_integration_view_lines_capacity_cap() {
     let _lock = acquire_db_lock();
+    let repository = SqliteSessionRepository;
 
     let line_content = "x".repeat(1000);
     let mut lines = Vec::new();
@@ -461,7 +472,7 @@ async fn test_integration_view_lines_capacity_cap() {
     let content = lines.join("\n");
     let file = TestFile::new("capacity_cap.txt", &content);
 
-    let view_res = view::view_lines(file.path_str(), 1, 50).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 50).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     let returned_lines = val["lines"].as_array().unwrap();

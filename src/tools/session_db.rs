@@ -1331,12 +1331,14 @@ mod tests {
         fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
+        let repository = SqliteSessionRepository;
+
         // 1. Initialize session
         let metadata = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 3);
 
         // 2. View all lines (1 to 3)
-        let output = crate::tools::view::view_lines(filepath_str, 1, 3)?;
+        let output = crate::tools::view::view_lines(&repository, filepath_str, 1, 3)?;
         
         // Verify structure
         let val: serde_json::Value = serde_json::from_str(&output)?;
@@ -1355,7 +1357,7 @@ mod tests {
         assert_eq!(line2[2].as_str().unwrap(), "}");
 
         // 3. View sub-range (2 to 2)
-        let sub_output = crate::tools::view::view_lines(filepath_str, 2, 2)?;
+        let sub_output = crate::tools::view::view_lines(&repository, filepath_str, 2, 2)?;
         let sub_val: serde_json::Value = serde_json::from_str(&sub_output)?;
         let sub_lines = sub_val["lines"].as_array().unwrap();
         assert_eq!(sub_lines.len(), 1);
@@ -1363,8 +1365,8 @@ mod tests {
         assert!(sub_line0[0].as_str().unwrap().starts_with("2#"));
 
         // 4. Test bounds validation
-        assert!(crate::tools::view::view_lines(filepath_str, 0, 3).is_err());
-        assert!(crate::tools::view::view_lines(filepath_str, 3, 1).is_err());
+        assert!(crate::tools::view::view_lines(&repository, filepath_str, 0, 3).is_err());
+        assert!(crate::tools::view::view_lines(&repository, filepath_str, 3, 1).is_err());
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -1382,8 +1384,10 @@ mod tests {
         fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
+        let repository = SqliteSessionRepository;
+
         // Call view_lines directly without calling init_edit_session
-        let output = crate::tools::view::view_lines(filepath_str, 1, 3)?;
+        let output = crate::tools::view::view_lines(&repository, filepath_str, 1, 3)?;
         
         let val: serde_json::Value = serde_json::from_str(&output)?;
         let lines = val["lines"].as_array().unwrap();

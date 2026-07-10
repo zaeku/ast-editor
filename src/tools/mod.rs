@@ -201,7 +201,8 @@ impl ToolDispatcher {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).context("Missing start_line")? as usize;
                 let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).context("Missing end_line")? as usize;
-                let text = view::view_lines(filepath, start_line, end_line)?;
+                let repository = session_db::SqliteSessionRepository;
+                let text = view::view_lines(&repository, filepath, start_line, end_line)?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,
@@ -211,7 +212,8 @@ impl ToolDispatcher {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let edits_val = arguments.get("edits").context("Missing edits array")?;
                 let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
-                let text = edit::edit_lines(filepath, edits, parser_manager).await?;
+                let repository = session_db::SqliteSessionRepository;
+                let text = edit::edit_lines(&repository, filepath, edits, parser_manager).await?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,
@@ -220,7 +222,8 @@ impl ToolDispatcher {
             "create_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let content = arguments.get("content").and_then(|v| v.as_str()).context("Missing content")?;
-                let text = view::create_lines(filepath, content)?;
+                let repository = session_db::SqliteSessionRepository;
+                let text = view::create_lines(&repository, filepath, content)?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crate::tools::session_db::{
-    compute_line_hash, SessionRepository, SqliteSessionRepository,
+    compute_line_hash, SessionRepository,
 };
 
 fn fetch_and_format_lines(
@@ -56,7 +56,12 @@ fn fetch_and_format_lines(
     Ok((serde_json::Value::Array(items), actual_end_line, warning_msg))
 }
 
-pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
+pub fn view_lines(
+    repository: &impl SessionRepository,
+    filepath: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<String> {
     if start_line == 0 {
         anyhow::bail!("Invalid bounds: start_line must be greater than 0");
     }
@@ -64,8 +69,6 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
         anyhow::bail!("Invalid bounds: start_line ({}) cannot be greater than end_line ({})", start_line, end_line);
     }
 
-    let repository = SqliteSessionRepository;
-    
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;
 
@@ -82,7 +85,7 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
 
     let total_bytes = std::path::Path::new(filepath).metadata()?.len();
 
-    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(&repository, &session_id, start_line, capped_end_line)?;
+    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &session_id, start_line, capped_end_line)?;
 
     let mut message = None;
     if line_count_capped {
@@ -115,11 +118,20 @@ pub fn view_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<
 }
 
 #[deprecated(since = "0.1.0", note = "use view_lines instead")]
-pub fn view_session_lines(filepath: &str, start_line: usize, end_line: usize) -> Result<String> {
-    view_lines(filepath, start_line, end_line)
+pub fn view_session_lines(
+    repository: &impl SessionRepository,
+    filepath: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<String> {
+    view_lines(repository, filepath, start_line, end_line)
 }
 
-pub fn create_lines(filepath: &str, content: &str) -> Result<String> {
+pub fn create_lines(
+    repository: &impl SessionRepository,
+    filepath: &str,
+    content: &str,
+) -> Result<String> {
     let path = std::path::Path::new(filepath);
     if path.exists() {
         anyhow::bail!("FILE_ALREADY_EXISTS: File already exists at: {}", filepath);
@@ -131,14 +143,12 @@ pub fn create_lines(filepath: &str, content: &str) -> Result<String> {
 
     std::fs::write(filepath, content)?;
 
-    let repository = SqliteSessionRepository;
-
     let setup_db_and_fetch = || -> Result<(serde_json::Value, usize, Option<String>, usize, u64)> {
         let meta = repository.init_session(filepath, false)?;
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if meta.total_lines > 0 {
             let end_line = if meta.total_lines > 800 { 800 } else { meta.total_lines };
-            let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(&repository, &meta.session_id, 1, end_line)?;
+            let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &meta.session_id, 1, end_line)?;
             Ok((items, actual_end_line, capacity_warning, meta.total_lines, total_bytes))
         } else {
             Ok((serde_json::json!([]), 0, None, 0, total_bytes))
@@ -185,6 +195,7 @@ pub fn create_lines(filepath: &str, content: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::session_db::SqliteSessionRepository;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
 
@@ -200,7 +211,8 @@ mod tests {
         let filepath_str = file_path.to_str().unwrap();
 
         let content = "line 1\nline 2\nline 3";
-        let output = create_lines(filepath_str, content)?;
+        let repository = SqliteSessionRepository;
+        let output = create_lines(&repository, filepath_str, content)?;
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");
@@ -240,7 +252,8 @@ mod tests {
         fs::write(filepath_str, initial_content)?;
 
         // Try to create again
-        let res = create_lines(filepath_str, "new content");
+        let repository = SqliteSessionRepository;
+        let res = create_lines(&repository, filepath_str, "new content");
         assert!(res.is_err());
         let err_msg = res.err().unwrap().to_string();
         assert!(err_msg.contains("FILE_ALREADY_EXISTS"));
@@ -267,7 +280,8 @@ mod tests {
 
         // Write content containing a null byte to trigger BINARY_FILE_ERROR during DB initialization
         let content = "hello \x00 world";
-        let res = create_lines(filepath_str, content);
+        let repository = SqliteSessionRepository;
+        let res = create_lines(&repository, filepath_str, content);
 
         assert!(res.is_err());
         let err_msg = res.err().unwrap().to_string();
@@ -297,10 +311,11 @@ mod tests {
             lines.push(format!("line {}", idx));
         }
         let content = lines.join("\n");
-        let _ = create_lines(filepath_str, &content)?;
+        let repository = SqliteSessionRepository;
+        let _ = create_lines(&repository, filepath_str, &content)?;
 
         // View lines from 1 to 1000
-        let output = view_lines(filepath_str, 1, 1000)?;
+        let output = view_lines(&repository, filepath_str, 1, 1000)?;
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         assert_eq!(val["total_lines"], 1000);
@@ -331,9 +346,10 @@ mod tests {
         // Line 1: normal, Line 2: 2500 characters, Line 3: normal
         let long_line = "A".repeat(2500);
         let content = format!("short 1\n{}\nshort 3", long_line);
-        let _ = create_lines(filepath_str, &content)?;
+        let repository = SqliteSessionRepository;
+        let _ = create_lines(&repository, filepath_str, &content)?;
 
-        let output = view_lines(filepath_str, 1, 3)?;
+        let output = view_lines(&repository, filepath_str, 1, 3)?;
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         let lines_array = val["lines"].as_array().unwrap();
@@ -372,9 +388,10 @@ mod tests {
             lines.push(line_content.clone());
         }
         let content = lines.join("\n");
-        let _ = create_lines(filepath_str, &content)?;
+        let repository = SqliteSessionRepository;
+        let _ = create_lines(&repository, filepath_str, &content)?;
 
-        let output = view_lines(filepath_str, 1, 50)?;
+        let output = view_lines(&repository, filepath_str, 1, 50)?;
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         let lines_array = val["lines"].as_array().unwrap();

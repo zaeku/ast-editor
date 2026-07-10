@@ -165,7 +165,7 @@ pub fn create_lines(
 
     std::fs::write(filepath, content)?;
 
-    let return_ids_bool = return_ids.unwrap_or(true);
+    let return_ids_bool = return_ids.unwrap_or(false);
 
     let setup_db_and_fetch = || -> Result<(Option<serde_json::Value>, Option<String>, usize, u64)> {
         let meta = repository.init_session(filepath, false)?;
@@ -253,7 +253,7 @@ mod tests {
 
         let content = "line 1\nline 2\nline 3";
         let repository = SqliteSessionRepository;
-        let output = create_lines(&repository, filepath_str, content, None)?;
+        let output = create_lines(&repository, filepath_str, content, Some(true))?;
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");

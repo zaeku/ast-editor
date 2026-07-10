@@ -372,7 +372,7 @@ async fn test_integration_create_lines_flow() {
 
     // 1. Create the new file via calling `create_lines` tool logic
     let initial_content = "fn main() {\n    let x = 42;\n}\n";
-    let create_res = view::create_lines(&repository, &filepath_str, initial_content, None).unwrap();
+    let create_res = view::create_lines(&repository, &filepath_str, initial_content, Some(true)).unwrap();
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
 
     assert_eq!(val["status"], "success");

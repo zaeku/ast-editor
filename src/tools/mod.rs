@@ -185,7 +185,7 @@ impl ToolDispatcher {
                         },
                         "return_ids": {
                             "type": "boolean",
-                            "default": true,
+                            "default": false,
                             "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens."
                         }
                     },

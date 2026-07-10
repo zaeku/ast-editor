@@ -132,7 +132,9 @@ async fn test_edit_operations_and_ast_validation() {
         ..Default::default()
     }];
     let edit_res = edit::edit_lines(&repository, file.path_str(), valid_edits, &pm).await.unwrap();
-    assert!(edit_res.contains("let a = 2;"));
+    let res: serde_json::Value = serde_json::from_str(&edit_res).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
 
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert!(content.contains("let a = 2;"));
@@ -183,6 +185,9 @@ async fn test_transactional_deletes_and_inserts() {
     ];
 
     let edit_preview = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
+    let res: serde_json::Value = serde_json::from_str(&edit_preview).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
     
     // The final file should be:
     // fn main() {
@@ -193,9 +198,6 @@ async fn test_transactional_deletes_and_inserts() {
     assert!(content.contains("let a = 1;"));
     assert!(content.contains("let c = 3;"));
     assert!(!content.contains("let b = 2;"));
-
-    // Verify preview output contains the new/modified lines
-    assert!(edit_preview.contains("let c = 3;"));
 }
 
 #[tokio::test]
@@ -246,7 +248,9 @@ async fn test_integration_append_operation() {
     }];
 
     let preview = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
-    assert!(preview.contains("fn additional() {"));
+    let res: serde_json::Value = serde_json::from_str(&preview).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
     
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert!(content.contains("fn main() {\n    let a = 1;\n}\nfn additional() {\n}\n"));
@@ -278,7 +282,9 @@ async fn test_integration_advanced_operations() {
     }];
 
     let preview = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
-    assert!(preview.contains("let val = 100;"));
+    let res: serde_json::Value = serde_json::from_str(&preview).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
     
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
@@ -300,7 +306,9 @@ async fn test_integration_advanced_operations() {
     }];
 
     let preview_move = edit::edit_lines(&repository, file.path_str(), edits_move, &pm).await.unwrap();
-    assert!(preview_move.contains("let val = 100;"));
+    let res: serde_json::Value = serde_json::from_str(&preview_move).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
 
     let content_move = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content_move, "    let val = 100;\nfn main() {\n}\n");
@@ -323,7 +331,9 @@ async fn test_integration_insert_without_target_id() {
     }];
 
     let preview1 = edit::edit_lines(&repository, file.path_str(), edits_before, &pm).await.unwrap();
-    assert!(preview1.contains("// Prepend header"));
+    let res: serde_json::Value = serde_json::from_str(&preview1).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
     
     let content1 = fs::read_to_string(file.path_str()).unwrap();
     assert!(content1.starts_with("// Prepend header\nfn main() {"), "content1 was: {:?}", content1);
@@ -337,7 +347,9 @@ async fn test_integration_insert_without_target_id() {
     }];
 
     let preview2 = edit::edit_lines(&repository, file.path_str(), edits_after, &pm).await.unwrap();
-    assert!(preview2.contains("// Append footer"));
+    let res: serde_json::Value = serde_json::from_str(&preview2).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
 
     let content2 = fs::read_to_string(file.path_str()).unwrap();
     assert!(content2.ends_with("// Append footer\n"), "content2 was: {:?}", content2);
@@ -393,7 +405,9 @@ async fn test_integration_create_lines_flow() {
     }];
 
     let edit_res = edit::edit_lines(&repository, &filepath_str, edits, &pm).await.unwrap();
-    assert!(edit_res.contains("let x = 100;"));
+    let res: serde_json::Value = serde_json::from_str(&edit_res).unwrap();
+    assert_eq!(res["status"], "success");
+    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
 
     // Verify modified contents on disk
     let disk_content = fs::read_to_string(&filepath_str).unwrap();

@@ -2,7 +2,7 @@ use anyhow::{Result, Context, bail};
 use std::fs;
 pub use crate::tools::session_db::LineEdit;
 use crate::tools::session_db::{
-    compute_line_hash, parse_line_id, SessionRepository,
+    parse_line_id, SessionRepository,
 };
 
 fn check_language_supported(path: &str) -> bool {
@@ -118,44 +118,9 @@ pub async fn edit_lines(
         .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
     repository.update_session_metadata(&session_id, &new_file_hash, new_mtime)?;
 
-    // Generate output preview
-    let mut items = Vec::new();
-    let mut indices_to_show = std::collections::BTreeSet::new();
-    for (line_idx, (seq, hash_opt, content)) in new_lines.iter().enumerate() {
-        let hash = hash_opt.clone().unwrap_or_else(|| compute_line_hash(content));
-        let line_id = format!("{:x}#{}", seq, hash);
-        if newly_modified_ids.contains(&line_id) {
-            let start = line_idx.saturating_sub(2);
-            let end = std::cmp::min(line_idx + 2, new_lines.len().saturating_sub(1));
-            for i in start..=end {
-                indices_to_show.insert(i);
-            }
-        }
-    }
-
-    // Default to last 5 lines if no modification ids were gathered (e.g. all deletions)
-    if indices_to_show.is_empty() {
-        let start = new_lines.len().saturating_sub(5);
-        for i in start..new_lines.len() {
-            indices_to_show.insert(i);
-        }
-    }
-
-    for idx in indices_to_show {
-        let (seq, hash_opt, content) = &new_lines[idx];
-        let hash = hash_opt.clone().unwrap_or_else(|| compute_line_hash(content));
-        let line_id = format!("{:x}#{}", seq, hash);
-        items.push(serde_json::json!([
-            line_id,
-            idx + 1,
-            content
-        ]));
-    }
-
     let result_val = serde_json::json!({
-        "columns": ["id", "n", "content"],
-        "lines": items,
-        "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above."
+        "status": "success",
+        "modified_ids": newly_modified_ids
     });
 
     let output = serde_json::to_string_pretty(&result_val)?;
@@ -266,7 +231,12 @@ mod tests {
             }
         ];
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("let a = 42;"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        let (seq, _) = parse_line_id(&target_id)?;
+        let expected_prefix = format!("{:x}#", seq);
+        assert!(modified.iter().any(|id| id.as_str().unwrap().starts_with(&expected_prefix)));
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n}\n");
 
         // Refresh metadata/session
@@ -285,7 +255,9 @@ mod tests {
             }
         ];
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("let b = 2;"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n    let b = 2;\n}\n");
 
         // Refresh session to get latest target IDs
@@ -293,6 +265,7 @@ mod tests {
         let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 4, None)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
+        assert!(modified.iter().any(|id| id.as_str().unwrap() == b_id));
 
         // 3. Test delete
         let edits = vec![
@@ -438,7 +411,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("fn main() {"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n}\n");
 
         Ok(())
@@ -474,12 +450,15 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        
-        // The deleted line was `let b = 2;`.
-        // The remaining lines around it should be rendered in the preview.
-        assert!(preview.contains("let a = 1;"));
-        assert!(preview.contains("let c = 3;"));
-        assert!(!preview.contains("let b = 2;"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
+
+        let disk_content = fs::read_to_string(&file_path)?;
+        assert!(disk_content.contains("let a = 1;"));
+        assert!(disk_content.contains("let c = 3;"));
+        assert!(!disk_content.contains("let b = 2;"));
 
         Ok(())
     }
@@ -507,7 +486,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("pub fn foo()"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\n");
 
         Ok(())
@@ -536,8 +518,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("pub fn bar() -> i32"));
-        assert!(preview.contains("42"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\npub fn bar() -> i32 {\n    42\n}\n");
 
         Ok(())
@@ -596,7 +580,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("use std::collections::HashMap;"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "use std::collections::HashMap;\n\npub fn hello() {}\n"
@@ -633,7 +620,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("let val = 42;"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "pub fn foo() {\n    let val = 42;\n}\n"
@@ -674,7 +664,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("pub fn foo() {}"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "pub fn foo() {}\npub fn main() {\n    foo();\n}\n"
@@ -707,7 +700,10 @@ mod tests {
         ];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(preview.contains("line 3"));
+        let res: serde_json::Value = serde_json::from_str(&preview)?;
+        assert_eq!(res["status"], "success");
+        let modified = res["modified_ids"].as_array().unwrap();
+        assert!(!modified.is_empty());
 
         let content = fs::read_to_string(&file_path)?;
         assert_eq!(content, "line 1\nline 2\nline 3\n");

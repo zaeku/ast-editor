@@ -41,16 +41,17 @@ $$\text{(Create Lines } \lor \text{ View Lines)} \rightarrow \text{Edit Lines}$$
 *Note: Session initialization is handled automatically either JIT (Just-in-Time) behind the scenes or explicitly during file creation.*
 
 #### A. `create_lines`
-Creates a brand-new file with the initial content and initializes its line editing session. It returns the list of lines with unique IDs immediately, avoiding an extra view call.
+Creates a brand-new file with the initial content and initializes its line editing session. By default, it returns the list of lines with unique IDs immediately.
 *   **Safety Features**: To prevent accidental overwriting, the tool fails if the file already exists (returns an error matching `FILE_ALREADY_EXISTS`).
 *   **Arguments**:
     *   `filepath` (string, required): Absolute path to the file.
     *   `content` (string, required): Initial text content of the file.
+    *   `return_ids` (boolean, optional, default: `true`): If true, returns the flat array of generated Line IDs. Set to false to omit IDs, bypass line hashing, and save token costs.
 *   **Response Safety Limits**:
     *   **Line Count Cap**: Output lines are capped at a maximum of 800 lines.
     *   **Response Capacity Cap**: Output payload size is limited to 45,000 bytes (approx. 44KB) to protect the context window.
     *   **Line Length Cap**: Lines exceeding 2,048 characters are truncated in the returned view with a truncation notice and are given a `#TRUNC` suffix in their Line ID (e.g., `12#TRUNC`).
-*   **Output Format**: Returns a JSON object indicating the status, a success/warning message (containing truncation details if any limits were hit), the column mapping, the list of generated line items, and session metadata (`total_lines`, `total_bytes`, `showing_start`, `showing_end`).
+*   **Output Format**: Returns a JSON object indicating the status, a success/warning message (containing truncation details if any limits were hit), the list of generated line IDs (if `return_ids` is true/omitted), and session metadata (`total_lines`, `total_bytes`).
 
 #### B. `view_lines`
 Retrieves lines along with their persistent unique Line IDs for a given file range. If no session exists for the file, it automatically JIT-initializes the session.
@@ -58,6 +59,7 @@ Retrieves lines along with their persistent unique Line IDs for a given file ran
     *   `filepath` (string, required): Absolute path to the file.
     *   `start_line` (integer, required): 1-indexed starting line.
     *   `end_line` (integer, required): 1-indexed ending line.
+    *   `only_ids` (boolean, optional, default: `false`): If true, only returns Line IDs and line numbers, dropping the `"content"` column. Useful for saving tokens when querying large sections of a file to obtain target IDs.
 *   **Response Safety Limits**:
     *   **Line Count Cap**: Output lines are capped at a maximum of 800 lines per call. If the requested range is larger, it will be automatically clamped to 800 lines and a warning will be added.
     *   **Response Capacity Cap**: Output payload size is limited to 45,000 bytes (approx. 44KB) to protect the context window. If the cumulative content length reaches this limit, lines are truncated and a warning is added.
@@ -93,25 +95,41 @@ Each element in the `edits` array of `edit_lines` is an object representing a si
 Tools returning line lists return a structured, type-safe, self-documenting JSON format.
 
 #### `create_lines` Output Format
-Returns a confirmation status, a success/warning message, lines list, and session metadata:
+Returns a confirmation status, a success/warning message, lines list (if `return_ids` is true/omitted), and session metadata.
+
+If `return_ids` is true or omitted:
 ```json
 {
   "status": "success",
   "message": "File successfully created and line editing session initialized.",
-  "columns": ["id", "n", "content"],
-  "lines": [
-    ["1#9d33", 1, "use anyhow::{Result, Context};"],
-    ["2#c3b3", 2, "use crate::tools::session_db::{get_db_connection, ensure_hashes_for_range, compute_line_hash};"]
+  "ids": [
+    "1#9d33",
+    "2#c3b3"
   ],
   "total_lines": 2,
-  "total_bytes": 135,
-  "showing_start": 1,
-  "showing_end": 2
+  "total_bytes": 135
 }
 ```
 
-#### `view_lines` and `edit_lines` Output Format
-`view_lines` and `edit_lines` previews return a structured layout with explicit columns metadata, session statistics, and warnings if any capacity/line limits were reached:
+If `return_ids` is false:
+```json
+{
+  "status": "success",
+  "message": "File successfully created and line editing session initialized.",
+  "total_lines": 2,
+  "total_bytes": 135
+}
+```
+
+#### Agent-Native Positioning Workflow (Token Savings)
+When creating large files via `create_lines`, passing `return_ids: false` saves significant token costs by bypassing line serialization and hashing.
+Since the file has just been initialized:
+1. **Implicit Mapping**: The agent knows the 1-indexed line numbers correspond 1-to-1 to the indices of the input content split by `\n`.
+2. **Local ID Construction**: For a newly created file, the agent can locally construct the Line ID for line number $N$ using the hexadecimal format of $N$ and the first 4 characters of the SHA-1 hex hash of the line content (e.g., `<hex_N>#<sha1_prefix>`).
+3. **Querying as Needed**: If the agent wants to edit a specific range later, it can call `view_lines` with `only_ids: true` for just that narrow range. This retrieves only the necessary Line IDs and line numbers, keeping the payload content-free and token-efficient.
+
+#### `view_lines` Output Format
+`view_lines` returns a structured layout with explicit columns metadata, session statistics, and warnings if any capacity/line limits were reached:
 ```json
 {
   "columns": ["id", "n", "content"],
@@ -127,13 +145,24 @@ Returns a confirmation status, a success/warning message, lines list, and sessio
   "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1#9d33) shown above."
 }
 ```
-*   `columns`: Describes the array schema (`"id"` is line ID, `"n"` is line number, `"content"` is code/text content).
-*   `lines`: An array of JSON arrays, where each entry matches the columns order `[id, n, content]`.
+*   `columns`: Describes the array schema. When `only_ids` is true, this is `["id", "n"]`. When `only_ids` is false/omitted, this is `["id", "n", "content"]`.
+*   `lines`: An array of JSON arrays, matching the columns order.
 *   `total_lines` (integer): The total number of lines in the file's current session.
 *   `total_bytes` (integer): The total size of the file on disk in bytes.
 *   `showing_start` (integer): The 1-indexed starting line number of the displayed slice.
 *   `showing_end` (integer): The 1-indexed actual ending line number of the displayed slice.
-*   `message` (string, optional): A warning message populated if limits are exceeded (e.g. `"Line count limit (800 lines max) exceeded. Output capped at 800 lines."` or `"Response truncated: cumulative response size limit (45,000 bytes) was reached."`).
+*   `message` (string, optional): A warning message populated if limits are exceeded.
+
+#### `edit_lines` Output Format
+`edit_lines` returns a compact confirmation object with the modified Line IDs:
+```json
+{
+  "status": "success",
+  "modified_ids": [
+    "1#9d33"
+  ]
+}
+```
 
 ---
 

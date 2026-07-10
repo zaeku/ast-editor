@@ -372,7 +372,7 @@ async fn test_integration_create_lines_flow() {
 
     // 1. Create the new file via calling `create_lines` tool logic
     let initial_content = "fn main() {\n    let x = 42;\n}\n";
-    let create_res = view::create_lines(&repository, &filepath_str, initial_content).unwrap();
+    let create_res = view::create_lines(&repository, &filepath_str, initial_content, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
 
     assert_eq!(val["status"], "success");
@@ -391,7 +391,7 @@ async fn test_integration_create_lines_flow() {
     assert!(id2.contains('#'));
 
     // 3. Try calling `create_lines` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
-    let dup_res = view::create_lines(&repository, &filepath_str, "different content");
+    let dup_res = view::create_lines(&repository, &filepath_str, "different content", None);
     assert!(dup_res.is_err());
     let dup_err = dup_res.unwrap_err().to_string();
     assert!(dup_err.contains("FILE_ALREADY_EXISTS"));
@@ -485,4 +485,47 @@ async fn test_integration_view_lines_capacity_cap() {
 
     let warning_msg = val["message"].as_str().unwrap();
     assert!(warning_msg.contains("cumulative response size limit"));
+}
+
+#[tokio::test]
+async fn test_integration_create_lines_return_ids_false() {
+    let _lock = acquire_db_lock();
+    let repository = SqliteSessionRepository;
+
+    let pid = std::process::id();
+    let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let temp_file_path = std::env::temp_dir().join(format!("ts_inspect_int_{}_{}_create_flow_ids_false.rs", pid, counter));
+    if temp_file_path.exists() {
+        let _ = fs::remove_file(&temp_file_path);
+    }
+    let filepath_str = temp_file_path.to_str().unwrap().to_string();
+
+    let initial_content = "fn main() {\n    let x = 42;\n}\n";
+    let create_res = view::create_lines(&repository, &filepath_str, initial_content, Some(false)).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
+
+    assert_eq!(val["status"], "success");
+    assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
+    assert!(val["total_bytes"].as_u64().is_some());
+    assert!(val["ids"].is_null());
+
+    let _ = fs::remove_file(&temp_file_path);
+}
+
+#[tokio::test]
+async fn test_integration_view_lines_only_ids() {
+    let _lock = acquire_db_lock();
+    let repository = SqliteSessionRepository;
+    let file = TestFile::new("only_ids.rs", "fn main() {\n    let a = 1;\n}\n");
+
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, Some(true)).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
+    
+    assert_eq!(val["columns"], serde_json::json!(["id", "n"]));
+    let lines = val["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 3);
+    for line in lines {
+        let line_arr = line.as_array().unwrap();
+        assert_eq!(line_arr.len(), 2); // [id, n]
+    }
 }

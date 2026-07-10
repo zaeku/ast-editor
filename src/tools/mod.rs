@@ -182,6 +182,11 @@ impl ToolDispatcher {
                         "content": {
                             "type": "string",
                             "description": "Initial text content of the file."
+                        },
+                        "return_ids": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens."
                         }
                     },
                     "required": ["filepath", "content"]
@@ -227,8 +232,9 @@ impl ToolDispatcher {
             "create_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let content = arguments.get("content").and_then(|v| v.as_str()).context("Missing content")?;
+                let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
                 let repository = session_db::SqliteSessionRepository;
-                let text = view::create_lines(&repository, filepath, content)?;
+                let text = view::create_lines(&repository, filepath, content, return_ids)?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

@@ -4,6 +4,7 @@ pub mod session_db;
 pub mod view;
 pub mod edit;
 pub mod metadata;
+pub mod formatter;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;

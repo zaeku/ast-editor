@@ -375,10 +375,15 @@ fn format_definition_table(
         current_idx += 1;
     }
 
-    let result_val = serde_json::json!({
-        "columns": ["id", "n", "content"],
-        "lines": items
-    });
-    let output = serde_json::to_string_pretty(&result_val)?;
+    let mut lines_strs = Vec::new();
+    for item in items {
+        lines_strs.push(serde_json::to_string(&item)?);
+    }
+    let lines_formatted = format!("[\n    {}\n  ]", lines_strs.join(",\n    "));
+
+    let output = format!(
+        "{{\n  \"columns\": [\n    \"id\",\n    \"n\",\n    \"content\"\n  ],\n  \"lines\": {}\n}}",
+        lines_formatted
+    );
     Ok(output)
 }

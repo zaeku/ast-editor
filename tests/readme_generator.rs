@@ -142,8 +142,8 @@ async fn generate_readme() {
     // Re-parse and pretty print tool outputs to ensure they look perfect
     let fmt_create_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_create_default).unwrap()).unwrap());
     let fmt_create_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_create_ids).unwrap()).unwrap());
-    let fmt_view_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_view_default).unwrap()).unwrap());
-    let fmt_view_only_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_view_only_ids).unwrap()).unwrap());
+    let fmt_view_default = format!("```json\n{}\n```", out_view_default);
+    let fmt_view_only_ids = format!("```json\n{}\n```", out_view_only_ids);
     let fmt_edit_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_edit_compact).unwrap()).unwrap());
 
     // 3. Read README.tpl.md

@@ -46,12 +46,12 @@ Creates a brand-new file with the initial content and initializes its line editi
 *   **Arguments**:
     *   `filepath` (string, required): Absolute path to the file.
     *   `content` (string, required): Initial text content of the file.
-    *   `return_ids` (boolean, optional, default: `true`): If true, returns the flat array of generated Line IDs. Set to false to omit IDs, bypass line hashing, and save token costs.
+    *   `return_ids` (boolean, optional, default: `false`): If true, returns the flat array of generated Line IDs. Set to false to omit IDs, bypass line hashing, and save token costs.
 *   **Response Safety Limits**:
     *   **Line Count Cap**: Output lines are capped at a maximum of 800 lines.
     *   **Response Capacity Cap**: Output payload size is limited to 45,000 bytes (approx. 44KB) to protect the context window.
     *   **Line Length Cap**: Lines exceeding 2,048 characters are truncated in the returned view with a truncation notice and are given a `#TRUNC` suffix in their Line ID (e.g., `12#TRUNC`).
-*   **Output Format**: Returns a JSON object indicating the status, a success/warning message (containing truncation details if any limits were hit), the list of generated line IDs (if `return_ids` is true/omitted), and session metadata (`total_lines`, `total_bytes`).
+*   **Output Format**: Returns a JSON object indicating the status, a success/warning message (containing truncation details if any limits were hit), the list of generated line IDs (if `return_ids` is true), and session metadata (`total_lines`, `total_bytes`).
 
 #### B. `view_lines`
 Retrieves lines along with their persistent unique Line IDs for a given file range. If no session exists for the file, it automatically JIT-initializes the session.
@@ -66,7 +66,7 @@ Retrieves lines along with their persistent unique Line IDs for a given file ran
     *   **Line Length Cap**: Lines exceeding 2,048 characters are truncated in the returned view with a truncation notice (e.g., `... [TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]`) and are given a `#TRUNC` suffix in their Line ID (e.g., `3f#TRUNC`, where `3f` is the hexadecimal sequence ID).
 
 #### C. `edit_lines`
-Transactionally applies one or more line-level edits, runs AST-based syntax validation (if supported), validates file concurrency, updates the file on disk, and returns a +/- 2 line context preview. If no session exists, it JIT-initializes the session.
+Transactionally applies one or more line-level edits, runs AST-based syntax validation (if supported), validates file concurrency, updates the file on disk, and returns a compact confirmation object containing the modified Line IDs. If no session exists, it JIT-initializes the session.
 *   **Arguments**:
     *   `filepath` (string, required): Absolute path to the file.
     *   `edits` (array of objects, required): A list of line edit operations.

@@ -126,27 +126,11 @@ Retrieves a range of lines for any text file along with their persistent line ID
 ##### Default Output (`only_ids = false`)
 ```json
 {
-  "columns": [
-    "id",
-    "n",
-    "content"
-  ],
+  "columns": ["id","n","content"],
   "lines": [
-    [
-      "1#77cf",
-      1,
-      "fn main() {"
-    ],
-    [
-      "2#bcb4",
-      2,
-      "    let x = 42;"
-    ],
-    [
-      "3#c2b7",
-      3,
-      "}"
-    ]
+    ["1#77cf",1,"fn main() {"],
+    ["2#bcb4",2,"    let x = 42;"],
+    ["3#c2b7",3,"}"]
   ],
   "showing_end": 3,
   "showing_start": 1,
@@ -159,24 +143,8 @@ Retrieves a range of lines for any text file along with their persistent line ID
 ##### Output with IDs Only (`only_ids = true`)
 ```json
 {
-  "columns": [
-    "id",
-    "n"
-  ],
-  "lines": [
-    [
-      "1#77cf",
-      1
-    ],
-    [
-      "2#bcb4",
-      2
-    ],
-    [
-      "3#c2b7",
-      3
-    ]
-  ],
+  "columns": ["id","n"],
+  "lines": [["1#77cf",1], ["2#bcb4",2], ["3#c2b7",3]],
   "showing_end": 3,
   "showing_start": 1,
   "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above.",

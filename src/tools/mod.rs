@@ -205,8 +205,9 @@ impl ToolDispatcher {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).context("Missing start_line")? as usize;
                 let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).context("Missing end_line")? as usize;
+                let only_ids = arguments.get("only_ids").and_then(|v| v.as_bool());
                 let repository = session_db::SqliteSessionRepository;
-                let text = view::view_lines(&repository, filepath, start_line, end_line)?;
+                let text = view::view_lines(&repository, filepath, start_line, end_line, only_ids)?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

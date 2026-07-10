@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(metadata.total_lines, 3);
 
         // Get the line IDs by viewing
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3, None)?;
         let target_id = find_line_id(&lines_view, "let a = 1;");
         assert!(!target_id.is_empty());
 
@@ -271,7 +271,7 @@ mod tests {
 
         // Refresh metadata/session
         let _metadata = init_edit_session(filepath_str, false)?;
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3, None)?;
         let new_target_id = find_line_id(&lines_view, "let a = 42;");
         assert!(!new_target_id.is_empty());
 
@@ -290,7 +290,7 @@ mod tests {
 
         // Refresh session to get latest target IDs
         let _ = init_edit_session(filepath_str, false)?;
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 4)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 4, None)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
 
@@ -385,7 +385,7 @@ mod tests {
         let _metadata = init_edit_session(filepath_str, false)?;
 
         // Find the line 2 ID
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3, None)?;
         let target_id = find_line_id(&lines_view, "let a = 1;");
         assert!(!target_id.is_empty());
 
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(metadata.total_lines, 5);
 
         // Get the line IDs by viewing
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 5)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 5, None)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
 
@@ -618,7 +618,7 @@ mod tests {
         let _metadata = init_edit_session(filepath_str, false)?;
 
         // Find IDs for lines 2 and 3
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 2, 3)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 2, 3, None)?;
         let id_2 = find_line_id(&lines_view, "let a = 1;");
         let id_3 = find_line_id(&lines_view, "let b = 2;");
 
@@ -655,11 +655,11 @@ mod tests {
         let _metadata = init_edit_session(filepath_str, false)?;
 
         // Get target ID for lines 4 (pub fn foo() {})
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 4, 4)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 4, 4, None)?;
         let foo_id = find_line_id(&lines_view, "pub fn foo() {}");
 
         // Get target ID for line 1 (pub fn main() {)
-        let lines_view_main = crate::tools::view::view_lines(&repository, filepath_str, 1, 1)?;
+        let lines_view_main = crate::tools::view::view_lines(&repository, filepath_str, 1, 1, None)?;
         let main_id = find_line_id(&lines_view_main, "pub fn main() {");
 
         // Move 'foo' function before 'main' function
@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(metadata.total_lines, 3);
 
         // Get the lines view
-        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3)?;
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3, None)?;
         
         // Assert that the line has been truncated in the view (ends with #TRUNC)
         let target_id = find_line_id(&lines_view, "    // aaaaa");

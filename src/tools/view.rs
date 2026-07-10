@@ -8,6 +8,7 @@ fn fetch_and_format_lines(
     session_id: &str,
     start_line: usize,
     end_line: usize,
+    only_ids: bool,
 ) -> Result<(serde_json::Value, usize, Option<String>)> {
     repository.ensure_hashes_range(session_id, start_line, end_line)?;
 
@@ -31,18 +32,29 @@ fn fetch_and_format_lines(
             (content, line_id)
         };
 
-        let line_len = final_content.len();
+        let line_len = if only_ids {
+            line_id.len() + 10
+        } else {
+            final_content.len()
+        };
         if cumulative_bytes + line_len > 45000 {
             capacity_truncated = true;
             break;
         }
 
         cumulative_bytes += line_len;
-        items.push(serde_json::json!([
-            line_id,
-            current_idx,
-            final_content
-        ]));
+        if only_ids {
+            items.push(serde_json::json!([
+                line_id,
+                current_idx
+            ]));
+        } else {
+            items.push(serde_json::json!([
+                line_id,
+                current_idx,
+                final_content
+            ]));
+        }
         actual_end_line = current_idx;
         current_idx += 1;
     }
@@ -61,6 +73,7 @@ pub fn view_lines(
     filepath: &str,
     start_line: usize,
     end_line: usize,
+    only_ids: Option<bool>,
 ) -> Result<String> {
     if start_line == 0 {
         anyhow::bail!("Invalid bounds: start_line must be greater than 0");
@@ -85,7 +98,8 @@ pub fn view_lines(
 
     let total_bytes = std::path::Path::new(filepath).metadata()?.len();
 
-    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &session_id, start_line, capped_end_line)?;
+    let only_ids_bool = only_ids.unwrap_or(false);
+    let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &session_id, start_line, capped_end_line, only_ids_bool)?;
 
     let mut message = None;
     if line_count_capped {
@@ -99,8 +113,14 @@ pub fn view_lines(
         }
     }
 
+    let columns = if only_ids_bool {
+        vec!["id", "n"]
+    } else {
+        vec!["id", "n", "content"]
+    };
+
     let mut result_val = serde_json::json!({
-        "columns": ["id", "n", "content"],
+        "columns": columns,
         "lines": items,
         "total_lines": total_lines,
         "total_bytes": total_bytes,
@@ -123,8 +143,9 @@ pub fn view_session_lines(
     filepath: &str,
     start_line: usize,
     end_line: usize,
+    only_ids: Option<bool>,
 ) -> Result<String> {
-    view_lines(repository, filepath, start_line, end_line)
+    view_lines(repository, filepath, start_line, end_line, only_ids)
 }
 
 pub fn create_lines(
@@ -148,7 +169,7 @@ pub fn create_lines(
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if meta.total_lines > 0 {
             let end_line = if meta.total_lines > 800 { 800 } else { meta.total_lines };
-            let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &meta.session_id, 1, end_line)?;
+            let (items, actual_end_line, capacity_warning) = fetch_and_format_lines(repository, &meta.session_id, 1, end_line, true)?;
             Ok((items, actual_end_line, capacity_warning, meta.total_lines, total_bytes))
         } else {
             Ok((serde_json::json!([]), 0, None, 0, total_bytes))
@@ -156,7 +177,7 @@ pub fn create_lines(
     };
 
     match setup_db_and_fetch() {
-        Ok((items, actual_end_line, capacity_warning, total_lines, total_bytes)) => {
+        Ok((items, _actual_end_line, capacity_warning, total_lines, total_bytes)) => {
             let line_count_capped = total_lines > 800;
             let mut warning_parts = Vec::new();
             if line_count_capped {
@@ -171,15 +192,25 @@ pub fn create_lines(
                 message = format!("{} Truncation details: {}", message, warning_parts.join("; "));
             }
 
+            let ids: Vec<String> = items.as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|val| {
+                            val.as_array()
+                                .and_then(|item| item.first())
+                                .and_then(|id_val| id_val.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let result_val = serde_json::json!({
                 "status": "success",
                 "message": message,
-                "columns": ["id", "n", "content"],
-                "lines": items,
+                "ids": ids,
                 "total_lines": total_lines,
                 "total_bytes": total_bytes,
-                "showing_start": 1,
-                "showing_end": actual_end_line,
             });
 
             let output = serde_json::to_string_pretty(&result_val)?;
@@ -217,16 +248,16 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");
         assert_eq!(val["message"], "File successfully created and line editing session initialized.");
-        assert_eq!(val["columns"], serde_json::json!(["id", "n", "content"]));
+        assert!(val["columns"].is_null());
+        assert!(val["lines"].is_null());
 
-        let lines = val["lines"].as_array().unwrap();
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0][1], 1);
-        assert_eq!(lines[0][2], "line 1");
-        assert_eq!(lines[1][1], 2);
-        assert_eq!(lines[1][2], "line 2");
-        assert_eq!(lines[2][1], 3);
-        assert_eq!(lines[2][2], "line 3");
+        let ids = val["ids"].as_array().unwrap();
+        assert_eq!(ids.len(), 3);
+        assert!(ids[0].as_str().unwrap().starts_with("1#"));
+        assert!(ids[1].as_str().unwrap().starts_with("2#"));
+        assert!(ids[2].as_str().unwrap().starts_with("3#"));
+        assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
+        assert_eq!(val["total_bytes"].as_u64().unwrap(), content.len() as u64);
 
         // Verify that the file was indeed written
         let read_content = fs::read_to_string(filepath_str)?;
@@ -315,7 +346,7 @@ mod tests {
         let _ = create_lines(&repository, filepath_str, &content)?;
 
         // View lines from 1 to 1000
-        let output = view_lines(&repository, filepath_str, 1, 1000)?;
+        let output = view_lines(&repository, filepath_str, 1, 1000, None)?;
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         assert_eq!(val["total_lines"], 1000);
@@ -327,6 +358,14 @@ mod tests {
         assert_eq!(lines_array.len(), 800);
         assert_eq!(lines_array[0][2], "line 1");
         assert_eq!(lines_array[799][2], "line 800");
+
+        // View lines with only_ids = true
+        let output_only_ids = view_lines(&repository, filepath_str, 1, 1000, Some(true))?;
+        let val_only_ids: serde_json::Value = serde_json::from_str(&output_only_ids)?;
+        assert_eq!(val_only_ids["columns"], serde_json::json!(["id", "n"]));
+        let lines_array_only_ids = val_only_ids["lines"].as_array().unwrap();
+        assert_eq!(lines_array_only_ids.len(), 800);
+        assert_eq!(lines_array_only_ids[0].as_array().unwrap().len(), 2);
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -349,7 +388,7 @@ mod tests {
         let repository = SqliteSessionRepository;
         let _ = create_lines(&repository, filepath_str, &content)?;
 
-        let output = view_lines(&repository, filepath_str, 1, 3)?;
+        let output = view_lines(&repository, filepath_str, 1, 3, None)?;
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         let lines_array = val["lines"].as_array().unwrap();
@@ -365,6 +404,14 @@ mod tests {
         assert!(lines_array[1][0].as_str().unwrap().ends_with("#TRUNC"));
 
         assert_eq!(lines_array[2][2], "short 3");
+
+        // With only_ids = true, it should still evaluate truncation and append `#TRUNC` to the ID
+        let output_only_ids = view_lines(&repository, filepath_str, 1, 3, Some(true))?;
+        let val_only_ids: serde_json::Value = serde_json::from_str(&output_only_ids)?;
+        let lines_array_only_ids = val_only_ids["lines"].as_array().unwrap();
+        assert_eq!(lines_array_only_ids.len(), 3);
+        assert!(lines_array_only_ids[1][0].as_str().unwrap().ends_with("#TRUNC"));
+        assert_eq!(lines_array_only_ids[1].as_array().unwrap().len(), 2); // [id, n], content omitted
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -391,7 +438,7 @@ mod tests {
         let repository = SqliteSessionRepository;
         let _ = create_lines(&repository, filepath_str, &content)?;
 
-        let output = view_lines(&repository, filepath_str, 1, 50)?;
+        let output = view_lines(&repository, filepath_str, 1, 50, None)?;
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         let lines_array = val["lines"].as_array().unwrap();
@@ -400,6 +447,14 @@ mod tests {
         assert_eq!(lines_array.len(), 45);
         assert_eq!(val["showing_end"], 45);
         assert!(val["message"].as_str().unwrap().contains("cumulative response size limit"));
+
+        // With only_ids = true, the limit of 45,000 bytes should NOT be exceeded
+        let output_only_ids = view_lines(&repository, filepath_str, 1, 50, Some(true))?;
+        let val_only_ids: serde_json::Value = serde_json::from_str(&output_only_ids)?;
+        let lines_array_only_ids = val_only_ids["lines"].as_array().unwrap();
+        assert_eq!(lines_array_only_ids.len(), 50);
+        assert_eq!(val_only_ids["showing_end"], 50);
+        assert!(val_only_ids["message"].is_null());
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())

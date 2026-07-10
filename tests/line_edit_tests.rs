@@ -77,7 +77,7 @@ async fn test_view_lines_lazy_hashing() {
     let repository = SqliteSessionRepository;
     
     // Retrieve lines (this triggers lazy hashing for range)
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
@@ -100,7 +100,7 @@ async fn test_edit_operations_and_ast_validation() {
     let pm = create_test_parser_manager();
 
     // Fetch the correct target ID for line 2
-    let view_res = view::view_lines(&repository, file.path_str(), 2, 2).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -147,7 +147,7 @@ async fn test_transactional_deletes_and_inserts() {
     let pm = create_test_parser_manager();
 
     // Get Line IDs
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 4).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 4, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     
@@ -207,7 +207,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     let pm = create_test_parser_manager();
 
     // Get line ID
-    let view_res = view::view_lines(&repository, file.path_str(), 2, 2).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -261,7 +261,7 @@ async fn test_integration_advanced_operations() {
     let pm = create_test_parser_manager();
 
     // 1. Get IDs for lines
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 4).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 4, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let _id_main = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -284,7 +284,7 @@ async fn test_integration_advanced_operations() {
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
 
     // Get new IDs
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let id_main_new = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -365,28 +365,18 @@ async fn test_integration_create_lines_flow() {
 
     assert_eq!(val["status"], "success");
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
-    assert_eq!(val["showing_start"].as_u64().unwrap(), 1);
-    assert_eq!(val["showing_end"].as_u64().unwrap(), 3);
     assert!(val["total_bytes"].as_u64().is_some());
-    let lines = val["lines"].as_array().unwrap();
-    assert_eq!(lines.len(), 3);
+    let ids = val["ids"].as_array().unwrap();
+    assert_eq!(ids.len(), 3);
 
     // 2. Assert that the returned line IDs are correct
-    let line0 = lines[0].as_array().unwrap();
-    let line1 = lines[1].as_array().unwrap();
-    let line2 = lines[2].as_array().unwrap();
-
-    let id0 = line0[0].as_str().unwrap();
-    let id1 = line1[0].as_str().unwrap();
-    let id2 = line2[0].as_str().unwrap();
+    let id0 = ids[0].as_str().unwrap();
+    let id1 = ids[1].as_str().unwrap();
+    let id2 = ids[2].as_str().unwrap();
 
     assert!(id0.contains('#'));
     assert!(id1.contains('#'));
     assert!(id2.contains('#'));
-
-    assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
-    assert_eq!(line1[2].as_str().unwrap(), "    let x = 42;");
-    assert_eq!(line2[2].as_str().unwrap(), "}");
 
     // 3. Try calling `create_lines` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
     let dup_res = view::create_lines(&repository, &filepath_str, "different content");
@@ -426,7 +416,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
     let content = format!("fn first() {{\n{}\n}}\n", long_line);
     let file = TestFile::new("truncation_protection.rs", &content);
 
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
@@ -472,7 +462,7 @@ async fn test_integration_view_lines_capacity_cap() {
     let content = lines.join("\n");
     let file = TestFile::new("capacity_cap.txt", &content);
 
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 50).unwrap();
+    let view_res = view::view_lines(&repository, file.path_str(), 1, 50, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     let returned_lines = val["lines"].as_array().unwrap();

@@ -104,7 +104,11 @@ pub fn retrieve_and_format_lines(
         }
     }
 
-    lines_json.push(']');
+    if items.is_empty() {
+        lines_json.push(']');
+    } else {
+        lines_json.push_str("  ]");
+    }
 
     Ok(FormattedLinesResult {
         lines_json,
@@ -153,14 +157,14 @@ mod tests {
         assert!(lines.len() > 3, "Expected formatting to wrap into multiple lines: {}", res.lines_json);
         assert_eq!(lines[0], "[");
         assert!(lines[1].starts_with("  "));
-        assert_eq!(*lines.last().unwrap(), "]");
+        assert_eq!(*lines.last().unwrap(), "  ]");
 
         // Test with large wrap_trigger_length so everything is on one line
         let res_no_wrap = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 1000)?;
         let lines_no_wrap: Vec<&str> = res_no_wrap.lines_json.lines().collect();
         assert_eq!(lines_no_wrap.len(), 3);
         assert_eq!(lines_no_wrap[0], "[");
-        assert_eq!(lines_no_wrap[2], "]");
+        assert_eq!(lines_no_wrap[2], "  ]");
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -197,7 +201,7 @@ mod tests {
         let lines: Vec<&str> = res.lines_json.lines().collect();
         assert_eq!(lines.len(), 4);
         assert_eq!(lines[0], "[");
-        assert_eq!(lines[3], "]");
+        assert_eq!(lines[3], "  ]");
         assert!(lines[1].ends_with(","));
         assert!(!lines[2].ends_with(","));
 

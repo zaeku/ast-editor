@@ -1,15 +1,19 @@
-# Task 3 Report: Refactor view.rs and edit.rs to use SessionRepository Trait
+# Task 3 Report: Implement Compact Output in edit.rs
 
-## Status
 - **Status:** DONE
-- **Commits:** `3ba9962` (refactor: view.rs and edit.rs to use SessionRepository trait)
+- **Commits created:**
+  - `99ee886` feat: implement compact output in edit.rs
+- **Test/compile summary:**
+  - 46 unit tests in `src/lib.rs` passed cleanly.
+  - 11 integration tests in `tests/line_edit_tests.rs` passed cleanly.
+  - Verification target `cargo test --lib tools::edit` passed successfully.
 
-## Summary of Changes
-1. **`src/tools/view.rs`**: Refactored `view_lines`, `create_lines`, and `fetch_and_format_lines` to take `repository: &impl SessionRepository` as their first parameter. Removed direct instantiation of `SqliteSessionRepository`.
-2. **`src/tools/edit.rs`**: Refactored `edit_lines` and the deprecated `apply_line_edits` to receive `repository: &impl SessionRepository` and use it for database queries and updates.
-3. **`src/tools/mod.rs`**: Instantiated `let repository = SqliteSessionRepository;` and passed its reference `&repository` in all dispatcher calls.
-4. **Tests**: Updated all test functions in `view.rs`, `edit.rs`, `session_db.rs`, and the integration test file `tests/line_edit_tests.rs` to instantiate and pass the repository reference.
+## Key Changes Made:
+1. **Modified `src/tools/edit.rs`**:
+   - Refactored `edit_lines` to return a JSON string representing `{ "status": "success", "modified_ids": [String] }` containing the Line IDs of all modified, inserted, and moved lines.
+   - Removed preview formatting logic (`indices_to_show` scanning, lines compilation, JSON objects formatting with columns, tips, etc.).
+   - Removed the unused `compute_line_hash` import.
+   - Refactored all unit tests in `edit.rs` to assert on `modified_ids` in the returned JSON.
 
-## Verification
-- Ran `cargo check --tests` and `cargo test`.
-- All 57 tests passed cleanly with 0 failures and 0 compile warnings.
+2. **Modified `tests/line_edit_tests.rs`**:
+   - Updated integration test assertions on `edit_lines` return values to expect the new compact output format with `modified_ids` instead of textual preview strings.

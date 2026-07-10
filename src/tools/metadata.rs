@@ -13,6 +13,22 @@ static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
     serde_json::from_str(json_str).unwrap_or_default()
 });
 
+
+#[derive(Deserialize)]
+pub struct ToolConfig {
+    pub only_ids_wrap_trigger_length: usize,
+    pub view_lines_response_tip: String,
+}
+
+static CONFIG: Lazy<ToolConfig> = Lazy::new(|| {
+    let json_str = include_str!("../../resources/tool_config.json");
+    serde_json::from_str(json_str).expect("Failed to parse tool_config.json")
+});
+
+pub fn get_config() -> &'static ToolConfig {
+    &CONFIG
+}
+
 pub fn get_tool_description(name: &str) -> String {
     METADATA
         .get(name)
@@ -42,5 +58,13 @@ mod tests {
 
         let dump_tip = get_tool_tip("dump_ast");
         assert!(dump_tip.contains("Tip:"));
+    }
+
+
+    #[test]
+    fn test_config_retrieval() {
+        let config = get_config();
+        assert_eq!(config.only_ids_wrap_trigger_length, 1000);
+        assert!(config.view_lines_response_tip.contains("edit_lines"));
     }
 }

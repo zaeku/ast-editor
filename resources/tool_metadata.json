@@ -1,11 +1,11 @@
 {
-  "inspect_ast": {
-    "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",
-    "tip": "Tip: Use templates like 'functions' or 'classes' for quick navigation."
-  },
   "dump_ast": {
     "description": "Dumps the complete AST syntax tree of a file as S-expression text.",
     "tip": "Tip: For larger files, prefer using 'inspect_ast' with specific templates/queries to reduce token usage and focus on target blocks."
+  },
+  "inspect_ast": {
+    "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",
+    "tip": "Tip: Use templates like 'functions' or 'classes' for quick navigation."
   },
   "view_lines": {
     "description": "Retrieve file lines along with persistent Line IDs. Set only_ids to true to retrieve only IDs and line numbers, excluding text contents.",

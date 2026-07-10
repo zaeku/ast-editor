@@ -111,6 +111,10 @@ impl ToolDispatcher {
                         "end_line": {
                             "type": "integer",
                             "description": "1-indexed ending line number (inclusive)"
+                        },
+                        "only_ids": {
+                            "type": "boolean",
+                            "description": "If true, only returns Line IDs and line numbers, omitting text content."
                         }
                     },
                     "required": ["filepath", "start_line", "end_line"]

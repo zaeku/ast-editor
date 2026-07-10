@@ -34,11 +34,11 @@ mod tests {
     #[test]
     fn test_metadata_retrieval() {
         let view_desc = get_tool_description("view_lines");
-        assert!(view_desc.contains("Retrieves lines"));
+        assert!(view_desc.contains("Retrieve file lines"));
         assert!(view_desc.contains("Line IDs"));
 
         let edit_desc = get_tool_description("edit_lines");
-        assert!(edit_desc.contains("Applies a structured batch"));
+        assert!(edit_desc.contains("Apply edits"));
 
         let dump_tip = get_tool_tip("dump_ast");
         assert!(dump_tip.contains("Tip:"));

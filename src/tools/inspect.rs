@@ -141,11 +141,11 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         None
     };
 
-    if args.template.is_some() && query_str.is_none() {
+    if let (Some(ref template), None) = (&args.template, &query_str) {
         status = "warning".to_string();
         hint = Some(format!(
             "Template '{}' is not supported for language '{}'. Supported templates: functions, classes, imports (rust, python).",
-            args.template.as_ref().unwrap(),
+            template,
             lang_name
         ));
     }

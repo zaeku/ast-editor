@@ -28,7 +28,7 @@ fn get_db_connection() -> Result<Connection> {
         .context("Failed to set SQLite busy timeout")?;
     
     // Configure high-performance memory pragmas and enable foreign keys
-    conn.pragma_update(None, "journal_mode", &"WAL")
+    conn.pragma_update(None, "journal_mode", "WAL")
         .context("Failed to configure WAL journal mode")?;
     conn.execute("PRAGMA synchronous = NORMAL;", [])
         .context("Failed to configure synchronous NORMAL")?;
@@ -511,7 +511,7 @@ impl SessionRepository for SqliteSessionRepository {
                     let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
                         .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
                     let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty()).unwrap_or(start_id);
-                    let move_pos = edit.move_position.as_ref().map(|s| s.as_str()).unwrap_or("after");
+                    let move_pos = edit.move_position.as_deref().unwrap_or("after");
 
                     let (start_seq, start_hash) = parse_line_id(start_id)?;
                     let (end_seq, end_hash) = parse_line_id(end_id)?;

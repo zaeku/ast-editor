@@ -117,6 +117,39 @@ pub fn retrieve_and_format_lines(
     })
 }
 
+pub fn format_modified_ids(ids: &[String], wrap_trigger_length: usize) -> String {
+    if ids.is_empty() {
+        return "[]".to_string();
+    }
+
+    let mut result = String::new();
+    result.push('[');
+    result.push('\n');
+
+    let mut current_line = "  ".to_string();
+    for (i, id) in ids.iter().enumerate() {
+        let item = serde_json::to_string(id).unwrap_or_else(|_| format!("\"{}\"", id));
+        if i > 0 {
+            let next_len = current_line.len() + 2 + item.len();
+            if next_len > wrap_trigger_length {
+                result.push_str(&current_line);
+                result.push_str(",\n");
+                current_line = format!("  {}", item);
+            } else {
+                current_line.push_str(", ");
+                current_line.push_str(&item);
+            }
+        } else {
+            current_line.push_str(&item);
+        }
+    }
+    result.push_str(&current_line);
+    result.push('\n');
+    result.push(']');
+    result
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,4 +305,29 @@ mod tests {
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
+
+    #[test]
+    fn test_format_modified_ids_empty() {
+        let ids: Vec<String> = vec![];
+        assert_eq!(format_modified_ids(&ids, 80), "[]");
+    }
+
+    #[test]
+    fn test_format_modified_ids_wrap() {
+        let ids = vec![
+            "1#77cf".to_string(),
+            "2#bcb4".to_string(),
+            "3#c2b7".to_string(),
+        ];
+        // small trigger -> wraps
+        let res_wrap = format_modified_ids(&ids, 15);
+        let expected_wrap = "[\n  \"1#77cf\",\n  \"2#bcb4\",\n  \"3#c2b7\"\n]";
+        assert_eq!(res_wrap, expected_wrap);
+
+        // large trigger -> no wrap
+        let res_no_wrap = format_modified_ids(&ids, 100);
+        let expected_no_wrap = "[\n  \"1#77cf\", \"2#bcb4\", \"3#c2b7\"\n]";
+        assert_eq!(res_no_wrap, expected_no_wrap);
+    }
+
 }

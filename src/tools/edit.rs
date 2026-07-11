@@ -169,12 +169,22 @@ pub async fn edit_lines(
         .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
     repository.update_session_metadata(&session_id, &new_file_hash, new_mtime)?;
 
-    let result_val = serde_json::json!({
-        "status": "success",
-        "modified_ids": newly_modified_ids
-    });
-
-    let output = serde_json::to_string_pretty(&result_val)?;
+    let config = crate::tools::metadata::get_config();
+    let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
+    let formatted_ids = crate::tools::formatter::format_modified_ids(&newly_modified_ids, only_ids_wrap_trigger_length);
+    let mut indented_ids = String::new();
+    for (i, line) in formatted_ids.lines().enumerate() {
+        if i == 0 {
+            indented_ids.push_str(line);
+        } else {
+            indented_ids.push_str("\n  ");
+            indented_ids.push_str(line);
+        }
+    }
+    let output = format!(
+        "{{\n  \"status\": \"success\",\n  \"modified_ids\": {}\n}}",
+        indented_ids
+    );
     Ok(output)
 }
 
@@ -964,4 +974,51 @@ fn main() {
         fs::remove_dir_all(&env.dir)?;
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_edit_lines_success_response_formatting() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("response_formatting");
+        let repository = SqliteSessionRepository;
+
+        let file_path = env.dir.join("test.txt");
+        let file_content = "line 1\nline 2\nline 3";
+        fs::write(&file_path, file_content)?;
+
+        let filepath_str = file_path.to_str().unwrap();
+        let _init_res = init_edit_session(filepath_str, false)?;
+
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3, None)?;
+        let line_1_id = find_line_id(&lines_view, "line 1");
+
+        let edits = vec![
+            LineEdit {
+                op: "update".to_string(),
+                target_id: Some(line_1_id.clone()),
+                content: Some("new line 1".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        
+        let val: serde_json::Value = serde_json::from_str(&result)?;
+        assert_eq!(val["status"], "success");
+        let modified_ids = val["modified_ids"].as_array().unwrap();
+        assert_eq!(modified_ids.len(), 1);
+        let new_id = modified_ids[0].as_str().unwrap();
+        let (old_seq, _) = crate::tools::session_db::parse_line_id(&line_1_id)?;
+        let (new_seq, _) = crate::tools::session_db::parse_line_id(new_id)?;
+        assert_eq!(old_seq, new_seq);
+
+        let expected_json = format!(
+            "{{\n  \"status\": \"success\",\n  \"modified_ids\": [\n    \"{}\"\n  ]\n}}",
+            new_id
+        );
+        assert_eq!(result, expected_json);
+        
+        fs::remove_dir_all(&env.dir)?;
+        Ok(())
+    }
+
 }

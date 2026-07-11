@@ -228,16 +228,25 @@ mod tests {
                 "rust": {
                     "extensions": [".rs"],
                     "wasm_file": "tree-sitter-rust.wasm"
+                },
+                "bash": {
+                    "extensions": [".sh", ".bash", ".zsh", ".ksh"],
+                    "wasm_file": "tree-sitter-bash.wasm"
                 }
             });
             fs::write(&langs_json_path, serde_json::to_string(&mock_config).unwrap()).unwrap();
 
-            // Copy real rust wasm so parsing/compilation succeeds
+            // Copy real rust and bash wasm so parsing/compilation succeeds
             let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
             let real_wasm_path = manifest_dir.join("resources").join("wasm").join("tree-sitter-rust.wasm");
             let target_wasm_path = wasm_dir.join("tree-sitter-rust.wasm");
             if real_wasm_path.exists() {
                 fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+            }
+            let real_bash_wasm_path = manifest_dir.join("resources").join("wasm").join("tree-sitter-bash.wasm");
+            let target_bash_wasm_path = wasm_dir.join("tree-sitter-bash.wasm");
+            if real_bash_wasm_path.exists() {
+                fs::copy(&real_bash_wasm_path, &target_bash_wasm_path).unwrap();
             }
 
             let pm = ParserManager::with_paths(cache_dir, compiler_path, wasm_dir).unwrap();
@@ -1017,6 +1026,51 @@ fn main() {
         );
         assert_eq!(result, expected_json);
         
+        fs::remove_dir_all(&env.dir)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_bash_syntax_validation_error_rolls_back() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("bash_syntax_error");
+        let repository = SqliteSessionRepository;
+
+        let file_path = env.dir.join("script.sh");
+        let initial_content = "if [ \"$x\" = \"1\" ]; then\n    echo \"one\"\nfi\n";
+        fs::write(&file_path, initial_content)?;
+        let filepath_str = file_path.to_str().unwrap();
+
+        let _metadata = init_edit_session(filepath_str, false)?;
+
+        // Find the line 3 ID (which is "fi")
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 3, None)?;
+        let target_id = find_line_id(&lines_view, "fi");
+        assert!(!target_id.is_empty());
+
+        // Apply edit that introduces syntax error (e.g. replacing "fi" with "else")
+        let edits = vec![
+            LineEdit {
+                op: "update".to_string(),
+                target_id: Some(target_id),
+                content: Some("else".to_string()), // Syntax error since mismatched if/else without fi
+                ..Default::default()
+            }
+        ];
+
+        let res = edit_lines(&repository, filepath_str, edits, &env.pm).await;
+        assert!(res.is_err());
+        let err_msg = res.unwrap_err().to_string();
+        assert!(err_msg.contains("Validation error"), "Expected syntax validation error, got: {}", err_msg);
+
+        // Verify disk content was rolled back (i.e. remains unchanged)
+        assert_eq!(fs::read_to_string(&file_path)?, initial_content);
+
+        // Verify DB content was rolled back (re-query content of line 3)
+        let lines = repository.fetch_lines_range(&_metadata.session_id, 3, 3)?;
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].2.trim(), "fi");
+
         fs::remove_dir_all(&env.dir)?;
         Ok(())
     }

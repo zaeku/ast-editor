@@ -92,8 +92,14 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         "lua" => "lua",
         "toml" => "toml",
         "yaml" | "yml" => "yaml",
+        "md" | "markdown" => "markdown",
         _ => bail!("Unsupported extension: {}", ext),
     };
+
+    if lang_name == "markdown" {
+        bail!("Query matching is not supported on markdown, but AST dumping is supported via dump_ast.");
+    }
+
 
     // 1. Delegated parsing via sticky session cache in ParserManager
     let (tree, language) = parser_manager.parse_code(ext, &code).await

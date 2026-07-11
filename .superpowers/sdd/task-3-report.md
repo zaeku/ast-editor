@@ -1,14 +1,9 @@
-# Task 3 Report: Implement Markdown AST Dump
-
-## Status: DONE
-
-## Commits Created:
-- `1be8210` feat(ast-editor): implement markdown AST dump via comrak
-
-## Test/Compile Summary:
-- **cargo check:** Compiled successfully without any errors or warnings on modified files.
-- **cargo test:** 57 tests passed (including `test_markdown_ast_dump`).
-- **Integration tests:** All 13 integration tests passed successfully.
-
-## Concerns:
-- None.
+- **Status:** DONE
+- Commits created:
+  - `c703a1f`: docs: update SKILL.md and README templates to document markdown inspect templates
+- Test/compile summary:
+  - Rebuilt `README.md` using `cargo test --test readme_generator`
+  - Verified compilation via `cargo clippy --all-targets` with no new warnings or errors
+  - Verified tests via `cargo test` (all 72 tests passed successfully)
+- Your concerns (if any): None.
+- Report file path: /Users/zaeku/workspace/Tools for Agents/ast-editor/.superpowers/sdd/task-3-report.md

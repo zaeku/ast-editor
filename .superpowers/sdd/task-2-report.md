@@ -1,6 +1,8 @@
-# Task 2 Report: Implement Markdown Syntax Validation
-
 - **Status:** DONE
-- **Commits created:** `a50d987` ("feat: implement markdown syntax validation using comrak and deduplicate check_language_supported")
-- **Test/compile summary:** Verified with `cargo test` and `strict_check` (total 71 tests in all suites, all 100% green and compiled without warnings).
-- **Your concerns:** None.
+- Commits created:
+  - `d62f98d`: feat: update inspect_ast tool schema with markdown templates and add schema unit tests
+- Test/compile summary:
+  - `strict_check` successfully passed with no compilation errors.
+  - `cargo test` passed successfully (72 tests passed).
+- Your concerns (if any): None.
+- Report file path: /Users/zaeku/workspace/Tools for Agents/ast-editor/.superpowers/sdd/task-2-report.md

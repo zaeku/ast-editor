@@ -93,6 +93,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         "toml" => "toml",
         "yaml" | "yml" => "yaml",
         "md" | "markdown" => "markdown",
+        "sh" | "bash" | "zsh" | "ksh" => "bash",
         _ => bail!("Unsupported extension: {}", ext),
     };
 

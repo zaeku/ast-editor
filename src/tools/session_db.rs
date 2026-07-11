@@ -790,7 +790,8 @@ pub fn check_language_supported(path: &str) -> bool {
         ext.as_str(),
         "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java" |
         "cpp" | "cc" | "cxx" | "c" | "h" | "lua" | "html" | "htm" |
-        "json" | "yaml" | "yml" | "toml" | "swift" | "md" | "markdown"
+        "json" | "yaml" | "yml" | "toml" | "swift" | "md" | "markdown" |
+        "sh" | "bash" | "zsh" | "ksh"
     )
 }
 
@@ -1084,6 +1085,10 @@ mod tests {
         assert!(check_language_supported("Bar.Py"));
         assert!(check_language_supported("foo.md"));
         assert!(check_language_supported("bar.markdown"));
+        assert!(check_language_supported("script.sh"));
+        assert!(check_language_supported("script.bash"));
+        assert!(check_language_supported("script.zsh"));
+        assert!(check_language_supported("script.ksh"));
         assert!(!check_language_supported("foo.txt"));
         assert!(!check_language_supported("foo.pdf"));
         assert!(!check_language_supported("foo"));

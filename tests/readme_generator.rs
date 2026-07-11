@@ -70,7 +70,7 @@ async fn generate_readme() {
     ).unwrap();
 
     // Run create_lines return_ids=true
-    let file_ids = temp_dir.join("create_ids.rs");
+    let file_ids = temp_dir.join("create_ids.txt");
     let out_create_ids = view::create_lines(
         &repo,
         file_ids.to_str().unwrap(),
@@ -100,20 +100,87 @@ async fn generate_readme() {
     let val_create_ids: serde_json::Value = serde_json::from_str(&out_create_ids).unwrap();
     let ids = val_create_ids["ids"].as_array().unwrap();
     let id_to_update = ids[1].as_str().unwrap().to_string();
+    let id_to_insert_after = ids[1].as_str().unwrap().to_string();
+    let id_to_delete = ids[2].as_str().unwrap().to_string();
 
-    // Run edit_lines update operation
-    let edits = vec![edit::LineEdit {
-        op: "update".to_string(),
-        target_id: Some(id_to_update),
-        content: Some("    let x = 100;".to_string()),
-        ..Default::default()
-    }];
+    // Run edit_lines multi-operation batch (update, insert_after, delete)
+    let edits = vec![
+        edit::LineEdit {
+            op: "insert_after".to_string(),
+            target_id: Some(id_to_insert_after.clone()),
+            content: Some("    let y = 200;".to_string()),
+            ..Default::default()
+        },
+        edit::LineEdit {
+            op: "update".to_string(),
+            target_id: Some(id_to_update.clone()),
+            content: Some("    let x = 100;".to_string()),
+            ..Default::default()
+        },
+        edit::LineEdit {
+            op: "delete".to_string(),
+            target_id: Some(id_to_delete.clone()),
+            ..Default::default()
+        },
+    ];
     let out_edit_compact = edit::edit_lines(
         &repo,
         file_ids.to_str().unwrap(),
         edits,
         &pm,
     ).await.unwrap();
+
+    // Construct pretty-printed JSON inputs
+    let create_lines_input_default_val = serde_json::json!({
+        "filepath": "/path/to/project/create_default.rs",
+        "content": content,
+        "return_ids": false
+    });
+    let fmt_create_lines_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_lines_input_default_val).unwrap());
+
+    let create_lines_input_ids_val = serde_json::json!({
+        "filepath": "/path/to/project/create_ids.rs",
+        "content": content,
+        "return_ids": true
+    });
+    let fmt_create_lines_input_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_lines_input_ids_val).unwrap());
+
+    let view_lines_input_default_val = serde_json::json!({
+        "filepath": "/path/to/project/create_ids.rs",
+        "start_line": 1,
+        "end_line": 3,
+        "only_ids": false
+    });
+    let fmt_view_lines_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_lines_input_default_val).unwrap());
+
+    let view_lines_input_only_ids_val = serde_json::json!({
+        "filepath": "/path/to/project/create_ids.rs",
+        "start_line": 1,
+        "end_line": 3,
+        "only_ids": true
+    });
+    let fmt_view_lines_input_only_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_lines_input_only_ids_val).unwrap());
+
+    let edit_lines_input_compact_val = serde_json::json!({
+        "filepath": "/path/to/project/create_ids.rs",
+        "edits": [
+            {
+                "op": "update",
+                "target_id": id_to_update,
+                "content": "    let x = 100;"
+            },
+            {
+                "op": "insert_after",
+                "target_id": id_to_insert_after,
+                "content": "    let y = 200;"
+            },
+            {
+                "op": "delete",
+                "target_id": id_to_delete
+            }
+        ]
+    });
+    let fmt_edit_lines_input_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_lines_input_compact_val).unwrap());
 
     // Extract schemas
     let dispatcher = ToolDispatcher::new();
@@ -151,14 +218,19 @@ async fn generate_readme() {
     let readme_tpl_path = manifest_dir.join("README.tpl.md");
     let mut readme_content = fs::read_to_string(readme_tpl_path).unwrap();
 
-    // 4. Replace all 8 placeholders
+    // 4. Replace all 13 placeholders
     readme_content = readme_content.replace("{{create_lines_schema}}", &fmt_create_lines_schema);
+    readme_content = readme_content.replace("{{create_lines_input_default}}", &fmt_create_lines_input_default);
     readme_content = readme_content.replace("{{create_lines_output_default}}", &fmt_create_default);
+    readme_content = readme_content.replace("{{create_lines_input_ids}}", &fmt_create_lines_input_ids);
     readme_content = readme_content.replace("{{create_lines_output_ids}}", &fmt_create_ids);
     readme_content = readme_content.replace("{{view_lines_schema}}", &fmt_view_lines_schema);
+    readme_content = readme_content.replace("{{view_lines_input_default}}", &fmt_view_lines_input_default);
     readme_content = readme_content.replace("{{view_lines_output_default}}", &fmt_view_default);
+    readme_content = readme_content.replace("{{view_lines_input_only_ids}}", &fmt_view_lines_input_only_ids);
     readme_content = readme_content.replace("{{view_lines_output_only_ids}}", &fmt_view_only_ids);
     readme_content = readme_content.replace("{{edit_lines_schema}}", &fmt_edit_lines_schema);
+    readme_content = readme_content.replace("{{edit_lines_input_compact}}", &fmt_edit_lines_input_compact);
     readme_content = readme_content.replace("{{edit_lines_output_compact}}", &fmt_edit_compact);
 
     // 5. Write to README.md at the workspace root

@@ -54,7 +54,13 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 
 ##### Default Example (`return_ids = false`)
 ###### Input
-{{create_lines_input_default}}
+```json
+{
+  "content": "fn main() {\n    let x = 42;\n}\n",
+  "filepath": "/path/to/project/create_default.rs",
+  "return_ids": false
+}
+```
 
 ###### Output
 ```json
@@ -68,7 +74,13 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 
 ##### Example with Line IDs (`return_ids = true`)
 ###### Input
-{{create_lines_input_ids}}
+```json
+{
+  "content": "fn main() {\n    let x = 42;\n}\n",
+  "filepath": "/path/to/project/create_ids.rs",
+  "return_ids": true
+}
+```
 
 ###### Output
 ```json
@@ -133,7 +145,14 @@ Retrieves a range of lines for any text file along with their persistent line ID
 
 ##### Default Example (`only_ids = false`)
 ###### Input
-{{view_lines_input_default}}
+```json
+{
+  "end_line": 3,
+  "filepath": "/path/to/project/create_ids.rs",
+  "only_ids": false,
+  "start_line": 1
+}
+```
 
 ###### Output
 ```json
@@ -154,7 +173,14 @@ Retrieves a range of lines for any text file along with their persistent line ID
 
 ##### Example with IDs Only (`only_ids = true`)
 ###### Input
-{{view_lines_input_only_ids}}
+```json
+{
+  "end_line": 3,
+  "filepath": "/path/to/project/create_ids.rs",
+  "only_ids": true,
+  "start_line": 1
+}
+```
 
 ###### Output
 ```json
@@ -247,13 +273,35 @@ Applies a transactional batch of operations to lines using their unique IDs.
 
 ##### Compact Example
 ###### Input
-{{edit_lines_input_compact}}
+```json
+{
+  "edits": [
+    {
+      "content": "    let x = 100;",
+      "op": "update",
+      "target_id": "2#bcb4"
+    },
+    {
+      "content": "    let y = 200;",
+      "op": "insert_after",
+      "target_id": "2#bcb4"
+    },
+    {
+      "op": "delete",
+      "target_id": "3#c2b7"
+    }
+  ],
+  "filepath": "/path/to/project/create_ids.rs"
+}
+```
 
 ###### Output
 ```json
 {
   "modified_ids": [
-    "2#9639"
+    "4#b7a3",
+    "2#9639",
+    "4#b7a3"
   ],
   "status": "success"
 }

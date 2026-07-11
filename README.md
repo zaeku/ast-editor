@@ -50,9 +50,13 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-#### Live Outputs
+#### Usage Examples
 
-##### Default Output (`return_ids = false`)
+##### Default Example (`return_ids = false`)
+###### Input
+{{create_lines_input_default}}
+
+###### Output
 ```json
 {
   "message": "File successfully created and line editing session initialized.",
@@ -62,7 +66,11 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-##### Output with Line IDs (`return_ids = true`)
+##### Example with Line IDs (`return_ids = true`)
+###### Input
+{{create_lines_input_ids}}
+
+###### Output
 ```json
 {
   "ids": [
@@ -121,9 +129,13 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-#### Live Outputs
+#### Usage Examples
 
-##### Default Output (`only_ids = false`)
+##### Default Example (`only_ids = false`)
+###### Input
+{{view_lines_input_default}}
+
+###### Output
 ```json
 {
   "columns": ["id","n","content"],
@@ -140,7 +152,11 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-##### Output with IDs Only (`only_ids = true`)
+##### Example with IDs Only (`only_ids = true`)
+###### Input
+{{view_lines_input_only_ids}}
+
+###### Output
 ```json
 {
   "columns": ["id","n"],
@@ -227,9 +243,13 @@ Applies a transactional batch of operations to lines using their unique IDs.
 }
 ```
 
-#### Live Outputs
+#### Usage Examples
 
-##### Compact Output
+##### Compact Example
+###### Input
+{{edit_lines_input_compact}}
+
+###### Output
 ```json
 {
   "modified_ids": [

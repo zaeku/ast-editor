@@ -27,12 +27,20 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 #### Input Schema
 {{create_lines_schema}}
 
-#### Live Outputs
+#### Usage Examples
 
-##### Default Output (`return_ids = false`)
+##### Default Example (`return_ids = false`)
+###### Input
+{{create_lines_input_default}}
+
+###### Output
 {{create_lines_output_default}}
 
-##### Output with Line IDs (`return_ids = true`)
+##### Example with Line IDs (`return_ids = true`)
+###### Input
+{{create_lines_input_ids}}
+
+###### Output
 {{create_lines_output_ids}}
 
 #### 🛡️ Catastrophic Truncation Prevention / Why not `write_lines`
@@ -52,12 +60,20 @@ Retrieves a range of lines for any text file along with their persistent line ID
 #### Input Schema
 {{view_lines_schema}}
 
-#### Live Outputs
+#### Usage Examples
 
-##### Default Output (`only_ids = false`)
+##### Default Example (`only_ids = false`)
+###### Input
+{{view_lines_input_default}}
+
+###### Output
 {{view_lines_output_default}}
 
-##### Output with IDs Only (`only_ids = true`)
+##### Example with IDs Only (`only_ids = true`)
+###### Input
+{{view_lines_input_only_ids}}
+
+###### Output
 {{view_lines_output_only_ids}}
 
 ### 3. `edit_lines`
@@ -69,9 +85,13 @@ Applies a transactional batch of operations to lines using their unique IDs.
 #### Input Schema
 {{edit_lines_schema}}
 
-#### Live Outputs
+#### Usage Examples
 
-##### Compact Output
+##### Compact Example
+###### Input
+{{edit_lines_input_compact}}
+
+###### Output
 {{edit_lines_output_compact}}
 
 ### 4. `inspect_ast`

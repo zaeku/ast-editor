@@ -15,7 +15,7 @@ fn check_language_supported(path: &str) -> bool {
         ext.as_str(),
         "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java" |
         "cpp" | "cc" | "cxx" | "c" | "h" | "lua" | "html" | "htm" |
-        "json" | "yaml" | "yml" | "toml" | "swift"
+        "json" | "yaml" | "yml" | "toml" | "swift" | "md" | "markdown"
     )
 }
 

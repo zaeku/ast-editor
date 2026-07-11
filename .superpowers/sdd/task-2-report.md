@@ -1,8 +1,10 @@
+# Task 2 Report: Register Language & Update Code Logic
+
 - **Status:** DONE
 - **Commits created:**
-  - `5771e50 test: update integration tests to match compact edit_lines response and rebuild README`
+  - `69bce34` feat: register bash language support and update inspect/checking logic
 - **Test/compile summary:**
-  - All 75 tests compiled cleanly and passed successfully under `cargo test`.
-  - Clippy run was clean.
-- **Your concerns (if any):** None
+  - Ran `cargo check` and `cargo test` successfully.
+  - 61 unit tests, 13 integration tests, and 1 readme generation test passed.
+  - No compiler/checker errors.
 - **Report file path:** `/Users/zaeku/workspace/Tools for Agents/ast-editor/.superpowers/sdd/task-2-report.md`

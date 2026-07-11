@@ -191,7 +191,7 @@ When this error occurs, you must not attempt to edit the line surgically. Instea
 
 ## 2. AST-based Syntax Inspection & Validation
 
-For 21 supported programming and configuration languages, the tool provides additional structural analysis tools and automatic syntax validation.
+For supported programming, markup, and configuration languages, the tool provides additional structural analysis tools and automatic syntax validation.
 
 ### Supported Languages
 *   **Python** (`.py`)
@@ -206,6 +206,7 @@ For 21 supported programming and configuration languages, the tool provides addi
 *   **YAML** (`.yaml`, `.yml`)
 *   **TOML** (`.toml`)
 *   **Swift** (`.swift`)
+*   **Markdown** (`.md`, `.markdown`)
 
 ### Inspection Tools
 
@@ -234,7 +235,9 @@ Use this tool to view the hierarchical AST structure of a file to design custom 
 ---
 
 ### Syntax Validation & Automatic Rollback
-For supported languages, after applying edits in the database session, the resulting code is passed to the WebAssembly tree-sitter parser. If any new `ERROR` or `MISSING` nodes are detected in the AST, the edit is aborted, the SQLite transaction is rolled back, and the tool returns a validation error detailing the syntax problem.
+For programming and configuration languages, after applying edits in the database session, the resulting code is passed to the WebAssembly tree-sitter parser. If any new `ERROR` or `MISSING` nodes are detected in the AST, the edit is aborted, the SQLite transaction is rolled back, and the tool returns a validation error detailing the syntax problem.
+
+For Markdown files (`.md`, `.markdown`), static syntax validation is performed via Comrak to verify elements like unclosed fenced code blocks. If any unclosed fenced code blocks are found, the transaction is rolled back and a validation error is returned.
 
 ---
 

@@ -85,8 +85,12 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         "py" => "python",
         "rs" => "rust",
         "js" | "jsx" => "javascript",
-        "ts" | "tsx" => "typescript",
+        "ts" => "typescript",
+        "tsx" => "tsx",
         "go" => "go",
+        "java" => "java",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" => "cpp",
         "html" | "htm" => "html",
         "json" => "json",
         "lua" => "lua",
@@ -135,12 +139,44 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         Some(q.clone())
     } else if let Some(ref temp) = args.template {
         match (lang_name, temp.as_str()) {
+            // Rust
             ("rust", "functions") => Some("(function_item) @function".to_string()),
             ("rust", "classes") => Some("(struct_item) @class".to_string()),
             ("rust", "imports") => Some("(use_declaration) @import".to_string()),
+            ("rust", "traits") => Some("(trait_item) @trait".to_string()),
+            ("rust", "impls") => Some("(impl_item) @impl".to_string()),
+
+            // Python
             ("python", "functions") => Some("(function_definition) @function".to_string()),
             ("python", "classes") => Some("(class_definition) @class".to_string()),
             ("python", "imports") => Some("(import_statement) @import".to_string()),
+
+            // Go
+            ("go", "functions") => Some("[(function_declaration) (method_declaration)] @function".to_string()),
+            ("go", "classes") => Some("(type_declaration) @class".to_string()),
+            ("go", "imports") => Some("(import_declaration) @import".to_string()),
+            ("go", "interfaces") => Some("(type_declaration (type_spec type: (interface_type))) @interface".to_string()),
+            ("go", "structs") => Some("(type_declaration (type_spec type: (struct_type))) @struct".to_string()),
+
+            // JavaScript / TypeScript / TSX
+            ("javascript" | "typescript" | "tsx", "functions") => Some("[(function_declaration) (arrow_function) (method_definition)] @function".to_string()),
+            ("javascript" | "typescript" | "tsx", "classes") => Some("(class_declaration) @class".to_string()),
+            ("javascript" | "typescript" | "tsx", "imports") => Some("(import_statement) @import".to_string()),
+
+            // Java
+            ("java", "functions") => Some("(method_declaration) @function".to_string()),
+            ("java", "classes") => Some("[(class_declaration) (interface_declaration)] @class".to_string()),
+            ("java", "imports") => Some("(import_declaration) @import".to_string()),
+
+            // C / C++
+            ("c" | "cpp", "functions") => Some("(function_definition) @function".to_string()),
+            ("c" | "cpp", "classes") => Some("[(struct_specifier) (class_specifier)] @class".to_string()),
+            ("c" | "cpp", "imports") => Some("(preproc_include) @import".to_string()),
+            ("c" | "cpp", "macros") => Some("[(preproc_def) (preproc_function_def)] @macro".to_string()),
+
+            // Bash
+            ("bash", "functions") => Some("(function_definition) @function".to_string()),
+
             _ => None,
         }
     } else {
@@ -150,7 +186,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     if let (Some(ref template), None) = (&args.template, &query_str) {
         status = "warning".to_string();
         hint = Some(format!(
-            "Template '{}' is not supported for language '{}'. Supported templates: functions, classes, imports (rust, python).",
+            "Template '{}' is not supported for language '{}'. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp), traits, impls (rust), interfaces, structs (go), macros (c, cpp), functions (bash).",
             template,
             lang_name
         ));
@@ -807,4 +843,68 @@ fn main() {}
         let text = &res.content[0].text;
         assert!(text.contains(r#""capture_name": "Paragraph""#));
     }
+    #[tokio::test]
+    async fn test_inspect_templates_all_languages() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("test_inspect_templates_all_languages");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("resources").join("wasm");
+        let pm = Arc::new(ParserManager::with_paths(
+            temp_dir.join("cache"),
+            temp_dir.join("compiler"),
+            wasm_dir,
+        ).unwrap());
+
+        async fn test_one(pm: &Arc<ParserManager>, temp_dir: &std::path::Path, filename: &str, code: &str, template: &str, expected_contains: &str) {
+            let file_path = temp_dir.join(filename);
+            std::fs::write(&file_path, code).unwrap();
+            let args = InspectArgs {
+                file: file_path.to_string_lossy().to_string(),
+                query: None,
+                template: Some(template.to_string()),
+                include_code: Some(true),
+                code_format: None,
+                output_file: None,
+            };
+            let res_val = run_inspect(args, pm).await.unwrap();
+            let res: McpToolResult = serde_json::from_value(res_val).unwrap();
+            let text = &res.content[0].text;
+            assert!(
+                text.contains(expected_contains),
+                "Expected text to contain '{}' for template '{}' of file '{}'. Got: {}",
+                expected_contains,
+                template,
+                filename,
+                text
+            );
+        }
+
+        // 1. Rust
+        test_one(&pm, &temp_dir, "test.rs", "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}", "functions", "my_rust_func").await;
+        test_one(&pm, &temp_dir, "test.rs", "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}", "classes", "MyRustStruct").await;
+        test_one(&pm, &temp_dir, "test.rs", "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}", "traits", "MyRustTrait").await;
+
+        // 2. Python
+        test_one(&pm, &temp_dir, "test.py", "def my_py_func():\n    pass\nclass MyPyClass:\n    pass", "functions", "my_py_func").await;
+
+        // 3. Go
+        test_one(&pm, &temp_dir, "test.go", "package main\nfunc myGoFunc() {}\ntype MyGoStruct struct {}", "functions", "myGoFunc").await;
+
+        // 4. JS/TS/TSX
+        test_one(&pm, &temp_dir, "test.ts", "function myTsFunc() {}\nclass MyTsClass {}", "functions", "myTsFunc").await;
+        test_one(&pm, &temp_dir, "test.tsx", "const MyComponent = () => { return <div />; };", "functions", "MyComponent").await;
+
+        // 5. Java
+        test_one(&pm, &temp_dir, "test.java", "class MyClass {\n    public void myJavaMethod() {}\n}", "functions", "myJavaMethod").await;
+
+        // 6. C/C++
+        test_one(&pm, &temp_dir, "test.cpp", "int myCppFunc() { return 0; }\n#define MY_MACRO 42", "functions", "myCppFunc").await;
+        test_one(&pm, &temp_dir, "test.cpp", "int myCppFunc() { return 0; }\n#define MY_MACRO 42", "macros", "MY_MACRO").await;
+
+        // 7. Bash
+        test_one(&pm, &temp_dir, "test.sh", "my_bash_func() {\n  echo 'hello'\n}", "functions", "my_bash_func").await;
+    }
+
 }

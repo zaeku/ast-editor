@@ -165,14 +165,14 @@ async fn generate_readme() {
         "filepath": "/path/to/project/create_ids.rs",
         "edits": [
             {
-                "op": "update",
-                "target_id": id_to_update,
-                "content": "    let x = 100;"
-            },
-            {
                 "op": "insert_after",
                 "target_id": id_to_insert_after,
                 "content": "    let y = 200;"
+            },
+            {
+                "op": "update",
+                "target_id": id_to_update,
+                "content": "    let x = 100;"
             },
             {
                 "op": "delete",

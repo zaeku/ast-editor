@@ -277,13 +277,13 @@ Applies a transactional batch of operations to lines using their unique IDs.
 {
   "edits": [
     {
-      "content": "    let x = 100;",
-      "op": "update",
+      "content": "    let y = 200;",
+      "op": "insert_after",
       "target_id": "2#bcb4"
     },
     {
-      "content": "    let y = 200;",
-      "op": "insert_after",
+      "content": "    let x = 100;",
+      "op": "update",
       "target_id": "2#bcb4"
     },
     {

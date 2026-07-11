@@ -211,7 +211,7 @@ async fn generate_readme() {
     let fmt_create_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_create_ids).unwrap()).unwrap());
     let fmt_view_default = format!("```json\n{}\n```", out_view_default);
     let fmt_view_only_ids = format!("```json\n{}\n```", out_view_only_ids);
-    let fmt_edit_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_edit_compact).unwrap()).unwrap());
+    let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
 
     // 3. Read README.tpl.md
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

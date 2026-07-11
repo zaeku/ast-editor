@@ -298,12 +298,10 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ###### Output
 ```json
 {
+  "status": "success",
   "modified_ids": [
-    "4#b7a3",
-    "2#9639",
-    "4#b7a3"
-  ],
-  "status": "success"
+    "4#b7a3", "2#9639", "4#b7a3"
+  ]
 }
 ```
 

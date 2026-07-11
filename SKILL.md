@@ -215,7 +215,7 @@ Use this tool to find targeted syntax structures using Tree-sitter queries.
 *   **Arguments**:
     *   `file` (string, required): Absolute or relative path to the file to inspect.
     *   `query` (string, optional): Tree-sitter S-expression query. If omitted, falls back to outline templates.
-    *   `template` (string, optional): Predefined query template: `"functions"`, `"classes"`, or `"imports"`.
+    *   `template` (string, optional): Predefined query template: `"functions"`, `"classes"`, or `"imports"` (for programming/config languages); `"headings"`, `"headers"`, `"codeblocks"`, `"code_blocks"`, `"links"`, `"tables"`, or `"lists"` (for Markdown files).
     *   `include_code` (boolean, optional, default: `true`): Whether to include the source code of the enclosing definition (returns compact columns + lines format).
     *   `code_format` (string, optional, default: `"lines"`): Format of the returned code.
     *   `output_file` (boolean, optional, default: `false`): If `true`, saves matches payload to a file in outputs folder to bypass token limits.

@@ -95,7 +95,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
 {{edit_lines_output_compact}}
 
 ### 4. `inspect_ast`
-Queries a file's structure using Tree-sitter S-expression query patterns or templates (`functions`, `classes`, `imports`), returning target line ranges and definitions.
+Queries a file's structure using Tree-sitter S-expression query patterns or templates (`functions`, `classes`, `imports` for programming/config languages; `headings`, `headers`, `codeblocks`, `code_blocks`, `links`, `tables`, `lists` for Markdown), returning target line ranges and definitions.
 
 ### 5. `dump_ast`
 Dumps the complete AST syntax tree of a file as S-expression text up to a certain depth.

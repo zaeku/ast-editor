@@ -61,8 +61,8 @@ impl ToolDispatcher {
                         },
                         "template": {
                             "type": "string",
-                            "enum": ["functions", "classes", "imports"],
-                            "description": "Predefined query template to run"
+                            "enum": ["functions", "classes", "imports", "headings", "headers", "codeblocks", "code_blocks", "links", "tables", "lists"],
+                            "description": "Predefined query template to run. Supported templates: functions, classes, imports (rust, python); headings, headers, codeblocks, code_blocks, links, tables, lists (markdown)"
                         },
                         "include_code": {
                             "type": "boolean",

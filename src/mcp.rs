@@ -332,6 +332,21 @@ mod tests {
         assert!(tool_names.contains(&"view_lines"));
         assert!(tool_names.contains(&"edit_lines"));
         assert!(tool_names.contains(&"create_lines"));
+
+        // Verify updated template enum in inspect_ast tool schema
+        let inspect_tool = tools.iter().find(|t| t.get("name").unwrap().as_str().unwrap() == "inspect_ast").unwrap();
+        let schema = inspect_tool.get("inputSchema").unwrap();
+        let props = schema.get("properties").unwrap();
+        let template = props.get("template").unwrap();
+        let enum_vals = template.get("enum").unwrap().as_array().unwrap();
+        let enum_strs: Vec<&str> = enum_vals.iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(enum_strs.contains(&"headings"));
+        assert!(enum_strs.contains(&"headers"));
+        assert!(enum_strs.contains(&"codeblocks"));
+        assert!(enum_strs.contains(&"code_blocks"));
+        assert!(enum_strs.contains(&"links"));
+        assert!(enum_strs.contains(&"tables"));
+        assert!(enum_strs.contains(&"lists"));
     }
 
     #[tokio::test]

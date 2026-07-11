@@ -780,7 +780,7 @@ fn compute_sha256(path: &str) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn check_language_supported(path: &str) -> bool {
+pub fn check_language_supported(path: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -790,7 +790,7 @@ fn check_language_supported(path: &str) -> bool {
         ext.as_str(),
         "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java" |
         "cpp" | "cc" | "cxx" | "c" | "h" | "lua" | "html" | "htm" |
-        "json" | "yaml" | "yml" | "toml" | "swift"
+        "json" | "yaml" | "yml" | "toml" | "swift" | "md" | "markdown"
     )
 }
 
@@ -1082,6 +1082,8 @@ mod tests {
         assert!(check_language_supported("config.toml"));
         assert!(check_language_supported("FOO.RS"));
         assert!(check_language_supported("Bar.Py"));
+        assert!(check_language_supported("foo.md"));
+        assert!(check_language_supported("bar.markdown"));
         assert!(!check_language_supported("foo.txt"));
         assert!(!check_language_supported("foo.pdf"));
         assert!(!check_language_supported("foo"));

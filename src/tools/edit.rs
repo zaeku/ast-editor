@@ -2,21 +2,68 @@ use anyhow::{Result, Context, bail};
 use std::fs;
 pub use crate::tools::session_db::LineEdit;
 use crate::tools::session_db::{
-    parse_line_id, SessionRepository,
+    parse_line_id, SessionRepository, check_language_supported,
 };
 
-fn check_language_supported(path: &str) -> bool {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(
-        ext.as_str(),
-        "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java" |
-        "cpp" | "cc" | "cxx" | "c" | "h" | "lua" | "html" | "htm" |
-        "json" | "yaml" | "yml" | "toml" | "swift" | "md" | "markdown"
-    )
+fn validate_markdown(content: &str) -> Result<()> {
+    let arena = comrak::Arena::new();
+    let mut options = comrak::Options::default();
+    options.extension.table = true;
+    options.extension.tasklist = true;
+    options.extension.strikethrough = true;
+    
+    let root = comrak::parse_document(&arena, content, &options);
+    let lines: Vec<&str> = content.split('\n').collect();
+    
+    for node in root.descendants() {
+        let data = node.data.borrow();
+        if let comrak::nodes::NodeValue::CodeBlock(ref cb) = data.value {
+            if cb.fenced {
+                let start_line = data.sourcepos.start.line;
+                let end_line = data.sourcepos.end.line;
+                
+                let start_idx = start_line.saturating_sub(1);
+                let end_idx = end_line.saturating_sub(1);
+                
+                if start_idx < lines.len() && end_idx < lines.len() {
+                    let start_line_str = lines[start_idx];
+                    let trimmed = start_line_str.trim_start();
+                    let fence_char = if trimmed.starts_with('`') {
+                        Some('`')
+                    } else if trimmed.starts_with('~') {
+                        Some('~')
+                    } else {
+                        None
+                    };
+                    
+                    if let Some(fc) = fence_char {
+                        let fence_len = trimmed.chars().take_while(|&c| c == fc).count();
+                        if fence_len >= 3 {
+                            let end_line_str = lines[end_idx];
+                            let end_trimmed = end_line_str.trim_end_matches('\r').trim_start();
+                            let end_lead_spaces = end_line_str.len() - end_line_str.trim_start().len();
+                            
+                            let is_valid_closing_fence = if end_lead_spaces <= 3 && end_trimmed.starts_with(fc) {
+                                let end_fence_len = end_trimmed.chars().take_while(|&c| c == fc).count();
+                                let remainder = &end_trimmed[end_fence_len..];
+                                end_fence_len >= fence_len && remainder.trim().is_empty()
+                            } else {
+                                false
+                            };
+                            
+                            if !is_valid_closing_fence {
+                                anyhow::bail!("Validation error: Unclosed fenced code block starting at line {}", start_line);
+                            }
+                        }
+                    }
+                } else {
+                    anyhow::bail!("Validation error: Fenced code block source position is out of bounds. Start: {}, End: {}", start_line, end_line);
+                }
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 async fn validate_syntax(filepath: &str, content: &str, parser_manager: &crate::parser::ParserManager) -> Result<()> {
@@ -29,6 +76,10 @@ async fn validate_syntax(filepath: &str, content: &str, parser_manager: &crate::
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+
+    if ext == "md" || ext == "markdown" {
+        return validate_markdown(content);
+    }
 
     let (tree, _language) = parser_manager.parse_code(&ext, content).await
         .context("Failed to parse code for syntax validation")?;
@@ -802,6 +853,111 @@ mod tests {
         assert!(err_msg_replace.contains("prettier, black, or cargo fmt"));
 
         // Verify that the file remains unchanged on disk
+        let disk_content = fs::read_to_string(&file_path)?;
+        assert_eq!(disk_content, file_content);
+
+        fs::remove_dir_all(&env.dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_markdown_valid() {
+        let valid_md = r#"# Hello World
+Some text here.
+
+```rust
+fn main() {
+    println!("Hello");
+}
+```
+
+Other text.
+~strikethrough~
+
+| A | B |
+|---|---|
+| 1 | 2 |
+"#;
+        assert!(validate_markdown(valid_md).is_ok());
+    }
+
+    #[test]
+    fn test_validate_markdown_invalid() {
+        let invalid_md = r#"# Hello World
+
+```rust
+fn main() {
+    println!("Hello");
+}
+"#;
+        let res = validate_markdown(invalid_md);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("Unclosed fenced code block"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_lines_markdown_success() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("markdown_success");
+        let repository = SqliteSessionRepository;
+
+        let file_path = env.dir.join("test.md");
+        let file_content = "# Title\n\n```rust\nfn main() {}\n```\n";
+        fs::write(&file_path, file_content)?;
+
+        let filepath_str = file_path.to_str().unwrap();
+        let _init_res = init_edit_session(filepath_str, false)?;
+        
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 100, None)?;
+        let start_line_id = find_line_id(&lines_view, "fn main()");
+
+        let edits = vec![
+            LineEdit {
+                op: "update".to_string(),
+                target_id: Some(start_line_id),
+                content: Some("fn main() { println!(\"x\"); }".to_string()),
+                ..Default::default()
+            }
+        ];
+
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
+        assert!(result.is_ok());
+
+        let disk_content = fs::read_to_string(&file_path)?;
+        assert_eq!(disk_content, "# Title\n\n```rust\nfn main() { println!(\"x\"); }\n```\n");
+
+        fs::remove_dir_all(&env.dir)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_edit_lines_markdown_failure() -> Result<()> {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let env = TestEnvironment::new("markdown_failure");
+        let repository = SqliteSessionRepository;
+
+        let file_path = env.dir.join("test.md");
+        let file_content = "# Title\n\n```rust\nfn main() {}\n````\n";
+        fs::write(&file_path, file_content)?;
+
+        let filepath_str = file_path.to_str().unwrap();
+        let _init_res = init_edit_session(filepath_str, false)?;
+        
+        let lines_view = crate::tools::view::view_lines(&repository, filepath_str, 1, 100, None)?;
+        let target_line_id = find_line_id(&lines_view, "````");
+
+        let edits = vec![
+            LineEdit {
+                op: "delete".to_string(),
+                target_id: Some(target_line_id),
+                ..Default::default()
+            }
+        ];
+
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unclosed fenced code block"));
+
         let disk_content = fs::read_to_string(&file_path)?;
         assert_eq!(disk_content, file_content);
 

@@ -197,6 +197,237 @@ pub fn resolve_line_id(db_conn: &rusqlite::Connection, session_id: &str, id_str:
     }
 }
 
+/// One line of a file being edited, paired with the sequence number that
+/// identifies it. Position in `LineBuffer::lines` is the line's order.
+#[derive(Clone)]
+pub struct BufLine {
+    pub seq: i64,
+    pub content: String,
+    pub parent_context: Option<String>,
+}
+
+/// A file's lines held in memory for the duration of one edit batch. Edits
+/// mutate the buffer; nothing reaches the database or the disk until the
+/// caller decides the result is good.
+pub struct LineBuffer {
+    pub lines: Vec<BufLine>,
+    next_seq: i64,
+}
+
+/// Split an op's `content` field into the lines it should insert, matching the
+/// behaviour edits have always had: a single trailing newline is dropped, and
+/// empty content still inserts one empty line.
+fn split_insert_content(content: &str) -> Vec<String> {
+    let mut parts: Vec<&str> = if content.is_empty() { vec![""] } else { content.split('\n').collect() };
+    if parts.last() == Some(&"") {
+        parts.pop();
+    }
+    if parts.is_empty() {
+        parts.push("");
+    }
+    parts.iter().map(|line| line.strip_suffix('\r').unwrap_or(line).to_string()).collect()
+}
+
+fn strip_line_ending(content: &str) -> String {
+    let trimmed = content.strip_suffix('\n').unwrap_or(content);
+    trimmed.strip_suffix('\r').unwrap_or(trimmed).to_string()
+}
+
+impl LineBuffer {
+    pub fn new(lines: Vec<BufLine>) -> Self {
+        let next_seq = lines.iter().map(|l| l.seq).max().unwrap_or(0) + 1;
+        Self { lines, next_seq }
+    }
+
+    fn take_seq(&mut self) -> i64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        seq
+    }
+
+    pub fn join(&self, line_ending: &str) -> String {
+        self.lines.iter().map(|l| l.content.as_str()).collect::<Vec<_>>().join(line_ending) + line_ending
+    }
+
+    /// Resolve a target id to a position, verifying the caller's view of the
+    /// line still matches. A bare hash with no sequence prefix is resolved by
+    /// searching the buffer, and must match exactly one line.
+    fn position_of(&self, target_id: &str, role: &str, field: &str) -> Result<usize> {
+        if target_id.contains('#') {
+            let (seq, hash) = parse_line_id(target_id)?;
+            let idx = self.lines.iter().position(|l| l.seq == seq)
+                .with_context(|| format!("Target line not found for target_id={}", target_id))?;
+            let actual = compute_line_hash(&self.lines[idx].content);
+            if actual != hash {
+                bail!("CHECKSUM_ERROR: {} line hash mismatch for {}={}. Edit rejected.", role, field, target_id);
+            }
+            Ok(idx)
+        } else {
+            let matches: Vec<usize> = self.lines.iter().enumerate()
+                .filter(|(_, l)| compute_line_hash(&l.content) == target_id)
+                .map(|(idx, _)| idx)
+                .collect();
+            match matches.len() {
+                0 => bail!("CHECKSUM_ERROR: Target line hash '{}' not found in session", target_id),
+                1 => Ok(matches[0]),
+                _ => bail!("CHECKSUM_ERROR: Target line hash '{}' is ambiguous (matches multiple lines in session)", target_id),
+            }
+        }
+    }
+
+    fn id_at(&self, idx: usize) -> String {
+        format!("{:x}#{}", self.lines[idx].seq, compute_line_hash(&self.lines[idx].content))
+    }
+
+    fn insert_at(&mut self, idx: usize, contents: Vec<String>, modified: &mut Vec<String>) {
+        for (offset, content) in contents.into_iter().enumerate() {
+            let seq = self.take_seq();
+            self.lines.insert(idx + offset, BufLine { seq, content, parent_context: None });
+            modified.push(self.id_at(idx + offset));
+        }
+    }
+
+    /// Apply one batch of edits in order, returning the ids the batch touched.
+    pub fn apply(&mut self, edits: &[LineEdit]) -> Result<Vec<String>> {
+        let mut modified = Vec::new();
+
+        for edit in edits {
+            match edit.op {
+                EditOp::InsertAfter | EditOp::InsertBefore | EditOp::Append | EditOp::Prepend => {
+                    let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
+                    let no_target = edit.target_id.as_ref().map_or(true, |s| s.is_empty());
+
+                    let at = if edit.op == EditOp::Append || (edit.op == EditOp::InsertAfter && no_target) {
+                        self.lines.len()
+                    } else if edit.op == EditOp::Prepend || (edit.op == EditOp::InsertBefore && no_target) {
+                        0
+                    } else {
+                        let target_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                            .with_context(|| format!("CHECKSUM_ERROR: Missing target_id for {:?}", edit.op))?;
+                        let idx = self.position_of(target_id, "Target", "target_id")?;
+                        if edit.op == EditOp::InsertAfter { idx + 1 } else { idx }
+                    };
+
+                    self.insert_at(at, contents, &mut modified);
+                }
+
+                EditOp::Update => {
+                    let target_id = edit.target_id.as_ref().context("Missing target_id for update op")?;
+                    let content = edit.content.as_ref().context("Missing content for update op")?;
+                    let idx = self.position_of(target_id, "Target", "target_id")?;
+                    self.lines[idx].content = strip_line_ending(content);
+                    modified.push(self.id_at(idx));
+                }
+
+                EditOp::ReplaceSubstring => {
+                    let target_id = edit.target_id.as_ref().context("Missing target_id for replace_substring op")?;
+                    let pattern = edit.pattern.as_ref().context("Missing pattern for replace_substring op")?;
+                    let replacement = edit.replacement.as_ref().context("Missing replacement for replace_substring op")?;
+                    let occurrence = edit.occurrence.unwrap_or(1);
+                    if occurrence < 1 {
+                        bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
+                    }
+                    let idx = self.position_of(target_id, "Target", "target_id")?;
+
+                    let current = &self.lines[idx].content;
+                    let start = current.match_indices(pattern.as_str()).nth(occurrence - 1)
+                        .map(|(pos, _)| pos)
+                        .with_context(|| format!(
+                            "CHECKSUM_ERROR: Pattern '{}' (occurrence {}) not found in target line.",
+                            pattern, occurrence
+                        ))?;
+
+                    let mut updated = String::with_capacity(current.len());
+                    updated.push_str(&current[..start]);
+                    updated.push_str(replacement);
+                    updated.push_str(&current[start + pattern.len()..]);
+                    self.lines[idx].content = updated;
+                    modified.push(self.id_at(idx));
+                }
+
+                EditOp::Delete => {
+                    let target_id = edit.target_id.as_ref().context("Missing target_id for delete op")?;
+                    let idx = self.position_of(target_id, "Target", "target_id")?;
+                    self.lines.remove(idx);
+
+                    // Report the line now nearest the hole, so the agent has a
+                    // live id to anchor its next edit on.
+                    if !self.lines.is_empty() {
+                        let neighbour = if idx < self.lines.len() { idx } else { self.lines.len() - 1 };
+                        modified.push(self.id_at(neighbour));
+                    }
+                }
+
+                EditOp::ReplaceRange => {
+                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                        .context("CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op")?;
+                    let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty())
+                        .context("CHECKSUM_ERROR: Missing end_target_id for replace_range op")?;
+
+                    let start_idx = self.position_of(start_id, "Start", "target_id")?;
+                    let end_idx = self.position_of(end_id, "End", "end_target_id")?;
+                    if start_idx > end_idx {
+                        bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for replace_range.");
+                    }
+
+                    let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
+                    self.lines.drain(start_idx..=end_idx);
+                    self.insert_at(start_idx, contents, &mut modified);
+                }
+
+                EditOp::Move => {
+                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                        .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
+                    let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty()).unwrap_or(start_id);
+                    let move_pos = edit.move_position.unwrap_or(MovePosition::After);
+
+                    let start_idx = self.position_of(start_id, "Start", "target_id")?;
+                    let end_idx = self.position_of(end_id, "End", "end_target_id")?;
+                    if start_idx > end_idx {
+                        bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
+                    }
+
+                    // Where the block lands is decided against the lines that
+                    // stay put, so resolve the destination before lifting it.
+                    let dest_idx = match move_pos {
+                        MovePosition::Prepend | MovePosition::Append => None,
+                        MovePosition::Before | MovePosition::After => {
+                            let dest_id = edit.dest_target_id.as_ref().filter(|s| !s.is_empty())
+                                .context("CHECKSUM_ERROR: Missing dest_target_id for move before/after operation")?;
+                            let idx = self.position_of(dest_id, "Destination", "dest_target_id")?;
+                            if idx >= start_idx && idx <= end_idx {
+                                bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_target_id lies within source range).");
+                            }
+                            Some(idx)
+                        }
+                    };
+
+                    let block: Vec<BufLine> = self.lines.drain(start_idx..=end_idx).collect();
+                    let moved = block.len();
+
+                    let at = match (move_pos, dest_idx) {
+                        (MovePosition::Prepend, _) => 0,
+                        (MovePosition::Append, _) => self.lines.len(),
+                        (pos, Some(dest)) => {
+                            // The drain shifted every position after the block.
+                            let dest = if dest > end_idx { dest - moved } else { dest };
+                            if pos == MovePosition::Before { dest } else { dest + 1 }
+                        }
+                        (_, None) => unreachable!("before/after always resolve a destination"),
+                    };
+
+                    for (offset, line) in block.into_iter().enumerate() {
+                        self.lines.insert(at + offset, line);
+                        modified.push(self.id_at(at + offset));
+                    }
+                }
+            }
+        }
+
+        Ok(modified)
+    }
+}
+
 pub trait SessionRepository: Send + Sync {
     fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata>;
     fn get_total_lines(&self, session_id: &str) -> Result<usize>;
@@ -337,585 +568,40 @@ impl SessionRepository for SqliteSessionRepository {
     ) -> Result<Vec<String>> {
         let mut conn = get_db_connection()?;
         let tx = conn.transaction()?;
-        let mut newly_modified_ids = Vec::new();
 
-        for edit in edits {
-            match edit.op {
-                EditOp::InsertAfter | EditOp::InsertBefore | EditOp::Append | EditOp::Prepend => {
-                    let content = edit.content.clone().unwrap_or_default();
-                    let mut lines_to_insert: Vec<&str> = if content.is_empty() {
-                        vec![""]
-                    } else {
-                        content.split('\n').collect()
-                    };
-                    if lines_to_insert.last() == Some(&"") {
-                        lines_to_insert.pop();
-                    }
-                    if lines_to_insert.is_empty() {
-                        lines_to_insert.push("");
-                    }
-                    
-                    let is_empty_target = edit.target_id.as_ref().map_or(true, |s| s.is_empty());
-                    let (gap_start, gap_end) = if edit.op == EditOp::Append || (edit.op == EditOp::InsertAfter && is_empty_target) {
-                        let last_order: Option<f64> = tx.query_row(
-                            "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1",
-                            [session_id],
-                            |row| row.get(0)
-                        ).ok().flatten();
-                        let start = last_order.unwrap_or(0.0);
-                        (start, start + 1000.0)
-                    } else if edit.op == EditOp::Prepend || (edit.op == EditOp::InsertBefore && is_empty_target) {
-                        let first_order: Option<f64> = tx.query_row(
-                            "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1",
-                            [session_id],
-                            |row| row.get(0)
-                        ).ok().flatten();
-                        let end = first_order.unwrap_or(1000.0);
-                        (end - 1000.0, end)
-                    } else {
-                        let target_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                            .context(format!("CHECKSUM_ERROR: Missing target_id for {:?}", edit.op))?;
-                        let (target_seq, target_hash) = resolve_line_id(&tx, session_id, target_id)?;
-                        
-                        let (db_hash_opt, db_order): (Option<String>, f64) = tx.query_row(
-                            "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                            rusqlite::params![session_id, target_seq],
-                            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, f64>(1)?))
-                        ).context(format!("Target line not found for target_id={}", target_id))?;
+        let mut buffer = {
+            let mut stmt = tx.prepare(
+                "SELECT sequence_id, content, parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+            )?;
+            let rows = stmt.query_map([session_id], |row| Ok(BufLine {
+                seq: row.get(0)?,
+                content: row.get(1)?,
+                parent_context: row.get(2)?,
+            }))?;
+            LineBuffer::new(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        };
 
-                        let db_hash = match db_hash_opt {
-                            Some(h) => h,
-                            None => {
-                                let line_content: String = tx.query_row(
-                                    "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                    rusqlite::params![session_id, target_seq],
-                                    |row| row.get(0)
-                                )?;
-                                let h = compute_line_hash(&line_content);
-                                tx.execute(
-                                    "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                    rusqlite::params![h, session_id, target_seq],
-                                )?;
-                                h
-                            }
-                        };
+        let modified_ids = buffer.apply(edits)?;
 
-                        if db_hash != target_hash {
-                            anyhow::bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                        }
-
-                        if edit.op == EditOp::InsertAfter {
-                            let next_order: Option<f64> = tx.query_row(
-                                "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2",
-                                rusqlite::params![session_id, db_order],
-                                |row| row.get(0)
-                            ).ok().flatten();
-                            (db_order, next_order.unwrap_or(db_order + 1000.0))
-                        } else {
-                            let prev_order: Option<f64> = tx.query_row(
-                                "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2",
-                                rusqlite::params![session_id, db_order],
-                                |row| row.get(0)
-                            ).ok().flatten();
-                            (prev_order.unwrap_or(0.0), db_order)
-                        }
-                    };
-
-                    let max_seq: i64 = tx.query_row(
-                        "SELECT COALESCE(MAX(sequence_id), 0) FROM lines WHERE session_id = ?1",
-                        [session_id],
-                        |row| row.get(0)
-                    )?;
-
-                    let gap = gap_end - gap_start;
-                    let step = gap / (lines_to_insert.len() as f64 + 1.0);
-
-                    for (ins_idx, ins_line) in lines_to_insert.iter().enumerate() {
-                        let trimmed_ins = ins_line.strip_suffix('\r').unwrap_or(ins_line);
-                        let new_seq = max_seq + 1 + (ins_idx as i64);
-                        let hash = compute_line_hash(trimmed_ins);
-                        let current_order = gap_start + step * ((ins_idx + 1) as f64);
-                        tx.execute(
-                            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, ?3, ?4, ?5);",
-                            rusqlite::params![session_id, new_seq, hash, trimmed_ins, current_order]
-                        )?;
-                        newly_modified_ids.push(format!("{:x}#{}", new_seq, hash));
-                    }
-                }
-                EditOp::Update => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for update op")?;
-                    let (target_seq, target_hash) = resolve_line_id(&tx, session_id, target_id)?;
-                    let content = edit.content.as_ref().context("Missing content for update op")?;
-
-                    let (db_hash_opt, db_id): (Option<String>, i64) = tx.query_row(
-                        "SELECT line_hash, id FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, target_seq],
-                        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
-                    ).context(format!("Target line not found for target_id={}", target_id))?;
-                    
-                    let db_hash = match db_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE id = ?1",
-                                rusqlite::params![db_id],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                                rusqlite::params![h, db_id],
-                            )?;
-                            h
-                        }
-                    };
-
-                    if db_hash != target_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                    }
-
-                    let mut content_clean = content.clone();
-                    if content_clean.ends_with('\n') {
-                        content_clean.pop();
-                    }
-                    if content_clean.ends_with('\r') {
-                        content_clean.pop();
-                    }
-                    let new_hash = compute_line_hash(&content_clean);
-                    tx.execute(
-                        "UPDATE lines SET content = ?1, line_hash = ?2 WHERE id = ?3;",
-                        rusqlite::params![content_clean, new_hash, db_id]
-                    )?;
-                    newly_modified_ids.push(format!("{:x}#{}", target_seq, new_hash));
-                }
-                EditOp::ReplaceSubstring => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for replace_substring op")?;
-                    let (target_seq, target_hash) = resolve_line_id(&tx, session_id, target_id)?;
-                    let pattern = edit.pattern.as_ref().context("Missing pattern for replace_substring op")?;
-                    let replacement = edit.replacement.as_ref().context("Missing replacement for replace_substring op")?;
-                    let occurrence = edit.occurrence.unwrap_or(1);
-
-                    let (db_hash_opt, db_id, current_content): (Option<String>, i64, String) = tx.query_row(
-                        "SELECT line_hash, id, content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, target_seq],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, String>(2)?))
-                    ).context(format!("Target line not found for target_id={}", target_id))?;
-
-                    let db_hash = match db_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let h = compute_line_hash(&current_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                                rusqlite::params![h, db_id],
-                            )?;
-                            h
-                        }
-                    };
-
-                    if db_hash != target_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                    }
-
-                    if occurrence < 1 {
-                        anyhow::bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
-                    }
-
-                    // Find and replace the N-th occurrence
-                    let mut new_content = String::new();
-                    let mut current_pos = 0;
-                    let mut match_count = 0;
-                    let mut replaced = false;
-
-                    while let Some(pos) = current_content[current_pos..].find(pattern) {
-                        let actual_pos = current_pos + pos;
-                        new_content.push_str(&current_content[current_pos..actual_pos]);
-                        match_count += 1;
-                        if match_count == occurrence {
-                            new_content.push_str(replacement);
-                            current_pos = actual_pos + pattern.len();
-                            replaced = true;
-                            break;
-                        } else {
-                            new_content.push_str(pattern);
-                            current_pos = actual_pos + pattern.len();
-                        }
-                    }
-
-                    if !replaced {
-                        anyhow::bail!(
-                            "CHECKSUM_ERROR: Pattern '{}' (occurrence {}) not found in target line.",
-                            pattern,
-                            occurrence
-                        );
-                    }
-
-                    new_content.push_str(&current_content[current_pos..]);
-
-                    let new_hash = compute_line_hash(&new_content);
-                    tx.execute(
-                        "UPDATE lines SET content = ?1, line_hash = ?2 WHERE id = ?3;",
-                        rusqlite::params![new_content, new_hash, db_id]
-                    )?;
-                    newly_modified_ids.push(format!("{:x}#{}", target_seq, new_hash));
-                }
-                EditOp::Delete => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for delete op")?;
-                    let (target_seq, target_hash) = resolve_line_id(&tx, session_id, target_id)?;
-
-                    let (db_hash_opt, db_id, sort_order): (Option<String>, i64, f64) = tx.query_row(
-                        "SELECT line_hash, id, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, target_seq],
-                        |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?, row.get::<_, f64>(2)?))
-                    ).context(format!("Target line not found for target_id={}", target_id))?;
-                    
-                    let db_hash = match db_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE id = ?1",
-                                rusqlite::params![db_id],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                                rusqlite::params![h, db_id],
-                            )?;
-                            h
-                        }
-                    };
-
-                    if db_hash != target_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: Target line hash mismatch for target_id={}. Edit rejected.", target_id);
-                    }
-
-                    tx.execute("DELETE FROM lines WHERE id = ?1;", [db_id])?;
-
-                    // Find closest remaining line to deletion and add to newly_modified_ids to show context
-                    let closest: Option<(i64, i64, Option<String>)> = tx.query_row(
-                        "SELECT id, sequence_id, line_hash FROM lines WHERE session_id = ?1 ORDER BY ABS(sort_order - ?2) LIMIT 1",
-                        rusqlite::params![session_id, sort_order],
-                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-                    ).ok();
-                    if let Some((db_id, seq, hash_opt)) = closest {
-                        let hash = match hash_opt {
-                            Some(h) => h,
-                            None => {
-                                let line_content: String = tx.query_row(
-                                    "SELECT content FROM lines WHERE id = ?1",
-                                    [db_id],
-                                    |row| row.get(0)
-                                )?;
-                                let h = compute_line_hash(&line_content);
-                                tx.execute(
-                                    "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                                    rusqlite::params![h, db_id],
-                                )?;
-                                h
-                            }
-                        };
-                        newly_modified_ids.push(format!("{:x}#{}", seq, hash));
-                    }
-                }
-                EditOp::ReplaceRange => {
-                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                        .context("CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op")?;
-                    let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty())
-                        .context("CHECKSUM_ERROR: Missing end_target_id for replace_range op")?;
-                    let content = edit.content.as_ref().unwrap_or(&String::new()).clone();
-
-                    let (start_seq, start_hash) = resolve_line_id(&tx, session_id, start_id)?;
-                    let (end_seq, end_hash) = resolve_line_id(&tx, session_id, end_id)?;
-
-                    let (start_hash_opt, start_order): (Option<String>, f64) = tx.query_row(
-                        "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, start_seq],
-                        |row| Ok((row.get(0)?, row.get(1)?))
-                    ).context(format!("Start line not found for target_id={}", start_id))?;
-
-                    let db_start_hash = match start_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                rusqlite::params![session_id, start_seq],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                rusqlite::params![h, session_id, start_seq],
-                            )?;
-                            h
-                        }
-                    };
-                    if db_start_hash != start_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: Start line hash mismatch for target_id={}. Edit rejected.", start_id);
-                    }
-
-                    let (end_hash_opt, end_order): (Option<String>, f64) = tx.query_row(
-                        "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, end_seq],
-                        |row| Ok((row.get(0)?, row.get(1)?))
-                    ).context(format!("End line not found for end_target_id={}", end_id))?;
-
-                    let db_end_hash = match end_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                rusqlite::params![session_id, end_seq],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                rusqlite::params![h, session_id, end_seq],
-                            )?;
-                            h
-                        }
-                    };
-                    if db_end_hash != end_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: End line hash mismatch for end_target_id={}. Edit rejected.", end_id);
-                    }
-
-                    if start_order > end_order {
-                        anyhow::bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for replace_range.");
-                    }
-
-                    let prev_order: Option<f64> = tx.query_row(
-                        "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2",
-                        rusqlite::params![session_id, start_order],
-                        |row| row.get(0)
-                    ).ok().flatten();
-                    let gap_start = prev_order.unwrap_or(start_order - 1000.0);
-
-                    let next_order: Option<f64> = tx.query_row(
-                        "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2",
-                        rusqlite::params![session_id, end_order],
-                        |row| row.get(0)
-                    ).ok().flatten();
-                    let gap_end = next_order.unwrap_or(end_order + 1000.0);
-
-                    tx.execute(
-                        "DELETE FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3",
-                        rusqlite::params![session_id, start_order, end_order]
-                    )?;
-
-                    let mut lines_to_insert: Vec<&str> = if content.is_empty() {
-                        vec![""]
-                    } else {
-                        content.split('\n').collect()
-                    };
-                    if lines_to_insert.last() == Some(&"") {
-                        lines_to_insert.pop();
-                    }
-                    if lines_to_insert.is_empty() {
-                        lines_to_insert.push("");
-                    }
-
-                    let max_seq: i64 = tx.query_row(
-                        "SELECT COALESCE(MAX(sequence_id), 0) FROM lines WHERE session_id = ?1",
-                        [session_id],
-                        |row| row.get(0)
-                    )?;
-
-                    let gap = gap_end - gap_start;
-                    let step = gap / (lines_to_insert.len() as f64 + 1.0);
-
-                    for (ins_idx, ins_line) in lines_to_insert.iter().enumerate() {
-                        let trimmed_ins = ins_line.strip_suffix('\r').unwrap_or(ins_line);
-                        let new_seq = max_seq + 1 + (ins_idx as i64);
-                        let hash = compute_line_hash(trimmed_ins);
-                        let current_order = gap_start + step * ((ins_idx + 1) as f64);
-                        tx.execute(
-                            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, ?3, ?4, ?5);",
-                            rusqlite::params![session_id, new_seq, hash, trimmed_ins, current_order]
-                        )?;
-                        newly_modified_ids.push(format!("{:x}#{}", new_seq, hash));
-                    }
-                }
-                EditOp::Move => {
-                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                         .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
-                    let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty()).unwrap_or(start_id);
-                    let move_pos = edit.move_position.unwrap_or(MovePosition::After);
-
-                    let (start_seq, start_hash) = resolve_line_id(&tx, session_id, start_id)?;
-                    let (end_seq, end_hash) = resolve_line_id(&tx, session_id, end_id)?;
-
-                    let (start_hash_opt, start_order): (Option<String>, f64) = tx.query_row(
-                        "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, start_seq],
-                        |row| Ok((row.get(0)?, row.get(1)?))
-                    ).context(format!("Start line not found for target_id={}", start_id))?;
-                    let db_start_hash = match start_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                rusqlite::params![session_id, start_seq],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                rusqlite::params![h, session_id, start_seq],
-                            )?;
-                            h
-                        }
-                    };
-                    if db_start_hash != start_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: Start line hash mismatch for target_id={}. Edit rejected.", start_id);
-                    }
-
-                    let (end_hash_opt, end_order): (Option<String>, f64) = tx.query_row(
-                        "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                        rusqlite::params![session_id, end_seq],
-                        |row| Ok((row.get(0)?, row.get(1)?))
-                    ).context(format!("End line not found for end_target_id={}", end_id))?;
-                    let db_end_hash = match end_hash_opt {
-                        Some(h) => h,
-                        None => {
-                            let line_content: String = tx.query_row(
-                                "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                rusqlite::params![session_id, end_seq],
-                                |row| row.get(0)
-                            )?;
-                            let h = compute_line_hash(&line_content);
-                            tx.execute(
-                                "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                rusqlite::params![h, session_id, end_seq],
-                            )?;
-                            h
-                        }
-                    };
-                    if db_end_hash != end_hash {
-                        anyhow::bail!("CHECKSUM_ERROR: End line hash mismatch for end_target_id={}. Edit rejected.", end_id);
-                    }
-
-                    if start_order > end_order {
-                        anyhow::bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
-                    }
-
-                    struct MovedLine {
-                        id: i64,
-                        seq: i64,
-                        hash: String,
-                    }
-                    let mut moved_lines = Vec::new();
-                    {
-                        let mut stmt = tx.prepare("SELECT id, sequence_id, COALESCE(line_hash, '') FROM lines WHERE session_id = ?1 AND sort_order >= ?2 AND sort_order <= ?3 ORDER BY sort_order")?;
-                        let mut rows = stmt.query(rusqlite::params![session_id, start_order, end_order])?;
-                        while let Some(row) = rows.next()? {
-                            let id: i64 = row.get(0)?;
-                            let seq: i64 = row.get(1)?;
-                            let mut hash: String = row.get(2)?;
-                            if hash.is_empty() {
-                                let line_content: String = tx.query_row(
-                                    "SELECT content FROM lines WHERE id = ?1",
-                                    [id],
-                                    |r| r.get(0)
-                                )?;
-                                hash = compute_line_hash(&line_content);
-                                tx.execute(
-                                    "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                                    rusqlite::params![hash, id],
-                                )?;
-                            }
-                            moved_lines.push(MovedLine { id, seq, hash });
-                        }
-                    }
-
-                    let (gap_start, gap_end) = match move_pos {
-                        MovePosition::Prepend => {
-                            let first_non_moved: Option<f64> = tx.query_row(
-                                "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND (sort_order < ?2 OR sort_order > ?3)",
-                                rusqlite::params![session_id, start_order, end_order],
-                                |row| row.get(0)
-                            ).ok().flatten();
-                            let end = first_non_moved.unwrap_or(1000.0);
-                            (end - 1000.0, end)
-                        }
-                        MovePosition::Append => {
-                            let last_non_moved: Option<f64> = tx.query_row(
-                                "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND (sort_order < ?2 OR sort_order > ?3)",
-                                rusqlite::params![session_id, start_order, end_order],
-                                |row| row.get(0)
-                            ).ok().flatten();
-                            let start = last_non_moved.unwrap_or(0.0);
-                            (start, start + 1000.0)
-                        }
-                        MovePosition::Before | MovePosition::After => {
-                            let dest_id = edit.dest_target_id.as_ref().filter(|s| !s.is_empty())
-                                .context("CHECKSUM_ERROR: Missing dest_target_id for move before/after operation")?;
-                            let (dest_seq, dest_hash) = resolve_line_id(&tx, session_id, dest_id)?;
-
-                            let (db_dest_hash_opt, dest_order): (Option<String>, f64) = tx.query_row(
-                                "SELECT line_hash, sort_order FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                rusqlite::params![session_id, dest_seq],
-                                |row| Ok((row.get(0)?, row.get(1)?))
-                            ).context(format!("Destination line not found for dest_target_id={}", dest_id))?;
-                            let db_dest_hash = match db_dest_hash_opt {
-                                Some(h) => h,
-                                None => {
-                                    let line_content: String = tx.query_row(
-                                        "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2",
-                                        rusqlite::params![session_id, dest_seq],
-                                        |row| row.get(0)
-                                    )?;
-                                    let h = compute_line_hash(&line_content);
-                                     tx.execute(
-                                        "UPDATE lines SET line_hash = ?1 WHERE session_id = ?2 AND sequence_id = ?3",
-                                        rusqlite::params![h, session_id, dest_seq],
-                                    )?;
-                                    h
-                                }
-                            };
-                            if db_dest_hash != dest_hash {
-                                anyhow::bail!("CHECKSUM_ERROR: Destination line hash mismatch for dest_target_id={}. Edit rejected.", dest_id);
-                            }
-
-                            if dest_order >= start_order && dest_order <= end_order {
-                                anyhow::bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_target_id lies within source range).");
-                            }
-
-                            if move_pos == MovePosition::Before {
-                                let prev_non_moved: Option<f64> = tx.query_row(
-                                    "SELECT MAX(sort_order) FROM lines WHERE session_id = ?1 AND sort_order < ?2 AND (sort_order < ?3 OR sort_order > ?4)",
-                                    rusqlite::params![session_id, dest_order, start_order, end_order],
-                                    |row| row.get(0)
-                                ).ok().flatten();
-                                (prev_non_moved.unwrap_or(dest_order - 1000.0), dest_order)
-                            } else {
-                                let next_non_moved: Option<f64> = tx.query_row(
-                                    "SELECT MIN(sort_order) FROM lines WHERE session_id = ?1 AND sort_order > ?2 AND (sort_order < ?3 OR sort_order > ?4)",
-                                    rusqlite::params![session_id, dest_order, start_order, end_order],
-                                    |row| row.get(0)
-                                ).ok().flatten();
-                                (dest_order, next_non_moved.unwrap_or(dest_order + 1000.0))
-                            }
-                        }
-                    };
-
-                    let gap = gap_end - gap_start;
-                    let step = gap / (moved_lines.len() as f64 + 1.0);
-
-                    for (idx, line) in moved_lines.iter().enumerate() {
-                        let current_order = gap_start + step * ((idx + 1) as f64);
-                        tx.execute(
-                            "UPDATE lines SET sort_order = ?1 WHERE id = ?2;",
-                            rusqlite::params![current_order, line.id]
-                        )?;
-                        newly_modified_ids.push(format!("{:x}#{}", line.seq, line.hash));
-                    }
-                }
+        tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
+            )?;
+            for (idx, line) in buffer.lines.iter().enumerate() {
+                stmt.execute(rusqlite::params![
+                    session_id,
+                    line.seq,
+                    compute_line_hash(&line.content),
+                    line.content,
+                    ((idx + 1) as f64) * 1000.0,
+                    line.parent_context,
+                ])?;
             }
         }
 
         tx.commit()?;
-        Ok(newly_modified_ids)
+        Ok(modified_ids)
     }
 
     fn restore_session_lines(

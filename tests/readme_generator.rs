@@ -1,4 +1,4 @@
-use ast_editor::tools::session_db::SqliteSessionRepository;
+use ast_editor::tools::session_db::{SqliteSessionRepository, EditOp};
 use ast_editor::tools::view;
 use ast_editor::tools::edit;
 use ast_editor::tools::ToolDispatcher;
@@ -82,8 +82,10 @@ async fn generate_readme() {
     let out_view_default = view::view_lines(
         &repo,
         file_ids.to_str().unwrap(),
-        1,
-        3,
+        Some(1),
+        Some(3),
+        None,
+        None,
         None,
     ).unwrap();
 
@@ -91,9 +93,11 @@ async fn generate_readme() {
     let out_view_only_ids = view::view_lines(
         &repo,
         file_ids.to_str().unwrap(),
-        1,
-        3,
+        Some(1),
+        Some(3),
         Some(true),
+        None,
+        None,
     ).unwrap();
 
     // Parse the returned line ID for `let x = 42;` (line 2)
@@ -106,19 +110,19 @@ async fn generate_readme() {
     // Run edit_lines multi-operation batch (update, insert_after, delete)
     let edits = vec![
         edit::LineEdit {
-            op: "insert_after".to_string(),
+            op: EditOp::InsertAfter,
             target_id: Some(id_to_insert_after.clone()),
             content: Some("    let y = 200;".to_string()),
             ..Default::default()
         },
         edit::LineEdit {
-            op: "update".to_string(),
+            op: EditOp::Update,
             target_id: Some(id_to_update.clone()),
             content: Some("    let x = 100;".to_string()),
             ..Default::default()
         },
         edit::LineEdit {
-            op: "delete".to_string(),
+            op: EditOp::Delete,
             target_id: Some(id_to_delete.clone()),
             ..Default::default()
         },
@@ -206,16 +210,23 @@ async fn generate_readme() {
     let fmt_view_lines_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(view_lines_schema).unwrap());
     let fmt_edit_lines_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(edit_lines_schema).unwrap());
 
-    // Re-parse and pretty print tool outputs to ensure they look perfect
-    let fmt_create_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_create_default).unwrap()).unwrap());
-    let fmt_create_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&out_create_ids).unwrap()).unwrap());
-    let fmt_view_default = format!("```json\n{}\n```", out_view_default);
-    let fmt_view_only_ids = format!("```json\n{}\n```", out_view_only_ids);
+    // Format tool outputs to ensure they look perfect
+    let fmt_create_default = format!("```json\n{}\n```", out_create_default);
+    let fmt_create_ids = format!("```json\n{}\n```", out_create_ids);
+    let fmt_view_default = format!(
+        "```rust\n{}\n```\n\n```json\n{}\n```",
+        out_view_default.lines_text.as_ref().unwrap(),
+        out_view_default.metadata_json
+    );
+    let fmt_view_only_ids = format!(
+        "```json\n{}\n```",
+        out_view_only_ids.metadata_json
+    );
     let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
 
     // 3. Read README.tpl.md
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let readme_tpl_path = manifest_dir.join("README.tpl.md");
+    let readme_tpl_path = manifest_dir.join("agent_skill").join("doc_templates").join("README.tpl.md");
     let mut readme_content = fs::read_to_string(readme_tpl_path).unwrap();
 
     // 4. Replace all 13 placeholders
@@ -236,4 +247,46 @@ async fn generate_readme() {
     // 5. Write to README.md at the workspace root
     let readme_path = manifest_dir.join("README.md");
     fs::write(readme_path, readme_content).unwrap();
+
+    // 6. Read api_specification.tpl.md
+    let api_tpl_path = manifest_dir.join("agent_skill").join("doc_templates").join("api_specification.tpl.md");
+    let mut api_content = fs::read_to_string(api_tpl_path).unwrap();
+
+    // 7. Replace placeholders in api_content
+    api_content = api_content.replace("{{create_lines_schema}}", &fmt_create_lines_schema);
+    api_content = api_content.replace("{{create_lines_input_default}}", &fmt_create_lines_input_default);
+    api_content = api_content.replace("{{create_lines_output_default}}", &fmt_create_default);
+    api_content = api_content.replace("{{create_lines_input_ids}}", &fmt_create_lines_input_ids);
+    api_content = api_content.replace("{{create_lines_output_ids}}", &fmt_create_ids);
+    api_content = api_content.replace("{{view_lines_schema}}", &fmt_view_lines_schema);
+    api_content = api_content.replace("{{view_lines_input_default}}", &fmt_view_lines_input_default);
+    api_content = api_content.replace("{{view_lines_output_default}}", &fmt_view_default);
+    api_content = api_content.replace("{{view_lines_input_only_ids}}", &fmt_view_lines_input_only_ids);
+    api_content = api_content.replace("{{view_lines_output_only_ids}}", &fmt_view_only_ids);
+    api_content = api_content.replace("{{edit_lines_schema}}", &fmt_edit_lines_schema);
+    api_content = api_content.replace("{{edit_lines_input_compact}}", &fmt_edit_lines_input_compact);
+    api_content = api_content.replace("{{edit_lines_output_compact}}", &fmt_edit_compact);
+
+    // 8. Write outputs
+    let api_path = manifest_dir.join("agent_skill").join("references").join("api_specification.md");
+    fs::write(&api_path, &api_content).unwrap();
+
+    // Read generated SKILL.md to sync with the global config folder later
+    let skill_path = manifest_dir.join("agent_skill").join("SKILL.md");
+    let skill_content = fs::read_to_string(skill_path).unwrap();
+
+
+
+    // 9. Copy to global config folder if home_dir is found
+    if let Some(mut global_skill_path) = dirs::home_dir() {
+        global_skill_path.push(".gemini");
+        global_skill_path.push("config");
+        global_skill_path.push("plugins");
+        global_skill_path.push("custom-developer-plugin");
+        global_skill_path.push("skills");
+        global_skill_path.push("ast-editor");
+        let _ = fs::create_dir_all(&global_skill_path);
+        global_skill_path.push("SKILL.md");
+        fs::write(global_skill_path, skill_content).unwrap();
+    }
 }

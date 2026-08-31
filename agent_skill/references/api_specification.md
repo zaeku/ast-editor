@@ -1,30 +1,13 @@
-# ast-editor
+# API Specification - `ast-editor`
 
-`ast-editor` is an agent-native tool suite designed to enable AI coding assistants to view, inspect, and modify codebases with absolute precision and safety. By combining Tree-sitter AST queries with a session-based transactional line editor, it eliminates common editing failure modes like line-sliding hallucinations and duplicate match corruption.
-
----
-
-## 🌟 Core Value Proposition
-
-When agentic workflows attempt to edit code using traditional string-replacement tools (like `replace_file_content`), they suffer from:
-1. **Line-sliding Hallucinations**: Modifying a block of code shifts the line numbers, causing subsequent edits in the same session to target the wrong lines.
-2. **Brittle Matching**: Find-and-replace rules fail or match duplicate blocks when editing common or generic lines.
-3. **Token Waste**: Dumping thousands of lines to edit a small function wastes context windows and tokens.
-
-`ast-editor` solves this by introducing:
-*   **Shift-Invariant targeting**: A session-cached database maps every line to a stable sequence ID and content hash (`[id, n, content]`). Line IDs remain valid even when surrounding lines are added, deleted, or shifted.
-*   **Safe Paragraph/Block-level Edits**: Instead of writing complex regex, agents edit code using target anchors with transactional rollbacks.
-*   **Multi-layered Safety Guards**: Automatic 800-line limits, 45KB response size caps, and 2048-character line truncations prevent token exhaustion.
+This document defines the interface, parameters, and return formats for the `ast-editor` MCP tool suite.
 
 ---
 
-## 🛠️ MCP Tool Suite
+## 1. `create_lines`
+Creates a brand-new file with the initial content and JIT-initializes its line editing session.
 
-### 1. `create_lines`
-Creates a brand-new file with initial content, JIT-initializes its database editing session, and returns the line list with unique line IDs in a single atomic step.
-*   **Safety**: Fails with `FILE_ALREADY_EXISTS` if the target path is not empty.
-
-#### Input Schema
+### Parameters (JSON Schema)
 ```json
 {
   "properties": {
@@ -50,10 +33,10 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-#### Usage Examples
+### Usage Examples
 
-##### Default Example (`return_ids = false`)
-###### Input
+#### Default Example (`return_ids = false`)
+##### Input
 ```json
 {
   "content": "fn main() {\n    let x = 42;\n}\n",
@@ -62,7 +45,7 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-###### Output
+##### Output
 ```json
 {
   "message": "File successfully created and line editing session initialized.",
@@ -72,8 +55,8 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-##### Example with Line IDs (`return_ids = true`)
-###### Input
+#### Example with Line IDs (`return_ids = true`)
+##### Input
 ```json
 {
   "content": "fn main() {\n    let x = 42;\n}\n",
@@ -82,7 +65,7 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-###### Output
+##### Output
 ```json
 {
   "ids": [
@@ -95,21 +78,12 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 }
 ```
 
-#### 🛡️ Catastrophic Truncation Prevention / Why not `write_lines`
+---
 
-Lazy agents often try to rewrite whole files to apply simple changes. When a network hiccup or token limit is reached mid-stream, it causes catastrophic mid-file truncation and permanent data loss.
+## 2. `view_lines`
+Retrieves a range of lines for any text file along with their persistent unique Line IDs.
 
-To prevent this, `create_lines` intentionally blocks overwriting (`FILE_ALREADY_EXISTS`) to act as a safety guardrail forcing surgical line-level edits (`edit_lines`) for existing files.
-
-We do not rename `create_lines` to `write_lines` because the word "write" suggests overwriting or rewriting existing content, whereas `create_lines` is explicitly designed as a one-time creation/initialization operation.
-
-### 2. `view_lines`
-Retrieves a range of lines for any text file along with their persistent line IDs.
-*   **Capping**: Range length is capped at 800 lines max per call.
-*   **Capacity Limit**: Cumulative returned text is capped at 45,000 bytes.
-*   **Truncation**: Lines exceeding 2048 characters are truncated in the view and given a `#TRUNC` ID suffix.
-
-#### Input Schema
+### Parameters (JSON Schema)
 ```json
 {
   "properties": {
@@ -145,10 +119,10 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-#### Usage Examples
+### Usage Examples
 
-##### Default Example (`only_ids = false`)
-###### Input
+#### Default Example (`only_ids = false`)
+##### Input
 ```json
 {
   "end_line": 3,
@@ -158,7 +132,7 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-###### Output
+##### Output
 ```rust
 1: fn main() {
 2:     let x = 42;
@@ -177,8 +151,8 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-##### Example with IDs Only (`only_ids = true`)
-###### Input
+#### Example with IDs Only (`only_ids = true`)
+##### Input
 ```json
 {
   "end_line": 3,
@@ -188,7 +162,7 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-###### Output
+##### Output
 ```json
 {
   "enclosing_contexts": [],
@@ -201,13 +175,12 @@ Retrieves a range of lines for any text file along with their persistent line ID
 }
 ```
 
-### 3. `edit_lines`
-Applies a transactional batch of operations to lines using their unique IDs.
-*   **Supported Operations**: `insert_before`, `insert_after`, `update`, `delete`, `move`, `replace_range`.
-*   **Syntax Validation**: Performs AST parsing validation for supported programming, configuration, and shell script languages, and Comrak-based structural validation for Markdown (`.md`, `.markdown` extensions) to verify elements like unclosed code fences. Changes are automatically rolled back if syntax errors are introduced.
-*   **Safety**: Reject edits to `#TRUNC` lines with a `LINE_TOO_LONG_ERROR` recommending beautifiers (prettier, black, cargo fmt) to prevent data loss.
+---
 
-#### Input Schema
+## 3. `edit_lines`
+Applies a transactional batch of operations to lines using their unique IDs.
+
+### Parameters (JSON Schema)
 ```json
 {
   "properties": {
@@ -291,10 +264,10 @@ Applies a transactional batch of operations to lines using their unique IDs.
 }
 ```
 
-#### Usage Examples
+### Usage Examples
 
-##### Compact Example
-###### Input
+#### Compact Example
+##### Input
 ```json
 {
   "edits": [
@@ -317,7 +290,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
 }
 ```
 
-###### Output
+##### Output
 ```json
 {
   "status": "success",
@@ -326,64 +299,3 @@ Applies a transactional batch of operations to lines using their unique IDs.
   ]
 }
 ```
-
-### 4. `inspect_ast`
-Queries a file's structure using Tree-sitter S-expression query patterns or templates (standard templates: `functions`, `classes`, `imports` across Python, Rust, Go, JS, TS, TSX, Java, C, and C++, with Bash supporting `functions`; specialized templates: Rust `traits` & `impls`, Go `structs` & `interfaces`, and C/C++ `macros`; Markdown templates: `headings`, `headers`, `codeblocks`, `code_blocks`, `links`, `tables`, `lists`), returning target line ranges and definitions.
-
-### 5. `dump_ast`
-Dumps the complete AST syntax tree of a file as S-expression text up to a certain depth.
-
----
-
-## 🌐 Supported Languages & Formats
-
-`ast-editor` supports full AST-based inspection and syntax validation for:
-*   **Python** (`.py`)
-*   **JavaScript / TypeScript / TSX** (`.js`, `.jsx`, `.ts`, `.tsx`)
-*   **Go** (`.go`)
-*   **Rust** (`.rs`)
-*   **Java** (`.java`)
-*   **C / C++** (`.c`, `.h`, `.cpp`, `.cc`, `.cxx`)
-*   **Lua** (`.lua`)
-*   **HTML** (`.html`, `.htm`)
-*   **JSON** (`.json`)
-*   **YAML** (`.yaml`, `.yml`)
-*   **TOML** (`.toml`)
-*   **Swift** (`.swift`)
-*   **Markdown** (`.md`, `.markdown`)
-*   **Shell Scripts (POSIX shell, Bash, Zsh, Ksh)** (`.sh`, `.bash`, `.zsh`, `.ksh`)
-*   **Nix** (`.nix`)
-
----
-
-## 🔄 Recommended Workflow (Agent Lifecycle)
-
-```mermaid
-graph TD
-    A[Start Task] --> B{File exists?}
-    B -- Yes --> C[Call view_lines or inspect_ast]
-    B -- No --> D[Call create_lines]
-    C --> E[Retrieve Stable Line IDs]
-    D --> E
-    E --> F[Plan modifications]
-    F --> G[Call edit_lines with target IDs]
-    G --> H[Verification & Completion]
-```
-
-### Long Line Handling
-If a line length exceeds 2048 characters and triggers a `LINE_TOO_LONG_ERROR`, run a local formatter to break it into multiple lines before editing:
-$$\text{Prettier / Black / Cargo fmt} \rightarrow \text{view\_lines} \rightarrow \text{edit\_lines}$$
-
----
-
-## ⚙️ Build & Setup
-
-### Requirements
-*   Rust 1.74.1+
-*   Cargo
-
-### Compilation
-```bash
-cargo build --release
-```
-The compiled release binary is located at `target/release/ast-editor`.

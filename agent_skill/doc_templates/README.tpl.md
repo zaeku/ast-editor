@@ -119,6 +119,7 @@ Dumps the complete AST syntax tree of a file as S-expression text up to a certai
 *   **Swift** (`.swift`)
 *   **Markdown** (`.md`, `.markdown`)
 *   **Shell Scripts (POSIX shell, Bash, Zsh, Ksh)** (`.sh`, `.bash`, `.zsh`, `.ksh`)
+*   **Nix** (`.nix`)
 
 ---
 

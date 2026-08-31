@@ -39,10 +39,12 @@ store and are blocked on it.
 - **SSOT-as-SQLite: content-addressed versioning with git projection** (§16) —
   a git-shaped object graph over a content-addressed block store, snapshot +
   changeset hybrid, unified local/remote backends, and projection back out to
-  git. This is a different product from an AST editor. It also carries an
-  unresolved blocker: the parser runs tree-sitter through `wasmtime`, which
-  cannot run in a Worker, so an in-Worker deployment would need a JS/WASM
-  parser path and possibly a second codebase (§17.3 "C").
+  git, motivated by running the editor on Cloudflare's infrastructure. Not an
+  item for this repository: it is a separate product that would present the
+  same tool interface, so it belongs in its own project rather than as a phase
+  here. It also carries an unresolved blocker: the parser runs tree-sitter
+  through `wasmtime`, which cannot run in a Worker, so an in-Worker deployment
+  needs a JS/WASM parser path and probably a second codebase (§17.3 "C").
 - **Merge handling** (§16.4) — the design accepts re-anchor over identity-merge,
   with line-level blame lossy across a merge. Only relevant once versioning
   exists.

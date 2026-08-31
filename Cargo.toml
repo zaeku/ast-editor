@@ -29,6 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 regex = "1.10.4"
 cc = "1.0.95"
 comrak = "0.28.0"
+similar = { version = "2.7.0", features = ["text"] }
 
 [profile.release]
 opt-level = 3         # Maximize runtime execution and startup speed

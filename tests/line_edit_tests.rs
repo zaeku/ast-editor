@@ -623,3 +623,85 @@ async fn test_integration_view_lines_only_ids() {
         assert_eq!(line_arr.len(), 2); // [id, n]
     }
 }
+
+#[tokio::test]
+async fn test_dry_run_preview_leaves_everything_untouched() {
+    let _lock = acquire_db_lock();
+    let original = "fn main() {\n    let a = 1;\n}\n";
+    let file = TestFile::new("dry_run.rs", original);
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let before_view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&before_view).unwrap();
+    let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
+    let before_mtime = fs::metadata(file.path_str()).unwrap().modified().unwrap();
+
+    let valid_edits = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id.clone()),
+        content: Some("    let a = 2;".to_string()),
+        ..Default::default()
+    }];
+
+    // 1. A valid batch previews the diff it would produce, and mints no IDs.
+    let res = edit::edit_lines_dry_run(&repository, file.path_str(), valid_edits.clone(), &pm).await.unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(preview["status"], "preview");
+    assert_eq!(preview["syntax_valid"], true);
+    assert!(preview["modified_ids"].is_null());
+    let diff = preview["diff"].as_str().unwrap();
+    assert!(diff.contains("-    let a = 1;"), "diff missing removal: {}", diff);
+    assert!(diff.contains("+    let a = 2;"), "diff missing addition: {}", diff);
+
+    // 3. Nothing on disk or in the session changed.
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
+    assert_eq!(fs::metadata(file.path_str()).unwrap().modified().unwrap(), before_mtime);
+    assert_eq!(view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap(), before_view);
+
+    // 2. A batch that breaks syntax reports the failure, still without writing.
+    let broken_edits = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("    let a = ;".to_string()),
+        ..Default::default()
+    }];
+    let res = edit::edit_lines_dry_run(&repository, file.path_str(), broken_edits, &pm).await.unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(preview["syntax_valid"], false);
+    assert!(!preview["diagnostics"].as_array().unwrap().is_empty());
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
+    assert_eq!(view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap(), before_view);
+
+    // 4. Applying the previewed batch produces what the preview showed.
+    let res = edit::edit_lines(&repository, file.path_str(), valid_edits, &pm).await.unwrap();
+    let applied: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(applied["status"], "success");
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn main() {\n    let a = 2;\n}\n");
+}
+
+#[tokio::test]
+async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("dry_run.md", "# Title\n\nbody\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let view = view_lines_old_compat(&repository, file.path_str(), 3, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let edits = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("### Skipped a level".to_string()),
+        ..Default::default()
+    }];
+
+    let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm).await.unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(preview["syntax_valid"], true);
+    assert!(!preview["warnings"].as_array().unwrap().is_empty());
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "# Title\n\nbody\n");
+}
+

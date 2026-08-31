@@ -236,22 +236,21 @@ async fn validate_syntax(
     SyntaxValidationResult::Success
 }
 
-pub async fn edit_lines_with_validation(
+/// Reconcile the session with disk when the file changed under us, so that an
+/// edit or a preview operates on the current state.
+fn resync_if_stale(
     repository: &impl SessionRepository,
     filepath: &str,
-    edits: Vec<LineEdit>,
-    strict_validation: bool,
-    parser_manager: &crate::parser::ParserManager,
-) -> Result<String> {
+    edits: &[LineEdit],
+) -> Result<()> {
     let path = std::path::Path::new(filepath);
-    
-    // Out-of-Sync Check
+
     if let Some(old_mtime) = repository.get_session_mtime(filepath)? {
         let current_mtime = path.metadata()?.modified()?
             .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
         if current_mtime != old_mtime {
             let mut target_ids = Vec::new();
-            for edit in &edits {
+            for edit in edits {
                 if let Some(ref tid) = edit.target_id {
                     target_ids.push(tid.clone());
                 }
@@ -269,6 +268,92 @@ pub async fn edit_lines_with_validation(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Preview an edit batch without touching disk or the session store.
+///
+/// The batch is applied to the session, the resulting content is validated the
+/// same way a real commit is, and the session is then restored to its previous
+/// state. No line IDs are minted: the caller obtains those from a real
+/// `edit_lines` call.
+pub async fn edit_lines_dry_run(
+    repository: &impl SessionRepository,
+    filepath: &str,
+    edits: Vec<LineEdit>,
+    parser_manager: &crate::parser::ParserManager,
+) -> Result<String> {
+    resync_if_stale(repository, filepath, &edits)?;
+
+    let meta = repository.init_session(filepath, false)?;
+    let session_id = meta.session_id;
+
+    let total_lines = repository.get_total_lines(&session_id)?;
+    let backup_lines = repository.fetch_lines_range(&session_id, 1, total_lines)?;
+    let is_crlf = repository.get_session_crlf(&session_id)?;
+    let line_ending = if is_crlf { "\r\n" } else { "\n" };
+    let join = |lines: &[(i64, Option<String>, String)]| {
+        lines.iter().map(|(_, _, content)| content.as_str()).collect::<Vec<_>>().join(line_ending) + line_ending
+    };
+
+    let applied = (|| -> Result<String> {
+        repository.apply_line_edits(filepath, &session_id, &edits)?;
+        let new_total_lines = repository.get_total_lines(&session_id)?;
+        Ok(join(&repository.fetch_lines_range(&session_id, 1, new_total_lines)?))
+    })();
+
+    repository.restore_session_lines(&session_id, &backup_lines)?;
+    let preview_content = applied?;
+
+    let diff = similar::TextDiff::from_lines(&join(&backup_lines), &preview_content)
+        .unified_diff()
+        .context_radius(3)
+        .header(filepath, filepath)
+        .to_string();
+
+    let output = match validate_syntax(filepath, &preview_content, parser_manager).await {
+        SyntaxValidationResult::Success => serde_json::json!({
+            "status": "preview",
+            "syntax_valid": true,
+            "diff": diff,
+        }),
+        SyntaxValidationResult::Warnings(warnings) => serde_json::json!({
+            "status": "preview",
+            "syntax_valid": true,
+            "diff": diff,
+            "warnings": warnings,
+        }),
+        SyntaxValidationResult::SyntaxErrors { errors, contexts, _raw_ast: _ } => {
+            let diagnostics: Vec<_> = errors.iter().zip(contexts.iter())
+                .map(|(message, context)| serde_json::json!({ "message": message, "context": context }))
+                .collect();
+            serde_json::json!({
+                "status": "preview",
+                "syntax_valid": false,
+                "diff": diff,
+                "diagnostics": diagnostics,
+            })
+        }
+        SyntaxValidationResult::InfrastructureFailure(reason) => serde_json::json!({
+            "status": "preview",
+            "syntax_valid": serde_json::Value::Null,
+            "diff": diff,
+            "message": format!("validation could not run: {}", reason),
+        }),
+    };
+
+    Ok(serde_json::to_string_pretty(&output)?)
+}
+
+pub async fn edit_lines_with_validation(
+    repository: &impl SessionRepository,
+    filepath: &str,
+    edits: Vec<LineEdit>,
+    strict_validation: bool,
+    parser_manager: &crate::parser::ParserManager,
+) -> Result<String> {
+    resync_if_stale(repository, filepath, &edits)?;
 
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;

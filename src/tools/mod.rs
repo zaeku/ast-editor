@@ -196,6 +196,11 @@ impl ToolDispatcher {
                             "type": "boolean",
                             "default": false,
                             "description": "If true, rolls back edits on syntax or parser error. If false, saves changes anyway and returns warnings/errors."
+                        },
+                        "dry_run": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. Call again with dry_run false to apply and receive modified_ids."
                         }
                     },
                     "required": ["filepath", "edits"]
@@ -292,8 +297,13 @@ impl ToolDispatcher {
                 let edits_val = arguments.get("edits").context("Missing edits array")?;
                 let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
                 let strict_validation = arguments.get("strict_validation").and_then(|v| v.as_bool()).unwrap_or(false);
+                let dry_run = arguments.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
                 let repository = session_db::SqliteSessionRepository;
-                let text = edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?;
+                let text = if dry_run {
+                    edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager).await?
+                } else {
+                    edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?
+                };
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

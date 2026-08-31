@@ -211,6 +211,11 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ```json
 {
   "properties": {
+    "dry_run": {
+      "default": false,
+      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. Call again with dry_run false to apply and receive modified_ids.",
+      "type": "boolean"
+    },
     "edits": {
       "items": {
         "properties": {

@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::fs;
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tree_sitter::{WasmStore, Parser};
 
@@ -907,19 +908,27 @@ impl SessionRepository for SqliteSessionRepository {
     ) -> Result<()> {
         let mut conn = get_db_connection()?;
         let tx = conn.transaction()?;
+
+        let contexts: HashMap<i64, Option<String>> = {
+            let mut stmt = tx.prepare("SELECT sequence_id, parent_context FROM lines WHERE session_id = ?1")?;
+            let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+
         tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
-        
+
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, ?3, ?4, ?5);"
+                "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
             )?;
-            
+
             for (idx, (seq, hash_opt, content)) in lines.iter().enumerate() {
                 let sort_order = ((idx + 1) as f64) * 1000.0;
-                stmt.execute(rusqlite::params![session_id, seq, hash_opt, content, sort_order])?;
+                let parent_context = contexts.get(seq).cloned().flatten();
+                stmt.execute(rusqlite::params![session_id, seq, hash_opt, content, sort_order, parent_context])?;
             }
         }
-        
+
         tx.commit()?;
         Ok(())
     }

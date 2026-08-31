@@ -317,12 +317,14 @@ pub async fn edit_lines_dry_run(
             "status": "preview",
             "syntax_valid": true,
             "diff": diff,
+            "preview_id": repository.create_preview(filepath, &edits)?,
         }),
         SyntaxValidationResult::Warnings(warnings) => serde_json::json!({
             "status": "preview",
             "syntax_valid": true,
             "diff": diff,
             "warnings": warnings,
+            "preview_id": repository.create_preview(filepath, &edits)?,
         }),
         SyntaxValidationResult::SyntaxErrors { errors, contexts, _raw_ast: _ } => {
             let diagnostics: Vec<_> = errors.iter().zip(contexts.iter())
@@ -344,6 +346,19 @@ pub async fn edit_lines_dry_run(
     };
 
     Ok(serde_json::to_string_pretty(&output)?)
+}
+
+/// Apply the edit batch a previous dry run validated, addressed by its preview
+/// id instead of resent in full.
+pub async fn apply_preview(
+    repository: &impl SessionRepository,
+    filepath: &str,
+    preview_id: &str,
+    strict_validation: bool,
+    parser_manager: &crate::parser::ParserManager,
+) -> Result<String> {
+    let edits = repository.take_preview(filepath, preview_id)?;
+    edit_lines_with_validation(repository, filepath, edits, strict_validation, parser_manager).await
 }
 
 pub async fn edit_lines_with_validation(

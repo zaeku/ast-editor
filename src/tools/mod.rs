@@ -200,10 +200,14 @@ impl ToolDispatcher {
                         "dry_run": {
                             "type": "boolean",
                             "default": false,
-                            "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. Call again with dry_run false to apply and receive modified_ids."
+                            "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. When the result is syntactically valid the response also carries a preview_id; pass it back as 'apply' to commit that exact batch without resending it."
+                        },
+                        "apply": {
+                            "type": "string",
+                            "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_ids. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it."
                         }
                     },
-                    "required": ["filepath", "edits"]
+                    "required": ["filepath"]
                 }
             }),
             serde_json::json!({
@@ -294,15 +298,20 @@ impl ToolDispatcher {
             }
             "edit_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
-                let edits_val = arguments.get("edits").context("Missing edits array")?;
-                let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
                 let strict_validation = arguments.get("strict_validation").and_then(|v| v.as_bool()).unwrap_or(false);
                 let dry_run = arguments.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
                 let repository = session_db::SqliteSessionRepository;
-                let text = if dry_run {
-                    edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager).await?
+
+                let text = if let Some(preview_id) = arguments.get("apply").and_then(|v| v.as_str()) {
+                    edit::apply_preview(&repository, filepath, preview_id, strict_validation, parser_manager).await?
                 } else {
-                    edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?
+                    let edits_val = arguments.get("edits").context("Missing edits array")?;
+                    let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
+                    if dry_run {
+                        edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager).await?
+                    } else {
+                        edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?
+                    }
                 };
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],

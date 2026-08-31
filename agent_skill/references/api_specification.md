@@ -184,9 +184,13 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ```json
 {
   "properties": {
+    "apply": {
+      "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_ids. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it.",
+      "type": "string"
+    },
     "dry_run": {
       "default": false,
-      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. Call again with dry_run false to apply and receive modified_ids.",
+      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. When the result is syntactically valid the response also carries a preview_id; pass it back as 'apply' to commit that exact batch without resending it.",
       "type": "boolean"
     },
     "edits": {
@@ -262,8 +266,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
     }
   },
   "required": [
-    "filepath",
-    "edits"
+    "filepath"
   ],
   "type": "object"
 }
@@ -308,8 +311,19 @@ Applies a transactional batch of operations to lines using their unique IDs.
 #### Dry-Run Example (`dry_run = true`)
 Previews the same batch. The response carries the unified diff and the syntax
 validation result; the file and the line IDs are left untouched, and no
-`modified_ids` are returned. Send the batch again without `dry_run` to apply it
-and receive the new IDs.
+`modified_ids` are returned.
+
+A batch that validates also returns a short single-use `preview_id`. Pass it
+back as `apply` with the same `filepath` to commit exactly that batch and
+receive the new IDs, without resending `edits`:
+
+```json
+{"filepath": "/path/to/file.rs", "apply": "p1f"}
+```
+
+The id is refused if it was already applied, if it is addressed at another
+file, or if the file changed since the preview was taken — in that last case
+the diff and syntax result no longer describe the outcome, so preview again.
 
 ##### Input
 ```json
@@ -339,6 +353,7 @@ and receive the new IDs.
 ```json
 {
   "diff": "--- /path/to/project/create_ids.rs\n+++ /path/to/project/create_ids.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-    let x = 42;\n-}\n+    let x = 100;\n+    let y = 200;\n",
+  "preview_id": "pa",
   "status": "preview",
   "syntax_valid": true
 }

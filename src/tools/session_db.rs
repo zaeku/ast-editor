@@ -1,5 +1,5 @@
-use anyhow::{Result, Context};
-use rusqlite::Connection;
+use anyhow::{Result, Context, bail};
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::fs;
@@ -74,6 +74,17 @@ fn create_tables(conn: &Connection) -> Result<()> {
     conn.execute("CREATE INDEX IF NOT EXISTS idx_lines_sort_order ON lines(sort_order);", [])
         .context("Failed to create index idx_lines_sort_order")?;
     
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS previews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filepath TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
+            edits_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );",
+        [],
+    ).context("Failed to create previews table")?;
+
     // Add crlf column if not present
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN line_ending_crlf INTEGER DEFAULT 0;", []);
     // Add parent_context column to lines if not present
@@ -225,7 +236,13 @@ pub trait SessionRepository: Send + Sync {
         session_id: &str,
         target_ids: &[String],
     ) -> Result<()>;
+    fn create_preview(&self, filepath: &str, edits: &[LineEdit]) -> Result<String>;
+    fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
 }
+
+/// Previews older than this are pruned whenever a new one is stored. A preview
+/// is only useful for as long as the file it was computed against is unchanged.
+const PREVIEW_TTL_SECONDS: i64 = 3600;
 
 pub struct SqliteSessionRepository;
 
@@ -931,6 +948,56 @@ impl SessionRepository for SqliteSessionRepository {
 
         tx.commit()?;
         Ok(())
+    }
+
+    fn create_preview(&self, filepath: &str, edits: &[LineEdit]) -> Result<String> {
+        let conn = get_db_connection()?;
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+
+        conn.execute("DELETE FROM previews WHERE created_at < ?1", [now - PREVIEW_TTL_SECONDS])?;
+
+        conn.execute(
+            "INSERT INTO previews (filepath, file_hash, edits_json, created_at) VALUES (?1, ?2, ?3, ?4);",
+            rusqlite::params![filepath, compute_sha256(filepath)?, serde_json::to_string(edits)?, now],
+        )?;
+
+        Ok(format!("p{:x}", conn.last_insert_rowid()))
+    }
+
+    fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>> {
+        let rowid = preview_id.strip_prefix('p')
+            .and_then(|digits| i64::from_str_radix(digits, 16).ok())
+            .with_context(|| format!("Invalid preview id '{}'. Preview ids look like 'p1f'.", preview_id))?;
+
+        let conn = get_db_connection()?;
+        let row = conn.query_row(
+            "SELECT filepath, file_hash, edits_json FROM previews WHERE id = ?1",
+            [rowid],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+        ).optional()?;
+
+        let (preview_path, file_hash, edits_json) = row.with_context(|| format!(
+            "Preview '{}' is unknown, already applied, or expired. Run edit_lines with dry_run again to get a fresh preview.",
+            preview_id
+        ))?;
+
+        if preview_path != filepath {
+            bail!(
+                "Preview '{}' belongs to {}, not {}. Apply it against the file it was previewed on.",
+                preview_id, preview_path, filepath
+            );
+        }
+
+        if compute_sha256(filepath)? != file_hash {
+            conn.execute("DELETE FROM previews WHERE id = ?1", [rowid])?;
+            bail!(
+                "PREVIEW_STALE: {} changed since preview '{}' was taken, so its diff and syntax check no longer describe the result. Run dry_run again.",
+                filepath, preview_id
+            );
+        }
+
+        conn.execute("DELETE FROM previews WHERE id = ?1", [rowid])?;
+        Ok(serde_json::from_str(&edits_json)?)
     }
 
     fn update_session_metadata(

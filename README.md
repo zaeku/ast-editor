@@ -211,9 +211,13 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ```json
 {
   "properties": {
+    "apply": {
+      "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_ids. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it.",
+      "type": "string"
+    },
     "dry_run": {
       "default": false,
-      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. Call again with dry_run false to apply and receive modified_ids.",
+      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. When the result is syntactically valid the response also carries a preview_id; pass it back as 'apply' to commit that exact batch without resending it.",
       "type": "boolean"
     },
     "edits": {
@@ -289,8 +293,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
     }
   },
   "required": [
-    "filepath",
-    "edits"
+    "filepath"
   ],
   "type": "object"
 }

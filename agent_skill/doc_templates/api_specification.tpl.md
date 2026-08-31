@@ -70,8 +70,19 @@ Applies a transactional batch of operations to lines using their unique IDs.
 #### Dry-Run Example (`dry_run = true`)
 Previews the same batch. The response carries the unified diff and the syntax
 validation result; the file and the line IDs are left untouched, and no
-`modified_ids` are returned. Send the batch again without `dry_run` to apply it
-and receive the new IDs.
+`modified_ids` are returned.
+
+A batch that validates also returns a short single-use `preview_id`. Pass it
+back as `apply` with the same `filepath` to commit exactly that batch and
+receive the new IDs, without resending `edits`:
+
+```json
+{"filepath": "/path/to/file.rs", "apply": "p1f"}
+```
+
+The id is refused if it was already applied, if it is addressed at another
+file, or if the file changed since the preview was taken — in that last case
+the diff and syntax result no longer describe the outcome, so preview again.
 
 ##### Input
 {{edit_lines_input_dry_run}}

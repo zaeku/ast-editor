@@ -724,3 +724,97 @@ async fn test_view_lines_without_a_range_does_not_overflow() {
     assert_eq!(meta["total_lines"], 900);
     assert!(meta["message"].as_str().unwrap().contains("800"), "900 lines should report the cap: {}", meta);
 }
+
+#[tokio::test]
+async fn test_preview_id_applies_the_validated_batch() {
+    let _lock = acquire_db_lock();
+    let original = "fn main() {\n    let a = 1;\n}\n";
+    let file = TestFile::new("preview_apply.rs", original);
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let edits = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("    let a = 2;".to_string()),
+        ..Default::default()
+    }];
+
+    let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm).await.unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview_id = preview["preview_id"].as_str().unwrap().to_string();
+    assert!(preview_id.starts_with('p'), "unexpected preview id: {}", preview_id);
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
+
+    let res = edit::apply_preview(&repository, file.path_str(), &preview_id, false, &pm).await.unwrap();
+    let applied: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(applied["status"], "success");
+    assert!(!applied["modified_ids"].as_array().unwrap().is_empty());
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn main() {\n    let a = 2;\n}\n");
+
+    // A preview id is single-use.
+    let err = edit::apply_preview(&repository, file.path_str(), &preview_id, false, &pm).await.unwrap_err();
+    assert!(format!("{}", err).contains("unknown, already applied, or expired"), "{}", err);
+}
+
+#[tokio::test]
+async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("preview_stale.rs", "fn main() {\n    let a = 1;\n}\n");
+    let other = TestFile::new("preview_other.rs", "fn other() {}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let edits = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("    let a = 2;".to_string()),
+        ..Default::default()
+    }];
+
+    let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm).await.unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview_id = preview["preview_id"].as_str().unwrap().to_string();
+
+    // Addressed at the wrong file.
+    let err = edit::apply_preview(&repository, other.path_str(), &preview_id, false, &pm).await.unwrap_err();
+    assert!(format!("{}", err).contains("belongs to"), "{}", err);
+
+    // The file moves under the preview.
+    fs::write(file.path_str(), "fn main() {\n    let a = 99;\n}\n").unwrap();
+    let err = edit::apply_preview(&repository, file.path_str(), &preview_id, false, &pm).await.unwrap_err();
+    assert!(format!("{}", err).contains("PREVIEW_STALE"), "{}", err);
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn main() {\n    let a = 99;\n}\n");
+}
+
+#[tokio::test]
+async fn test_failed_dry_run_mints_no_preview_id() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("preview_invalid.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let edits = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("    let a = ;".to_string()),
+        ..Default::default()
+    }];
+
+    let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm).await.unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(preview["syntax_valid"], false);
+    assert!(preview["preview_id"].is_null());
+}

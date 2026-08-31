@@ -155,7 +155,9 @@ pub fn view_lines(
     }
 
     let config = crate::tools::metadata::get_config();
-    let line_count_capped = query.is_none() && (end_line.unwrap_or(0) - start_line.unwrap_or(1) + 1 > 800) && total_lines > 800;
+    let requested_start = start_line.unwrap_or(1);
+    let requested_end = end_line.unwrap_or(total_lines);
+    let line_count_capped = query.is_none() && requested_end.saturating_sub(requested_start) + 1 > 800 && total_lines > 800;
     let mut message = None;
     if line_count_capped {
         message = Some(config.warning_line_limit_exceeded.clone());

@@ -705,3 +705,22 @@ async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
     assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "# Title\n\nbody\n");
 }
 
+
+#[tokio::test]
+async fn test_view_lines_without_a_range_does_not_overflow() {
+    let _lock = acquire_db_lock();
+    let big = (1..=900).map(|n| format!("line {}", n)).collect::<Vec<_>>().join("\n") + "\n";
+    let small = TestFile::new("norange_small.rs", "fn main() {}\n");
+    let large = TestFile::new("norange_large.txt", &big);
+    let repository = SqliteSessionRepository;
+
+    let res = view::view_lines(&repository, small.path_str(), None, None, None, None, None).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&res.metadata_json).unwrap();
+    assert_eq!(meta["total_lines"], 1);
+    assert!(meta["message"].is_null(), "short file reported as truncated: {}", meta);
+
+    let res = view::view_lines(&repository, large.path_str(), None, None, None, None, None).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&res.metadata_json).unwrap();
+    assert_eq!(meta["total_lines"], 900);
+    assert!(meta["message"].as_str().unwrap().contains("800"), "900 lines should report the cap: {}", meta);
+}

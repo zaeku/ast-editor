@@ -62,5 +62,9 @@
   "bash": {
     "extensions": [".sh", ".bash", ".zsh", ".ksh"],
     "wasm_file": "tree-sitter-bash.wasm"
+  },
+  "nix": {
+    "extensions": [".nix"],
+    "wasm_file": "tree-sitter-nix.wasm"
   }
 }

@@ -175,4 +175,13 @@ mod tests {
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Raw Wasm file not found"));
     }
+
+    #[tokio::test]
+    async fn test_parse_nix_code() {
+        let pm = ParserManager::new().unwrap();
+        let res = pm.parse_code("nix", "{ x = 1; }").await;
+        assert!(res.is_ok());
+        let (tree, _) = res.unwrap();
+        assert!(!tree.root_node().has_error());
+    }
 }

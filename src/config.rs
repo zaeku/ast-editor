@@ -44,29 +44,51 @@ fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
+static LANGUAGES_MAP_CACHE: once_cell::sync::Lazy<std::sync::Mutex<HashMap<PathBuf, HashMap<String, String>>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
 /// Dynamically lookup wasm grammar file name for a given file extension under a custom raw wasm directory.
 pub fn get_wasm_file(wasm_dir: &Path, ext: &str) -> Result<String> {
-    let map = init_languages_map(wasm_dir)?;
     let lookup_key = if ext.starts_with('.') {
         ext.to_string()
     } else {
         format!(".{}", ext)
     };
-    if let Some(wasm_file) = map.get(&lookup_key) {
+
+    let mut cache = LANGUAGES_MAP_CACHE.lock().unwrap();
+    if let Some(map) = cache.get(wasm_dir) {
+        if let Some(wasm_file) = map.get(&lookup_key) {
+            return Ok(wasm_file.clone());
+        } else {
+            bail!("Unsupported file extension: {}", ext);
+        }
+    }
+
+    let map = init_languages_map(wasm_dir)?;
+    let result = if let Some(wasm_file) = map.get(&lookup_key) {
         Ok(wasm_file.clone())
     } else {
         bail!("Unsupported file extension: {}", ext)
-    }
+    };
+    cache.insert(wasm_dir.to_path_buf(), map);
+    result
 }
 
 /// Clear caching for test isolation (noop after removing cache)
 #[cfg(test)]
-pub fn clear_langs_map_for_testing() {}
+pub fn clear_langs_map_for_testing() {
+    if let Ok(mut cache) = LANGUAGES_MAP_CACHE.lock() {
+        cache.clear();
+    }
+}
 
 
 
 /// Returns the path to the WebAssembly grammar files directory (resources/wasm).
 pub fn get_wasm_dir() -> PathBuf {
+    if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
+        return PathBuf::from(manifest_dir).join("resources").join("wasm");
+    }
     if let Ok(exe_path) = env::current_exe() {
         if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
             return parent.join("resources").join("wasm");

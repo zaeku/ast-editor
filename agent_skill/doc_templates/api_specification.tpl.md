@@ -66,3 +66,15 @@ Applies a transactional batch of operations to lines using their unique IDs.
 
 ##### Output
 {{edit_lines_output_compact}}
+
+#### Dry-Run Example (`dry_run = true`)
+Previews the same batch. The response carries the unified diff and the syntax
+validation result; the file and the line IDs are left untouched, and no
+`modified_ids` are returned. Send the batch again without `dry_run` to apply it
+and receive the new IDs.
+
+##### Input
+{{edit_lines_input_dry_run}}
+
+##### Output
+{{edit_lines_output_dry_run}}

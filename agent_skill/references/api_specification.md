@@ -304,3 +304,42 @@ Applies a transactional batch of operations to lines using their unique IDs.
   ]
 }
 ```
+
+#### Dry-Run Example (`dry_run = true`)
+Previews the same batch. The response carries the unified diff and the syntax
+validation result; the file and the line IDs are left untouched, and no
+`modified_ids` are returned. Send the batch again without `dry_run` to apply it
+and receive the new IDs.
+
+##### Input
+```json
+{
+  "dry_run": true,
+  "edits": [
+    {
+      "content": "    let y = 200;",
+      "op": "insert_after",
+      "target_id": "2#bcb4"
+    },
+    {
+      "content": "    let x = 100;",
+      "op": "update",
+      "target_id": "2#bcb4"
+    },
+    {
+      "op": "delete",
+      "target_id": "3#c2b7"
+    }
+  ],
+  "filepath": "/path/to/project/create_ids.rs"
+}
+```
+
+##### Output
+```json
+{
+  "diff": "--- /path/to/project/create_ids.rs\n+++ /path/to/project/create_ids.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-    let x = 42;\n-}\n+    let x = 100;\n+    let y = 200;\n",
+  "status": "preview",
+  "syntax_valid": true
+}
+```

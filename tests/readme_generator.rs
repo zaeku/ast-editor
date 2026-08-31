@@ -9,6 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TEST_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+/// Stands in for the workspace's temporary path wherever a tool echoes the file
+/// it was given, so the generated documents do not carry a machine-local path.
+const DOC_FILEPATH: &str = "/path/to/project/create_ids.rs";
+
 struct CleanupGuard {
     dir: PathBuf,
 }
@@ -127,6 +131,16 @@ async fn generate_readme() {
             ..Default::default()
         },
     ];
+    // Preview the batch first, then apply it. The preview leaves the session
+    // untouched, so the same IDs are still valid for the real call below.
+    let out_edit_dry_run = edit::edit_lines_dry_run(
+        &repo,
+        file_ids.to_str().unwrap(),
+        edits.clone(),
+        &pm,
+    ).await.unwrap();
+    let out_edit_dry_run = out_edit_dry_run.replace(file_ids.to_str().unwrap(), DOC_FILEPATH);
+
     let out_edit_compact = edit::edit_lines(
         &repo,
         file_ids.to_str().unwrap(),
@@ -166,7 +180,7 @@ async fn generate_readme() {
     let fmt_view_lines_input_only_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_lines_input_only_ids_val).unwrap());
 
     let edit_lines_input_compact_val = serde_json::json!({
-        "filepath": "/path/to/project/create_ids.rs",
+        "filepath": DOC_FILEPATH,
         "edits": [
             {
                 "op": "insert_after",
@@ -185,6 +199,10 @@ async fn generate_readme() {
         ]
     });
     let fmt_edit_lines_input_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_lines_input_compact_val).unwrap());
+
+    let mut edit_lines_input_dry_run_val = edit_lines_input_compact_val.clone();
+    edit_lines_input_dry_run_val["dry_run"] = serde_json::Value::Bool(true);
+    let fmt_edit_lines_input_dry_run = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_lines_input_dry_run_val).unwrap());
 
     // Extract schemas
     let dispatcher = ToolDispatcher::new();
@@ -223,53 +241,46 @@ async fn generate_readme() {
         out_view_only_ids.metadata_json
     );
     let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
+    let fmt_edit_dry_run = format!("```json\n{}\n```", out_edit_dry_run);
 
-    // 3. Read README.tpl.md
+    // 3. Render every template from one placeholder table
+    let placeholders: Vec<(&str, &str)> = vec![
+        ("{{create_lines_schema}}", &fmt_create_lines_schema),
+        ("{{create_lines_input_default}}", &fmt_create_lines_input_default),
+        ("{{create_lines_output_default}}", &fmt_create_default),
+        ("{{create_lines_input_ids}}", &fmt_create_lines_input_ids),
+        ("{{create_lines_output_ids}}", &fmt_create_ids),
+        ("{{view_lines_schema}}", &fmt_view_lines_schema),
+        ("{{view_lines_input_default}}", &fmt_view_lines_input_default),
+        ("{{view_lines_output_default}}", &fmt_view_default),
+        ("{{view_lines_input_only_ids}}", &fmt_view_lines_input_only_ids),
+        ("{{view_lines_output_only_ids}}", &fmt_view_only_ids),
+        ("{{edit_lines_schema}}", &fmt_edit_lines_schema),
+        ("{{edit_lines_input_compact}}", &fmt_edit_lines_input_compact),
+        ("{{edit_lines_output_compact}}", &fmt_edit_compact),
+        ("{{edit_lines_input_dry_run}}", &fmt_edit_lines_input_dry_run),
+        ("{{edit_lines_output_dry_run}}", &fmt_edit_dry_run),
+    ];
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let readme_tpl_path = manifest_dir.join("agent_skill").join("doc_templates").join("README.tpl.md");
-    let mut readme_content = fs::read_to_string(readme_tpl_path).unwrap();
+    let templates_dir = manifest_dir.join("agent_skill").join("doc_templates");
+    let render = |template: &std::path::Path, output: PathBuf| {
+        let content = fs::read_to_string(template).unwrap();
+        let rendered = placeholders.iter()
+            .fold(content, |acc, (key, value)| acc.replace(key, value));
+        assert!(
+            !rendered.contains("{{"),
+            "unfilled placeholder left in {}",
+            output.display()
+        );
+        fs::write(output, rendered).unwrap();
+    };
 
-    // 4. Replace all 13 placeholders
-    readme_content = readme_content.replace("{{create_lines_schema}}", &fmt_create_lines_schema);
-    readme_content = readme_content.replace("{{create_lines_input_default}}", &fmt_create_lines_input_default);
-    readme_content = readme_content.replace("{{create_lines_output_default}}", &fmt_create_default);
-    readme_content = readme_content.replace("{{create_lines_input_ids}}", &fmt_create_lines_input_ids);
-    readme_content = readme_content.replace("{{create_lines_output_ids}}", &fmt_create_ids);
-    readme_content = readme_content.replace("{{view_lines_schema}}", &fmt_view_lines_schema);
-    readme_content = readme_content.replace("{{view_lines_input_default}}", &fmt_view_lines_input_default);
-    readme_content = readme_content.replace("{{view_lines_output_default}}", &fmt_view_default);
-    readme_content = readme_content.replace("{{view_lines_input_only_ids}}", &fmt_view_lines_input_only_ids);
-    readme_content = readme_content.replace("{{view_lines_output_only_ids}}", &fmt_view_only_ids);
-    readme_content = readme_content.replace("{{edit_lines_schema}}", &fmt_edit_lines_schema);
-    readme_content = readme_content.replace("{{edit_lines_input_compact}}", &fmt_edit_lines_input_compact);
-    readme_content = readme_content.replace("{{edit_lines_output_compact}}", &fmt_edit_compact);
-
-    // 5. Write to README.md at the workspace root
-    let readme_path = manifest_dir.join("README.md");
-    fs::write(readme_path, readme_content).unwrap();
-
-    // 6. Read api_specification.tpl.md
-    let api_tpl_path = manifest_dir.join("agent_skill").join("doc_templates").join("api_specification.tpl.md");
-    let mut api_content = fs::read_to_string(api_tpl_path).unwrap();
-
-    // 7. Replace placeholders in api_content
-    api_content = api_content.replace("{{create_lines_schema}}", &fmt_create_lines_schema);
-    api_content = api_content.replace("{{create_lines_input_default}}", &fmt_create_lines_input_default);
-    api_content = api_content.replace("{{create_lines_output_default}}", &fmt_create_default);
-    api_content = api_content.replace("{{create_lines_input_ids}}", &fmt_create_lines_input_ids);
-    api_content = api_content.replace("{{create_lines_output_ids}}", &fmt_create_ids);
-    api_content = api_content.replace("{{view_lines_schema}}", &fmt_view_lines_schema);
-    api_content = api_content.replace("{{view_lines_input_default}}", &fmt_view_lines_input_default);
-    api_content = api_content.replace("{{view_lines_output_default}}", &fmt_view_default);
-    api_content = api_content.replace("{{view_lines_input_only_ids}}", &fmt_view_lines_input_only_ids);
-    api_content = api_content.replace("{{view_lines_output_only_ids}}", &fmt_view_only_ids);
-    api_content = api_content.replace("{{edit_lines_schema}}", &fmt_edit_lines_schema);
-    api_content = api_content.replace("{{edit_lines_input_compact}}", &fmt_edit_lines_input_compact);
-    api_content = api_content.replace("{{edit_lines_output_compact}}", &fmt_edit_compact);
-
-    // 8. Write outputs
-    let api_path = manifest_dir.join("agent_skill").join("references").join("api_specification.md");
-    fs::write(&api_path, &api_content).unwrap();
+    render(&templates_dir.join("README.tpl.md"), manifest_dir.join("README.md"));
+    render(
+        &templates_dir.join("api_specification.tpl.md"),
+        manifest_dir.join("agent_skill").join("references").join("api_specification.md"),
+    );
 
     // Read generated SKILL.md to sync with the global config folder later
     let skill_path = manifest_dir.join("agent_skill").join("SKILL.md");

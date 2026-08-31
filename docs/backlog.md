@@ -10,13 +10,16 @@ Active specs: [dry-run preview](specs/dry-run-preview-spec.md), then
 ## From the persistent line IDs design
 
 Detail in [the archived design](archive/2026-07-12-persistent-line-ids-and-reconciliation-design.md),
-section numbers below refer to it. All of these sit on top of the persistent
+section numbers below refer to it. All of these sit on top of the index-backed
 store and are blocked on it.
 
-- **Git-checkpoint compaction** (§7) — hot/cold split, per-SHA id-map snapshots,
-  retention GC, and restoring the exact id-map live at a commit on `git reset` /
-  `git checkout`. *Needed when:* tombstone growth in a long-lived file measurably
-  hurts. Until then tombstones just accumulate.
+- **Git-checkpoint rewind** (§7) — per-SHA id-map snapshots, so `git reset` /
+  `git checkout` restores the exact IDs that were live at that commit. This is
+  the goal the active spec dropped, and dropping it is what let tombstones and
+  the compaction phase go with it. Picking it back up means reintroducing both,
+  plus enough recorded content to reconstruct an old state — so price it as
+  reversing §3 and §5.2 of the active spec, not as an addition to them.
+  *Needed when:* an agent is observed losing work to a checkout.
 - **Blame backfill from git-held history** (§5.0) — lazily cache id-maps for
   commit SHAs the tool never witnessed live, to improve blame fidelity.
   *Needed when:* something actually asks the tool for blame.
@@ -54,5 +57,5 @@ store and are blocked on it.
 - **CLI mode** — `argv[1]` dispatches straight to
   [`ToolDispatcher::call_tool`](../src/tools/mod.rs), with the JSON-RPC loop
   kept behind an `mcp` subcommand. No spec needed.
-- **`session_db.rs` is 2,000 lines** — larger than `edit.rs`. Split it when the
-  persistent store lands, since that rewrites much of it anyway.
+- **`session_db.rs` is 2,000 lines** — larger than `edit.rs`. Split it during
+  phase 1 of the active spec, which rewrites much of it anyway.

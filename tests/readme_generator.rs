@@ -12,6 +12,7 @@ static TEST_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// Stands in for the workspace's temporary path wherever a tool echoes the file
 /// it was given, so the generated documents do not carry a machine-local path.
 const DOC_FILEPATH: &str = "/path/to/project/create_ids.rs";
+const DOC_PREVIEW_ID: &str = "p1f";
 
 struct CleanupGuard {
     dir: PathBuf,
@@ -140,6 +141,13 @@ async fn generate_readme() {
         &pm,
     ).await.unwrap();
     let out_edit_dry_run = out_edit_dry_run.replace(file_ids.to_str().unwrap(), DOC_FILEPATH);
+    // The preview id counts up with every run, so pin it or the generated
+    // documentation differs on each invocation.
+    let out_edit_dry_run = {
+        let parsed: serde_json::Value = serde_json::from_str(&out_edit_dry_run).unwrap();
+        let minted = parsed["preview_id"].as_str().expect("a valid preview mints an id");
+        out_edit_dry_run.replace(minted, DOC_PREVIEW_ID)
+    };
 
     let out_edit_compact = edit::edit_lines(
         &repo,

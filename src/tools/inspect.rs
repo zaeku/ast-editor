@@ -13,6 +13,7 @@ use crate::tools::{McpTextContent, McpToolResult};
 
 #[derive(Debug, Deserialize)]
 pub struct InspectArgs {
+    #[serde(alias = "filepath")]
     pub file: String,
     pub query: Option<String>,
     pub template: Option<String>,
@@ -98,6 +99,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         "yaml" | "yml" => "yaml",
         "md" | "markdown" => "markdown",
         "sh" | "bash" | "zsh" | "ksh" => "bash",
+        "nix" => "nix",
         _ => bail!("Unsupported extension: {}", ext),
     };
 
@@ -400,21 +402,7 @@ fn format_definition_table(
     start_line: usize,
     end_line: usize,
 ) -> Result<String> {
-    let config = crate::tools::metadata::get_config();
-    let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
-        repository,
-        session_id,
-        start_line,
-        end_line,
-        false,
-        config.only_ids_wrap_trigger_length,
-    )?;
-
-    let output = format!(
-        "{{\n  \"columns\": [\n    \"id\",\n    \"n\",\n    \"content\"\n  ],\n  \"lines\": {}\n}}",
-        formatted_res.lines_json
-    );
-    Ok(output)
+    crate::tools::formatter::format_definition_json(repository, session_id, start_line, end_line)
 }
 
 pub fn run_markdown_inspect(
@@ -520,11 +508,13 @@ pub fn run_markdown_inspect(
         .unwrap_or(false);
 
     if is_gc_turn {
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
-                let outputs_dir = parent.join("outputs");
-                if outputs_dir.exists() {
-                    tokio::spawn(run_gc(outputs_dir));
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
+                    let outputs_dir = parent.join("outputs");
+                    if outputs_dir.exists() {
+                        handle.spawn(run_gc(outputs_dir));
+                    }
                 }
             }
         }
@@ -732,6 +722,7 @@ fn safe_byte_slice(s: &str, mut start: usize, mut end: usize) -> &str {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
     use crate::tools::session_db::SqliteSessionRepository;
@@ -905,6 +896,49 @@ fn main() {}
 
         // 7. Bash
         test_one(&pm, &temp_dir, "test.sh", "my_bash_func() {\n  echo 'hello'\n}", "functions", "my_bash_func").await;
+    }
+
+    #[tokio::test]
+    async fn test_inspect_nix_custom_query() {
+        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("test_inspect_nix_custom_query");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("resources").join("wasm");
+        let pm = Arc::new(ParserManager::with_paths(
+            temp_dir.join("cache"),
+            temp_dir.join("compiler"),
+            wasm_dir,
+        ).unwrap());
+
+        let file_path = temp_dir.join("test.nix");
+        std::fs::write(&file_path, "{ x = 1; }").unwrap();
+
+        // 1. Test using 'file' field
+        let args_file = InspectArgs {
+            file: file_path.to_string_lossy().to_string(),
+            query: Some("(binding attrpath: (attrpath (identifier) @attr))".to_string()),
+            template: None,
+            include_code: Some(true),
+            code_format: None,
+            output_file: None,
+        };
+        let res_val1 = run_inspect(args_file, &pm).await.unwrap();
+        let res1: McpToolResult = serde_json::from_value(res_val1).unwrap();
+        let text1 = &res1.content[0].text;
+        assert!(text1.contains("x"));
+
+        // 2. Test using 'filepath' alias field (deserialized manually in code or via serde)
+        let json_input = serde_json::json!({
+            "filepath": file_path.to_string_lossy().to_string(),
+            "query": "(binding attrpath: (attrpath (identifier) @attr))"
+        });
+        let args_filepath: InspectArgs = serde_json::from_value(json_input).unwrap();
+        let res_val2 = run_inspect(args_filepath, &pm).await.unwrap();
+        let res2: McpToolResult = serde_json::from_value(res_val2).unwrap();
+        let text2 = &res2.content[0].text;
+        assert!(text2.contains("x"));
     }
 
 }

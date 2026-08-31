@@ -2,7 +2,8 @@ use anyhow::Result;
 use crate::tools::session_db::{compute_line_hash, SessionRepository};
 
 pub struct FormattedLinesResult {
-    pub lines_json: String,
+    pub lines_text: Option<String>,
+    pub ids_json: String,
     pub actual_end_line: usize,
     pub warning_msg: Option<String>,
 }
@@ -18,29 +19,52 @@ pub fn retrieve_and_format_lines(
     repository.ensure_hashes_range(session_id, start_line, end_line)?;
 
     let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
-    let mut items = Vec::new();
+    let mut id_items = Vec::new();
+    let mut text_lines = Vec::new();
 
     let mut actual_end_line = start_line.saturating_sub(1);
     let mut cumulative_bytes = 0;
     let mut capacity_truncated = false;
+    let mut segment_count = 0;
+    let mut line_cap_reached = false;
 
     for (current_idx, (seq_id, line_hash_opt, content)) in (start_line..).zip(lines) {
-        let (final_content, line_id) = if content.chars().count() > 2048 {
-            let truncated: String = content.chars().take(2048).collect();
-            let final_content = format!("{}... [TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]", truncated);
-            let line_id = format!("{:x}#TRUNC", seq_id);
-            (final_content, line_id)
-        } else {
-            let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
-            let line_id = format!("{:x}#{}", seq_id, line_hash);
-            (content, line_id)
-        };
+        let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
+        let line_id = format!("{:x}#{}", seq_id, line_hash);
 
-        let line_len = if only_ids {
-            line_id.len() + 10
+        // Split into segments of 2048 characters
+        let chars: Vec<char> = content.chars().collect();
+        let mut segments = Vec::new();
+        let mut start = 0;
+        while start < chars.len() {
+            let end = std::cmp::min(start + 2048, chars.len());
+            let segment: String = chars[start..end].iter().collect();
+            segments.push(segment);
+            start = end;
+        }
+        if segments.is_empty() {
+            segments.push(String::new());
+        }
+
+        // Check 800 segment limit
+        let mut segments_to_add = segments.len();
+        if segment_count + segments_to_add > 800 {
+            segments_to_add = 800 - segment_count;
+            line_cap_reached = true;
+        }
+
+        if segments_to_add == 0 {
+            break;
+        }
+
+        let mut line_len = 0;
+        if only_ids {
+            line_len = line_id.len() + 10;
         } else {
-            final_content.len()
-        };
+            for seg in segments.iter().take(segments_to_add) {
+                line_len += seg.len();
+            }
+        }
 
         if cumulative_bytes + line_len > 45000 {
             capacity_truncated = true;
@@ -49,69 +73,75 @@ pub fn retrieve_and_format_lines(
 
         cumulative_bytes += line_len;
 
-        let item_str = if only_ids {
-            format!("[\"{}\", {}]", line_id, current_idx)
-        } else {
-            let content_escaped = serde_json::to_string(&final_content)?;
-            format!("[\"{}\", {}, {}]", line_id, current_idx, content_escaped)
-        };
-
-        items.push(item_str);
+        id_items.push(format!("[\"{}\", {}]", line_id, current_idx));
+        if !only_ids {
+            let indent = " ".repeat(current_idx.to_string().len().saturating_sub(1));
+            for (seg_idx, seg) in segments.iter().take(segments_to_add).enumerate() {
+                if seg_idx == 0 {
+                    text_lines.push(format!("{}: {}", current_idx, seg));
+                } else if seg_idx == segments_to_add - 1 {
+                    text_lines.push(format!("{}└: {}", indent, seg));
+                } else {
+                    text_lines.push(format!("{}│: {}", indent, seg));
+                }
+            }
+        }
+        segment_count += segments_to_add;
         actual_end_line = current_idx;
+
+        if line_cap_reached {
+            break;
+        }
     }
 
+    let config = crate::tools::metadata::get_config();
     let warning_msg = if capacity_truncated {
-        Some("Response truncated: cumulative response size limit (45,000 bytes) was reached.".to_string())
+        Some(config.warning_cumulative_limit.clone())
+    } else if line_cap_reached {
+        Some(config.warning_line_cap.clone())
     } else {
         None
     };
 
-    let mut lines_json = String::new();
-    lines_json.push('[');
-
-    if !items.is_empty() {
-        if only_ids {
-            lines_json.push('\n');
-            let mut current_line = "  ".to_string();
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    let next_len = current_line.len() + 2 + item.len();
-                    if next_len > wrap_trigger_length {
-                        lines_json.push_str(&current_line);
-                        lines_json.push_str(",\n");
-                        current_line = format!("  {}", item);
-                    } else {
-                        current_line.push_str(", ");
-                        current_line.push_str(item);
-                    }
+    // Format ids_json in a nice wrapped array
+    let mut ids_json = String::new();
+    ids_json.push('[');
+    if !id_items.is_empty() {
+        ids_json.push('\n');
+        let mut current_line = "  ".to_string();
+        for (i, item) in id_items.iter().enumerate() {
+            if i > 0 {
+                let next_len = current_line.len() + 2 + item.len();
+                if next_len > wrap_trigger_length {
+                    ids_json.push_str(&current_line);
+                    ids_json.push_str(",\n");
+                    current_line = format!("  {}", item);
                 } else {
+                    current_line.push_str(", ");
                     current_line.push_str(item);
                 }
-            }
-            lines_json.push_str(&current_line);
-            lines_json.push('\n');
-        } else {
-            lines_json.push('\n');
-            for (i, item) in items.iter().enumerate() {
-                lines_json.push_str("  ");
-                lines_json.push_str(item);
-                if i < items.len() - 1 {
-                    lines_json.push_str(",\n");
-                } else {
-                    lines_json.push('\n');
-                }
+            } else {
+                current_line.push_str(item);
             }
         }
+        ids_json.push_str(&current_line);
+        ids_json.push('\n');
+    }
+    if id_items.is_empty() {
+        ids_json.push(']');
+    } else {
+        ids_json.push_str("  ]");
     }
 
-    if items.is_empty() {
-        lines_json.push(']');
+    let lines_text = if only_ids {
+        None
     } else {
-        lines_json.push_str("  ]");
-    }
+        Some(text_lines.join("\n"))
+    };
 
     Ok(FormattedLinesResult {
-        lines_json,
+        lines_text,
+        ids_json,
         actual_end_line,
         warning_msg,
     })
@@ -149,6 +179,47 @@ pub fn format_modified_ids(ids: &[String], wrap_trigger_length: usize) -> String
     result
 }
 
+pub fn format_definition_json(
+    repository: &impl SessionRepository,
+    session_id: &str,
+    start_line: usize,
+    end_line: usize,
+) -> Result<String> {
+    repository.ensure_hashes_range(session_id, start_line, end_line)?;
+    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
+
+    let mut items = Vec::new();
+    for (current_idx, (seq_id, line_hash_opt, content)) in (start_line..).zip(lines) {
+        let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
+        let line_id = format!("{:x}#{}", seq_id, line_hash);
+        let content_escaped = serde_json::to_string(&content)?;
+        items.push(format!("[\"{}\", {}, {}]", line_id, current_idx, content_escaped));
+    }
+
+    let mut lines_json = String::new();
+    lines_json.push('[');
+    if !items.is_empty() {
+        lines_json.push('\n');
+        for (i, item) in items.iter().enumerate() {
+            lines_json.push_str("  ");
+            lines_json.push_str(item);
+            if i < items.len() - 1 {
+                lines_json.push_str(",\n");
+            } else {
+                lines_json.push('\n');
+            }
+        }
+        lines_json.push_str("  ]");
+    } else {
+        lines_json.push(']');
+    }
+
+    let output = format!(
+        "{{\n  \"columns\": [\n    \"id\",\n    \"n\",\n    \"content\"\n  ],\n  \"lines\": {}\n}}",
+        lines_json
+    );
+    Ok(output)
+}
 
 #[cfg(test)]
 mod tests {
@@ -179,22 +250,23 @@ mod tests {
         let res = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 30)?;
         assert_eq!(res.actual_end_line, 4);
         assert!(res.warning_msg.is_none());
+        assert!(res.lines_text.is_none());
 
-        let val: serde_json::Value = serde_json::from_str(&res.lines_json)?;
+        let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         let arr = val.as_array().unwrap();
         assert_eq!(arr.len(), 4);
         assert_eq!(arr[0][1].as_u64().unwrap(), 1);
         assert_eq!(arr[3][1].as_u64().unwrap(), 4);
 
-        let lines: Vec<&str> = res.lines_json.lines().collect();
-        assert!(lines.len() > 3, "Expected formatting to wrap into multiple lines: {}", res.lines_json);
+        let lines: Vec<&str> = res.ids_json.lines().collect();
+        assert!(lines.len() > 3, "Expected formatting to wrap into multiple lines: {}", res.ids_json);
         assert_eq!(lines[0], "[");
         assert!(lines[1].starts_with("  "));
         assert_eq!(*lines.last().unwrap(), "  ]");
 
         // Test with large wrap_trigger_length so everything is on one line
         let res_no_wrap = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 1000)?;
-        let lines_no_wrap: Vec<&str> = res_no_wrap.lines_json.lines().collect();
+        let lines_no_wrap: Vec<&str> = res_no_wrap.ids_json.lines().collect();
         assert_eq!(lines_no_wrap.len(), 3);
         assert_eq!(lines_no_wrap[0], "[");
         assert_eq!(lines_no_wrap[2], "  ]");
@@ -225,18 +297,12 @@ mod tests {
         assert_eq!(res.actual_end_line, 2);
         assert!(res.warning_msg.is_none());
 
-        let val: serde_json::Value = serde_json::from_str(&res.lines_json)?;
+        assert_eq!(res.lines_text.as_ref().unwrap(), "1: line 1\n2: line 2");
+
+        let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         let arr = val.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0][1].as_u64().unwrap(), 1);
-        assert_eq!(arr[0][2].as_str().unwrap(), "line 1");
-
-        let lines: Vec<&str> = res.lines_json.lines().collect();
-        assert_eq!(lines.len(), 4);
-        assert_eq!(lines[0], "[");
-        assert_eq!(lines[3], "  ]");
-        assert!(lines[1].ends_with(","));
-        assert!(!lines[2].ends_with(","));
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -261,13 +327,15 @@ mod tests {
         let session_id = &meta.session_id;
 
         let res = retrieve_and_format_lines(&repository, session_id, 1, 1, false, 1000)?;
-        let val: serde_json::Value = serde_json::from_str(&res.lines_json)?;
+        let text = res.lines_text.as_ref().unwrap();
+        assert!(text.contains("1: "));
+        assert!(text.contains("└: "));
+
+        let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         let arr = val.as_array().unwrap();
         let line_id = arr[0][0].as_str().unwrap();
-        let content = arr[0][2].as_str().unwrap();
 
-        assert!(line_id.ends_with("#TRUNC"));
-        assert!(content.contains("[TRUNCATED:"));
+        assert!(!line_id.ends_with("#TRUNC"));
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -299,7 +367,7 @@ mod tests {
         assert_eq!(res.actual_end_line, 45);
         assert_eq!(res.warning_msg.as_deref(), Some("Response truncated: cumulative response size limit (45,000 bytes) was reached."));
 
-        let val: serde_json::Value = serde_json::from_str(&res.lines_json)?;
+        let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         assert_eq!(val.as_array().unwrap().len(), 45);
 
         fs::remove_dir_all(&temp_dir)?;

@@ -53,7 +53,11 @@ impl ToolDispatcher {
                     "properties": {
                         "file": {
                             "type": "string",
-                            "description": "Path to the file to inspect"
+                            "description": "Path to the file to inspect (deprecated, use filepath instead)"
+                        },
+                        "filepath": {
+                            "type": "string",
+                            "description": "Absolute path to the file to inspect"
                         },
                         "query": {
                             "type": "string",
@@ -77,8 +81,7 @@ impl ToolDispatcher {
                             "type": "boolean",
                             "description": "If true, saves the inspect output JSON to a unique file in the plugin's outputs directory and returns its absolute path. Recommended for large source files to bypass token limits."
                         }
-                    },
-                    "required": ["file"]
+                    }
                 }
             }),
             serde_json::json!({
@@ -89,10 +92,13 @@ impl ToolDispatcher {
                     "properties": {
                         "file": {
                             "type": "string",
-                            "description": "Path to the file to inspect"
+                            "description": "Path to the file to inspect (deprecated, use filepath instead)"
+                        },
+                        "filepath": {
+                            "type": "string",
+                            "description": "Absolute path to the file to inspect"
                         }
-                    },
-                    "required": ["file"]
+                    }
                 }
             }),
             serde_json::json!({
@@ -116,9 +122,17 @@ impl ToolDispatcher {
                         "only_ids": {
                             "type": "boolean",
                             "description": "If true, only returns Line IDs and line numbers, omitting text content."
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Optional search term to filter lines matching this keyword."
+                        },
+                        "context_lines": {
+                            "type": "integer",
+                            "description": "Optional number of surrounding context lines to return around query matches. Defaults to 5."
                         }
                     },
-                    "required": ["filepath", "start_line", "end_line"]
+                    "required": ["filepath"]
                 }
             }),
             serde_json::json!({
@@ -138,12 +152,12 @@ impl ToolDispatcher {
                                 "properties": {
                                     "op": {
                                         "type": "string",
-                                        "enum": ["update", "insert_after", "insert_before", "delete", "replace_range", "move"],
+                                        "enum": ["update", "insert_after", "insert_before", "delete", "replace_range", "move", "replace_substring"],
                                         "description": "The edit operation to perform."
                                     },
                                     "target_id": {
                                         "type": "string",
-                                        "description": "Optional target line ID (e.g. 1#a5c7). Required for update, delete, replace_range, move. Optional/omitted for insert_before (prepends) and insert_after (appends)."
+                                        "description": "Optional target line ID (e.g. 1#a5c7). Required for update, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends)."
                                     },
                                     "end_target_id": {
                                         "type": "string",
@@ -161,10 +175,27 @@ impl ToolDispatcher {
                                     "content": {
                                         "type": "string",
                                         "description": "The new content to insert/update/replace. Omitted/ignored for delete, move."
+                                    },
+                                    "pattern": {
+                                        "type": "string",
+                                        "description": "The substring pattern to find. Required for replace_substring."
+                                    },
+                                    "replacement": {
+                                        "type": "string",
+                                        "description": "The replacement string. Required for replace_substring."
+                                    },
+                                    "occurrence": {
+                                        "type": "integer",
+                                        "description": "Optional 1-indexed occurrence count of the pattern (default: 1) for replace_substring."
                                     }
                                 },
                                 "required": ["op"]
                             }
+                        },
+                        "strict_validation": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, rolls back edits on syntax or parser error. If false, saves changes anyway and returns warnings/errors."
                         }
                     },
                     "required": ["filepath", "edits"]
@@ -209,13 +240,50 @@ impl ToolDispatcher {
             }
             "view_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
-                let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).context("Missing start_line")? as usize;
-                let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).context("Missing end_line")? as usize;
+                let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+                let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
                 let only_ids = arguments.get("only_ids").and_then(|v| v.as_bool());
+                let query = arguments.get("query").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let context_lines = arguments.get("context_lines").and_then(|v| v.as_u64()).map(|v| v as usize);
                 let repository = session_db::SqliteSessionRepository;
-                let text = view::view_lines(&repository, filepath, start_line, end_line, only_ids)?;
+                let res = view::view_lines(&repository, filepath, start_line, end_line, only_ids, query, context_lines)?;
+                
+                let mut content = Vec::new();
+                if let Some(code) = res.lines_text {
+                    let ext = std::path::Path::new(filepath)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("");
+                    let lang = match ext {
+                        "rs" => "rust",
+                        "py" => "python",
+                        "js" => "javascript",
+                        "ts" => "typescript",
+                        "tsx" => "tsx",
+                        "jsx" => "jsx",
+                        "go" => "go",
+                        "json" => "json",
+                        "toml" => "toml",
+                        "yaml" | "yml" => "yaml",
+                        "html" => "html",
+                        "md" => "markdown",
+                        "sh" => "bash",
+                        _ => "text",
+                    };
+                    let formatted_code = format!("```{}\n{}\n```", lang, code);
+                    content.push(McpTextContent {
+                        content_type: "text".to_string(),
+                        text: formatted_code,
+                    });
+                }
+                
+                content.push(McpTextContent {
+                    content_type: "text".to_string(),
+                    text: res.metadata_json,
+                });
+                
                 Ok(serde_json::to_value(McpToolResult {
-                    content: vec![McpTextContent { content_type: "text".to_string(), text }],
+                    content,
                     is_error: None,
                 })?)
             }
@@ -223,8 +291,9 @@ impl ToolDispatcher {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let edits_val = arguments.get("edits").context("Missing edits array")?;
                 let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
+                let strict_validation = arguments.get("strict_validation").and_then(|v| v.as_bool()).unwrap_or(false);
                 let repository = session_db::SqliteSessionRepository;
-                let text = edit::edit_lines(&repository, filepath, edits, parser_manager).await?;
+                let text = edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?;
                 Ok(serde_json::to_value(McpToolResult {
                     content: vec![McpTextContent { content_type: "text".to_string(), text }],
                     is_error: None,

@@ -230,6 +230,7 @@ impl McpServer {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock, clippy::bool_assert_comparison)]
 mod tests {
     use super::*;
     use std::fs;
@@ -741,7 +742,7 @@ mod tests {
 
         // Adjust old_file's modified time to 24 hours ago (Mac/Unix touch command)
         let status = std::process::Command::new("touch")
-            .args(&["-m", "-t", "202001010000", old_file.to_str().unwrap()])
+            .args(["-m", "-t", "202001010000", old_file.to_str().unwrap()])
             .status()
             .expect("failed to execute touch command for testing");
         assert!(status.success());

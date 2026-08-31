@@ -1,5 +1,6 @@
+#![allow(clippy::await_holding_lock)]
 use ast_editor::tools::session_db;
-use ast_editor::tools::session_db::SqliteSessionRepository;
+use ast_editor::tools::session_db::{SqliteSessionRepository, EditOp, MovePosition};
 use ast_editor::tools::view;
 use ast_editor::tools::edit;
 use ast_editor::parser::ParserManager;
@@ -34,6 +35,71 @@ impl Drop for TestFile {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
+}
+
+fn view_lines_old_compat(
+    repository: &impl session_db::SessionRepository,
+    filepath: &str,
+    start_line: usize,
+    end_line: usize,
+    only_ids: Option<bool>,
+) -> std::result::Result<String, anyhow::Error> {
+    let res = view::view_lines(repository, filepath, Some(start_line), Some(end_line), only_ids, None, None)?;
+    let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
+    let ids = ids_val["ids"].as_array().unwrap();
+    
+    let mut lines = Vec::new();
+    if let Some(ref text) = res.lines_text {
+        let mut current_id = String::new();
+        let mut current_n = 0;
+        let mut current_content = String::new();
+        let mut has_pending = false;
+
+        for line in text.lines() {
+            let colon_idx = line.find(':').unwrap();
+            let prefix = line[..colon_idx].trim();
+            let content = &line[colon_idx + 2..];
+
+            if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
+                if has_pending {
+                    lines.push(serde_json::json!([current_id, current_n, current_content]));
+                }
+                current_n = prefix.parse::<usize>().unwrap();
+                current_content = content.to_string();
+                current_id = String::new();
+                for id_entry in ids {
+                    let id_arr = id_entry.as_array().unwrap();
+                    if id_arr[1].as_u64().unwrap() as usize == current_n {
+                        current_id = id_arr[0].as_str().unwrap().to_string();
+                        break;
+                    }
+                }
+                has_pending = true;
+            } else {
+                current_content.push_str(content);
+            }
+        }
+        if has_pending {
+            lines.push(serde_json::json!([current_id, current_n, current_content]));
+        }
+    } else {
+        for id_entry in ids {
+            let id_arr = id_entry.as_array().unwrap();
+            let id = id_arr[0].as_str().unwrap();
+            let n = id_arr[1].as_u64().unwrap() as usize;
+            lines.push(serde_json::json!([id, n]));
+        }
+    }
+    
+    let mut val = ids_val.clone();
+    val["lines"] = serde_json::Value::Array(lines);
+    let columns = if only_ids.unwrap_or(false) {
+        vec!["id", "n"]
+    } else {
+        vec!["id", "n", "content"]
+    };
+    val["columns"] = serde_json::json!(columns);
+    Ok(serde_json::to_string(&val)?)
 }
 
 fn create_test_parser_manager() -> ParserManager {
@@ -77,7 +143,7 @@ async fn test_view_lines_lazy_hashing() {
     let repository = SqliteSessionRepository;
     
     // Retrieve lines (this triggers lazy hashing for range)
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
@@ -100,18 +166,43 @@ async fn test_edit_operations_and_ast_validation() {
     let pm = create_test_parser_manager();
 
     // Fetch the correct target ID for line 2
-    let view_res = view::view_lines(&repository, file.path_str(), 2, 2, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     // Perform invalid edit (Syntax error)
     let invalid_edits = vec![edit::LineEdit {
-        op: "update".to_string(),
+        op: EditOp::Update,
         target_id: Some(target_id.clone()),
         content: Some("let a = ;".to_string()), // missing value
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(&repository, file.path_str(), invalid_edits, &pm).await;
+    // 1. Permissive Mode test: should save with errors
+    let edit_res_permissive = edit::edit_lines(&repository, file.path_str(), invalid_edits.clone(), &pm).await.unwrap();
+    let res_permissive: serde_json::Value = serde_json::from_str(&edit_res_permissive).unwrap();
+    assert_eq!(res_permissive["status"], "saved_with_errors");
+    assert_eq!(res_permissive["syntax_valid"], false);
+    
+    let content_permissive = fs::read_to_string(file.path_str()).unwrap();
+    assert!(content_permissive.contains("let a = ;"));
+
+    // Reset file for strict test
+    fs::write(file.path_str(), "fn main() {\n    let a = 1;\n}\n").unwrap();
+    // Re-initialize session to clear the dirty session
+    let _init = session_db::init_edit_session(file.path_str(), false).unwrap();
+    let view_res_strict = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
+    let val_strict: serde_json::Value = serde_json::from_str(&view_res_strict).unwrap();
+    let target_id_strict = val_strict["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let invalid_edits_strict = vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id_strict),
+        content: Some("let a = ;".to_string()),
+        ..Default::default()
+    }];
+
+    // 2. Strict Mode test: should roll back
+    let edit_res = edit::edit_lines_with_validation(&repository, file.path_str(), invalid_edits_strict, true, &pm).await;
     
     if let Err(ref e) = edit_res {
         println!("DEBUG: invalid edit error = {:?}", e);
@@ -126,7 +217,7 @@ async fn test_edit_operations_and_ast_validation() {
 
     // Perform valid edit
     let valid_edits = vec![edit::LineEdit {
-        op: "update".to_string(),
+        op: EditOp::Update,
         target_id: Some(target_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
@@ -149,7 +240,7 @@ async fn test_transactional_deletes_and_inserts() {
     let pm = create_test_parser_manager();
 
     // Get Line IDs
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 4, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 4, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     
@@ -171,13 +262,13 @@ async fn test_transactional_deletes_and_inserts() {
     // Transactional delete and insert_after
     let edits = vec![
         edit::LineEdit {
-            op: "delete".to_string(),
+            op: EditOp::Delete,
             target_id: Some(id_b),
             content: None,
             ..Default::default()
         },
         edit::LineEdit {
-            op: "insert_after".to_string(),
+            op: EditOp::InsertAfter,
             target_id: Some(id_a),
             content: Some("    let c = 3;".to_string()),
             ..Default::default()
@@ -209,7 +300,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     let pm = create_test_parser_manager();
 
     // Get line ID
-    let view_res = view::view_lines(&repository, file.path_str(), 2, 2, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -217,18 +308,21 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     tokio::time::sleep(tokio::time::Duration::from_millis(1100)).await;
     fs::write(file.path_str(), "fn main() {\n    let a = 1;\n}\n// external change\n").unwrap();
 
-    // Try applying line edits, should fail with CONCURRENCY_ERROR
+    // Try applying line edits, should succeed due to Smart Resync
     let edits = vec![edit::LineEdit {
-        op: "update".to_string(),
+        op: EditOp::Update,
         target_id: Some(target_id),
         content: Some("    let a = 3;".to_string()),
         ..Default::default()
     }];
 
-    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm).await;
-    assert!(edit_res.is_err());
-    let err_msg = edit_res.unwrap_err().to_string();
-    assert!(err_msg.contains("CONCURRENCY_ERROR"));
+    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
+    assert!(edit_res.contains("success"));
+
+    // Verify disk content includes both the external change and our update
+    let content = fs::read_to_string(file.path_str()).unwrap();
+    assert!(content.contains("let a = 3;"));
+    assert!(content.contains("external change"));
 }
 
 #[tokio::test]
@@ -241,7 +335,7 @@ async fn test_integration_append_operation() {
 
     // Perform append
     let edits = vec![edit::LineEdit {
-        op: "append".to_string(),
+        op: EditOp::Append,
         target_id: None,
         content: Some("fn additional() {\n}".to_string()),
         ..Default::default()
@@ -265,7 +359,7 @@ async fn test_integration_advanced_operations() {
     let pm = create_test_parser_manager();
 
     // 1. Get IDs for lines
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 4, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 4, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let _id_main = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -274,7 +368,7 @@ async fn test_integration_advanced_operations() {
 
     // 2. Perform replace_range replacing let a = 1 and let b = 2 with let val = 100
     let edits = vec![edit::LineEdit {
-        op: "replace_range".to_string(),
+        op: EditOp::ReplaceRange,
         target_id: Some(id_a.clone()),
         end_target_id: Some(id_b.clone()),
         content: Some("    let val = 100;".to_string()),
@@ -290,7 +384,7 @@ async fn test_integration_advanced_operations() {
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
 
     // Get new IDs
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let id_main_new = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -298,10 +392,10 @@ async fn test_integration_advanced_operations() {
 
     // 3. Move let val = 100; before fn main() {
     let edits_move = vec![edit::LineEdit {
-        op: "move".to_string(),
+        op: EditOp::Move,
         target_id: Some(id_val_new),
         dest_target_id: Some(id_main_new),
-        move_position: Some("before".to_string()),
+        move_position: Some(MovePosition::Before),
         ..Default::default()
     }];
 
@@ -324,7 +418,7 @@ async fn test_integration_insert_without_target_id() {
 
     // 1. Perform insert_before with target_id = None (should prepend to the beginning of the file)
     let edits_before = vec![edit::LineEdit {
-        op: "insert_before".to_string(),
+        op: EditOp::InsertBefore,
         target_id: None,
         content: Some("// Prepend header".to_string()),
         ..Default::default()
@@ -340,7 +434,7 @@ async fn test_integration_insert_without_target_id() {
 
     // 2. Perform insert_after with target_id = Some("") (should append to the end of the file)
     let edits_after = vec![edit::LineEdit {
-        op: "insert_after".to_string(),
+        op: EditOp::InsertAfter,
         target_id: Some("".to_string()),
         content: Some("// Append footer".to_string()),
         ..Default::default()
@@ -398,7 +492,7 @@ async fn test_integration_create_lines_flow() {
 
     // 4. Modify the newly created file using `edit_lines` and verify the modified contents on disk
     let edits = vec![edit::LineEdit {
-        op: "update".to_string(),
+        op: EditOp::Update,
         target_id: Some(id1.to_string()),
         content: Some("    let x = 100;".to_string()),
         ..Default::default()
@@ -430,7 +524,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
     let content = format!("fn first() {{\n{}\n}}\n", long_line);
     let file = TestFile::new("truncation_protection.rs", &content);
 
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
@@ -442,25 +536,25 @@ async fn test_integration_view_lines_truncation_and_protection() {
     let line1_arr = lines[1].as_array().unwrap();
     let line1_id = line1_arr[0].as_str().unwrap();
     let line1_content = line1_arr[2].as_str().unwrap();
-    assert!(line1_id.ends_with("#TRUNC"));
-    assert!(line1_content.contains("[TRUNCATED: Line is too long. DO NOT UPDATE this line directly unless replacing it completely.]"));
 
+    // Verify it accumulated correctly
+    assert_eq!(line1_content, &long_line);
+    assert!(!line1_id.contains("#TRUNC"));
+
+    // Verify replace_substring works on this long line
     let edits = vec![edit::LineEdit {
-        op: "update".to_string(),
+        op: EditOp::ReplaceSubstring,
         target_id: Some(line1_id.to_string()),
-        content: Some("    let x = 1;".to_string()),
+        pattern: Some("aaaaa".to_string()),
+        replacement: Some("bbbbb".to_string()),
+        occurrence: Some(1),
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm).await;
-    assert!(edit_res.is_err());
-    let err_msg = edit_res.unwrap_err().to_string();
-    assert!(err_msg.contains("LINE_TOO_LONG_ERROR"));
-    assert!(err_msg.contains("prettier"));
-    assert!(err_msg.contains("black"));
-    assert!(err_msg.contains("cargo fmt"));
+    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm).await.unwrap();
+    assert!(edit_res.contains("success"));
 
     let disk_content = std::fs::read_to_string(file.path_str()).unwrap();
-    assert_eq!(disk_content, content);
+    assert!(disk_content.contains("bbbbbaaaaa"));
 }
 
 #[tokio::test]
@@ -476,7 +570,7 @@ async fn test_integration_view_lines_capacity_cap() {
     let content = lines.join("\n");
     let file = TestFile::new("capacity_cap.txt", &content);
 
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 50, None).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 50, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     let returned_lines = val["lines"].as_array().unwrap();
@@ -518,7 +612,7 @@ async fn test_integration_view_lines_only_ids() {
     let repository = SqliteSessionRepository;
     let file = TestFile::new("only_ids.rs", "fn main() {\n    let a = 1;\n}\n");
 
-    let view_res = view::view_lines(&repository, file.path_str(), 1, 3, Some(true)).unwrap();
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, Some(true)).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     
     assert_eq!(val["columns"], serde_json::json!(["id", "n"]));

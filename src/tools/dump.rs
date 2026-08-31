@@ -12,6 +12,7 @@ use crate::tools::{McpTextContent, McpToolResult};
 
 #[derive(Debug, Deserialize)]
 pub struct DumpArgs {
+    #[serde(alias = "filepath")]
     pub file: String,
 }
 

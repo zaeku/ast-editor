@@ -18,6 +18,14 @@ static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
 pub struct ToolConfig {
     pub only_ids_wrap_trigger_length: usize,
     pub view_lines_response_tip: String,
+    pub warning_cumulative_limit: String,
+    pub warning_line_cap: String,
+    pub error_no_query_match: String,
+    pub warning_line_limit_exceeded: String,
+    pub status_file_created: String,
+    pub warning_header_hierarchy: String,
+    pub warning_malformed_link: String,
+    pub warning_html_syntax: String,
 }
 
 static CONFIG: Lazy<ToolConfig> = Lazy::new(|| {

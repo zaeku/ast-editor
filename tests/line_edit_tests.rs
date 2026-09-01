@@ -1047,3 +1047,63 @@ async fn test_repeated_insertion_between_the_same_pair() {
     assert_eq!(lines[1], "    let v199 = 199;");
     assert_eq!(lines[200], "    let v0 = 0;");
 }
+
+#[tokio::test]
+async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("desync.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    // Push the ids out of step with the positions, so that renumbering the
+    // file 1..N would give a visibly different answer from reconciling it.
+    let anchor = live_id(&repository, file.path_str(), 1);
+    edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::InsertAfter,
+        target_id: Some(anchor),
+        content: Some("    let inserted = 0;".to_string()),
+        ..Default::default()
+    }], &pm).await.unwrap();
+
+    let before = index_pairs(&repository, file.path_str());
+    assert_eq!(before.len(), 4);
+    let ids: Vec<i64> = before.iter().map(|(seq, _)| *seq).collect();
+    assert_ne!(ids, vec![1, 2, 3, 4], "the ids never diverged from the positions");
+
+    // Stand in for the narrow window where the file changes between the
+    // reconcile at the gate and the buffer load: drop the last index row so the
+    // index is shorter than the file, without touching the file itself.
+    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    let db = rusqlite::Connection::open(session_db::get_db_path().unwrap()).unwrap();
+    db.execute(
+        "DELETE FROM lines WHERE session_id = ?1 AND sequence_id = (SELECT MAX(sequence_id) FROM lines WHERE session_id = ?1)",
+        [&meta.session_id],
+    ).unwrap();
+    drop(db);
+
+    // Read a fixed range rather than the session's line count: the point is
+    // what the buffer recovers, not what the stale count claims.
+    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    let after: Vec<(i64, String)> = repository
+        .fetch_lines_range(&meta.session_id, 1, 4)
+        .unwrap()
+        .into_iter()
+        .map(|(seq, _, content)| (seq, content))
+        .collect();
+    assert_eq!(after.len(), 4);
+
+    // Every line whose index row survived keeps the id an agent would hold.
+    let destroyed = ids.iter().copied().max().unwrap();
+    for (seq, content) in &before {
+        if *seq == destroyed {
+            continue;
+        }
+        let found = after.iter().find(|(_, c)| c == content).expect("a line vanished");
+        assert_eq!(found.0, *seq, "line {:?} was re-identified", content);
+    }
+
+    // The one line whose identity was destroyed draws a fresh id, never a
+    // number already in use.
+    let replacement = after.iter().find(|(seq, _)| !ids.contains(seq)).expect("no fresh id was minted");
+    assert!(!ids.contains(&replacement.0));
+}

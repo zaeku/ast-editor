@@ -104,10 +104,13 @@ fn create_tables(conn: &Connection) -> Result<()> {
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN parent_context TEXT;", []);
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN norm_hash TEXT;", []);
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN next_line_id INTEGER NOT NULL DEFAULT 1;", []);
-    // Content used to be cached here. Drop it, and with it every row built
-    // under the old schema: line_hash was four characters wide then, and the
-    // index rebuilds itself from disk on next access anyway.
+    // Content used to be cached here. Drop it, and with it every entry built
+    // under the old schema: line_hash was four characters wide then. Clearing
+    // the sessions is what clears the lines — dropping the line rows alone
+    // would leave each session claiming a hash and a line count it no longer
+    // has, and a file nobody had touched since would read as empty.
     if conn.execute("ALTER TABLE lines DROP COLUMN content;", []).is_ok() {
+        conn.execute("DELETE FROM sessions;", []).context("Failed to clear the pre-index cache")?;
         conn.execute("DELETE FROM lines;", []).context("Failed to clear the pre-index line cache")?;
     }
 
@@ -447,50 +450,56 @@ fn session_filepath(conn: &Connection, session_id: &str) -> Result<String> {
 
 /// Read a session's file and pair each line with the identity the index holds
 /// for it. The index stores order and identity; the text comes from disk.
-///
-/// If the index and the file disagree on length the index is stale, and the
-/// caller is served a fresh one built from disk — the same rebuild the tool
-/// has always fallen back to. Phase 2 replaces this with a real reconcile.
-fn load_buffer(conn: &Connection, session_id: &str) -> Result<LineBuffer> {
+fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<LineBuffer> {
     let filepath = session_filepath(conn, session_id)?;
-    let content = fs::read_to_string(&filepath)
-        .with_context(|| format!("Failed to read file for line buffer: {}", filepath))?;
 
-    let mut parts: Vec<&str> = content.split('\n').collect();
-    if parts.last() == Some(&"") {
-        parts.pop();
+    // Callers reach here through init_edit_session, which reconciles, so the
+    // index normally matches. It can still be short or long if the file changed
+    // in the window between the two. Reconciling again keeps the ids an agent
+    // is holding, where renumbering the file 1..N would discard every one of
+    // them without saying so — and persist that through the next commit.
+    let mut reconciled = false;
+    loop {
+        let content = fs::read_to_string(&filepath)
+            .with_context(|| format!("Failed to read file for line buffer: {}", filepath))?;
+        let mut parts: Vec<&str> = content.split('\n').collect();
+        if parts.last() == Some(&"") {
+            parts.pop();
+        }
+        let disk: Vec<String> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect();
+
+        let index: Vec<(i64, Option<String>)> = {
+            let mut stmt = conn.prepare(
+                "SELECT sequence_id, parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+            )?;
+            let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        if index.len() != disk.len() {
+            if reconciled {
+                bail!(
+                    "CONCURRENCY_ERROR: {} is being written while it is read; its line index could not be brought in step with it.",
+                    filepath
+                );
+            }
+            reconcile_index(conn, session_id, &filepath, &[])?;
+            reconciled = true;
+            continue;
+        }
+
+        let lines: Vec<BufLine> = disk.into_iter().zip(index)
+            .map(|(content, (seq, parent_context))| BufLine { seq, content, parent_context })
+            .collect();
+
+        let stored_next: i64 = conn.query_row(
+            "SELECT next_line_id FROM sessions WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        ).unwrap_or(1);
+        let highest_live = lines.iter().map(|line| line.seq).max().unwrap_or(0);
+        return Ok(LineBuffer::new(lines, std::cmp::max(stored_next, highest_live + 1)));
     }
-    let disk: Vec<String> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect();
-
-    let index: Vec<(i64, Option<String>)> = {
-        let mut stmt = conn.prepare(
-            "SELECT sequence_id, parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
-        )?;
-        let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    };
-
-    let lines: Vec<BufLine> = if index.len() == disk.len() {
-        disk.into_iter().zip(index).map(|(content, (seq, parent_context))| BufLine {
-            seq,
-            content,
-            parent_context,
-        }).collect()
-    } else {
-        disk.into_iter().enumerate().map(|(idx, content)| BufLine {
-            seq: idx as i64 + 1,
-            content,
-            parent_context: None,
-        }).collect()
-    };
-
-    let stored_next: i64 = conn.query_row(
-        "SELECT next_line_id FROM sessions WHERE session_id = ?1",
-        [session_id],
-        |row| row.get(0),
-    ).unwrap_or(1);
-    let highest_live = lines.iter().map(|line| line.seq).max().unwrap_or(0);
-    Ok(LineBuffer::new(lines, std::cmp::max(stored_next, highest_live + 1)))
 }
 
 pub trait SessionRepository: Send + Sync {
@@ -552,8 +561,8 @@ impl SessionRepository for SqliteSessionRepository {
     }
 
     fn find_matching_lines(&self, session_id: &str, query: &str) -> Result<Vec<usize>> {
-        let conn = get_db_connection()?;
-        let buffer = load_buffer(&conn, session_id)?;
+        let mut conn = get_db_connection()?;
+        let buffer = load_buffer(&mut conn, session_id)?;
         Ok(buffer.lines.iter().enumerate()
             .filter(|(_, line)| line.content.contains(query))
             .map(|(idx, _)| idx + 1)
@@ -576,8 +585,8 @@ impl SessionRepository for SqliteSessionRepository {
         start_line: usize,
         end_line: usize,
     ) -> Result<Vec<(i64, Option<String>, String)>> {
-        let conn = get_db_connection()?;
-        let buffer = load_buffer(&conn, session_id)?;
+        let mut conn = get_db_connection()?;
+        let buffer = load_buffer(&mut conn, session_id)?;
         let from = start_line.saturating_sub(1);
         let to = std::cmp::min(end_line, buffer.lines.len());
         if from >= to {
@@ -589,14 +598,14 @@ impl SessionRepository for SqliteSessionRepository {
     }
 
     fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>> {
-        let conn = get_db_connection()?;
-        let buffer = load_buffer(&conn, session_id)?;
+        let mut conn = get_db_connection()?;
+        let buffer = load_buffer(&mut conn, session_id)?;
         Ok(buffer.lines.iter().find(|line| line.seq == sequence_id).map(|line| line.content.clone()))
     }
 
     fn plan_line_edits(&self, session_id: &str, edits: &[LineEdit]) -> Result<(LineBuffer, Vec<String>)> {
-        let conn = get_db_connection()?;
-        let mut buffer = load_buffer(&conn, session_id)?;
+        let mut conn = get_db_connection()?;
+        let mut buffer = load_buffer(&mut conn, session_id)?;
         let modified_ids = buffer.apply(edits)?;
         Ok((buffer, modified_ids))
     }
@@ -758,8 +767,6 @@ fn reconcile_index(
     filepath: &str,
     target_ids: &[String],
 ) -> Result<usize> {
-    // Nothing to reconcile if the file still looks the way the index last saw
-    // it. Targets are then verified downstream against the buffer itself.
     let current: Option<(String, i64, usize)> = conn.query_row(
         "SELECT file_hash, mtime, (SELECT COUNT(*) FROM lines WHERE session_id = ?1) FROM sessions WHERE session_id = ?1",
         [session_id],
@@ -768,11 +775,6 @@ fn reconcile_index(
     let disk_mtime = std::path::Path::new(filepath).metadata()?.modified()?
         .duration_since(UNIX_EPOCH)?.as_secs() as i64;
     let disk_file_hash = compute_sha256(filepath)?;
-    if let Some((stored_hash, stored_mtime, line_count)) = &current {
-        if *stored_hash == disk_file_hash && *stored_mtime == disk_mtime {
-            return Ok(*line_count);
-        }
-    }
 
     let mut targeted = Vec::new();
     for id in target_ids {
@@ -789,6 +791,16 @@ fn reconcile_index(
     }
     let disk: Vec<&str> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
     let disk_hashes: Vec<String> = disk.iter().map(|line| compute_stored_hash(line)).collect();
+
+    // Nothing to reconcile if the file still looks the way the index last saw
+    // it *and* the index still covers it. Matching hashes alone are not enough:
+    // a schema migration clears the line rows while leaving the session's hash
+    // in place, and an index that is short must be rebuilt rather than trusted.
+    if let Some((stored_hash, stored_mtime, line_count)) = &current {
+        if *stored_hash == disk_file_hash && *stored_mtime == disk_mtime && *line_count == disk.len() {
+            return Ok(*line_count);
+        }
+    }
 
     let index: Vec<(i64, String, String)> = {
         let mut stmt = conn.prepare(

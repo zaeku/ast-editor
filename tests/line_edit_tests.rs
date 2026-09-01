@@ -1,6 +1,6 @@
 #![allow(clippy::await_holding_lock)]
 use ast_editor::tools::session_db;
-use ast_editor::tools::session_db::{SqliteSessionRepository, EditOp, MovePosition};
+use ast_editor::tools::session_db::{SqliteSessionRepository, SessionRepository, EditOp, MovePosition};
 use ast_editor::tools::view;
 use ast_editor::tools::edit;
 use ast_editor::parser::ParserManager;
@@ -227,7 +227,13 @@ async fn test_edit_operations_and_ast_validation() {
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert!(content.contains("let a = 1;"));
 
-    // Perform valid edit
+    // The file was rewritten from outside between these edits, so the line was
+    // changed and changed back without the tool seeing it. Its id is not the
+    // one captured at the top; re-read it.
+    let view_res = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
+    let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
+
     let valid_edits = vec![edit::LineEdit {
         op: EditOp::Update,
         target_id: Some(target_id),
@@ -864,4 +870,99 @@ async fn test_store_holds_no_file_text() {
         "the store contains file text at {}",
         db.display()
     );
+}
+
+/// Read the (sequence id, content) pairs the index currently holds.
+fn index_pairs(repository: &SqliteSessionRepository, path: &str) -> Vec<(i64, String)> {
+    let meta = session_db::init_edit_session(path, false).unwrap();
+    repository.fetch_lines_range(&meta.session_id, 1, meta.total_lines).unwrap()
+        .into_iter()
+        .map(|(seq, _, content)| (seq, content))
+        .collect()
+}
+
+#[tokio::test]
+async fn test_external_insert_preserves_surrounding_ids() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("reconcile_insert.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
+    let repository = SqliteSessionRepository;
+
+    let before = index_pairs(&repository, file.path_str());
+    assert_eq!(before.len(), 4);
+
+    // Another writer inserts a line in the middle.
+    fs::write(file.path_str(), "fn main() {\n    let a = 1;\n    let mid = 0;\n    let b = 2;\n}\n").unwrap();
+
+    let after = index_pairs(&repository, file.path_str());
+    assert_eq!(after.len(), 5);
+    for (seq, content) in &before {
+        let found = after.iter().find(|(_, c)| c == content).expect("a line vanished");
+        assert_eq!(found.0, *seq, "line {:?} was re-identified", content);
+    }
+    let fresh = after.iter().find(|(_, c)| c == "    let mid = 0;").unwrap();
+    assert!(!before.iter().any(|(seq, _)| *seq == fresh.0), "the new line reused an id");
+}
+
+#[tokio::test]
+async fn test_duplicate_lines_reconcile_without_misalignment() {
+    let _lock = acquire_db_lock();
+    // Blank lines and bare braces are what a naive diff mis-pairs.
+    let original = "fn a() {\n}\n\nfn b() {\n}\n";
+    let file = TestFile::new("reconcile_dupes.rs", original);
+    let repository = SqliteSessionRepository;
+
+    let before = index_pairs(&repository, file.path_str());
+    assert_eq!(before.len(), 5);
+
+    // A third function is appended, repeating the same brace-and-blank shape.
+    fs::write(file.path_str(), "fn a() {\n}\n\nfn b() {\n}\n\nfn c() {\n}\n").unwrap();
+
+    let after = index_pairs(&repository, file.path_str());
+    assert_eq!(after.len(), 8);
+    // The original five lines keep their ids and their order.
+    assert_eq!(&after[..5], &before[..]);
+}
+
+/// The id an agent would hold for a given line, straight from view_lines.
+fn live_id(repository: &SqliteSessionRepository, path: &str, line: usize) -> String {
+    let view = view_lines_old_compat(repository, path, line, line, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn test_edit_conflicts_only_when_the_target_itself_changed() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("reconcile_conflict.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    // An untargeted line changes underneath. The edit should still land.
+    let target_id = live_id(&repository, file.path_str(), 2);
+    fs::write(file.path_str(), "fn main() {\n    let a = 1;\n    let b = 99;\n}\n").unwrap();
+    let res = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("    let a = 7;".to_string()),
+        ..Default::default()
+    }], &pm).await.unwrap();
+    let val: serde_json::Value = serde_json::from_str(&res).unwrap();
+    assert_eq!(val["status"], "success");
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn main() {\n    let a = 7;\n    let b = 99;\n}\n");
+
+    // The targeted line itself changes underneath. The edit must be refused.
+    let target_id = live_id(&repository, file.path_str(), 2);
+    fs::write(file.path_str(), "fn main() {\n    let a = 123;\n    let b = 99;\n}\n").unwrap();
+    let err = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some("    let a = 8;".to_string()),
+        ..Default::default()
+    }], &pm).await.unwrap_err();
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("CONCURRENCY_ERROR") || msg.contains("CHECKSUM_ERROR"),
+        "expected a refusal naming the conflict, got: {}", msg
+    );
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn main() {\n    let a = 123;\n    let b = 99;\n}\n");
 }

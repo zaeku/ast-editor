@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use std::fs;
 pub use crate::tools::session_db::LineEdit;
 use crate::tools::session_db::{
@@ -243,33 +243,20 @@ fn resync_if_stale(
     filepath: &str,
     edits: &[LineEdit],
 ) -> Result<()> {
-    let path = std::path::Path::new(filepath);
+    // Reconcile before the read path can, so the lines this batch targets are
+    // checked for having survived rather than silently re-identified.
+    let Some(session_id) = repository.get_session_id(filepath)? else {
+        return Ok(());
+    };
 
-    if let Some(old_mtime) = repository.get_session_mtime(filepath)? {
-        let current_mtime = path.metadata()?.modified()?
-            .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
-        if current_mtime != old_mtime {
-            let mut target_ids = Vec::new();
-            for edit in edits {
-                if let Some(ref tid) = edit.target_id {
-                    target_ids.push(tid.clone());
-                }
-                if let Some(ref etid) = edit.end_target_id {
-                    target_ids.push(etid.clone());
-                }
-                if let Some(ref dtid) = edit.dest_target_id {
-                    target_ids.push(dtid.clone());
-                }
-            }
-            if let Some(session_id) = repository.get_session_id(filepath)? {
-                repository.smart_resync(filepath, &session_id, &target_ids)?;
-            } else {
-                bail!("CONCURRENCY_ERROR: File has been modified externally and no active session was found.");
-            }
+    let mut target_ids = Vec::new();
+    for edit in edits {
+        for id in [&edit.target_id, &edit.end_target_id, &edit.dest_target_id].into_iter().flatten() {
+            target_ids.push(id.clone());
         }
     }
 
-    Ok(())
+    repository.smart_resync(filepath, &session_id, &target_ids)
 }
 
 /// Preview an edit batch without touching disk or the session store.

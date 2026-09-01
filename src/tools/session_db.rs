@@ -3,6 +3,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::env;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tree_sitter::{WasmStore, Parser};
@@ -711,135 +712,143 @@ impl SessionRepository for SqliteSessionRepository {
         target_ids: &[String],
     ) -> Result<()> {
         let mut conn = get_db_connection()?;
-        
+        reconcile_index(&mut conn, session_id, filepath, target_ids).map(|_| ())
+    }
+}
 
-        // 2. Resolve target IDs in the DB session
-        let mut targeted_lines = Vec::new();
-        for id in target_ids {
-            if id.is_empty() {
-                continue;
+/// Reconcile a session's index with the file on disk.
+///
+/// Lines that survived keep their sequence number; only genuinely new lines
+/// get a fresh one. Alignment comes from a patience diff over the stored
+/// hashes, which anchors on lines unique to both sides — code is dense with
+/// duplicates (`}`, blank lines) that a plain longest-common-subsequence
+/// mis-pairs.
+///
+/// `target_ids` name lines the caller is about to edit. If any of them did not
+/// survive, the edit cannot be applied safely and this fails instead of
+/// guessing which line was meant.
+fn reconcile_index(
+    conn: &mut Connection,
+    session_id: &str,
+    filepath: &str,
+    target_ids: &[String],
+) -> Result<usize> {
+    // Nothing to reconcile if the file still looks the way the index last saw
+    // it. Targets are then verified downstream against the buffer itself.
+    let current: Option<(String, i64, usize)> = conn.query_row(
+        "SELECT file_hash, mtime, (SELECT COUNT(*) FROM lines WHERE session_id = ?1) FROM sessions WHERE session_id = ?1",
+        [session_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional()?;
+    let disk_mtime = std::path::Path::new(filepath).metadata()?.modified()?
+        .duration_since(UNIX_EPOCH)?.as_secs() as i64;
+    let disk_file_hash = compute_sha256(filepath)?;
+    if let Some((stored_hash, stored_mtime, line_count)) = &current {
+        if *stored_hash == disk_file_hash && *stored_mtime == disk_mtime {
+            return Ok(*line_count);
+        }
+    }
+
+    let mut targeted = Vec::new();
+    for id in target_ids {
+        if !id.is_empty() {
+            targeted.push(resolve_line_id(conn, session_id, id)?);
+        }
+    }
+
+    let content = fs::read_to_string(filepath)
+        .with_context(|| format!("Failed to read file for reconcile: {}", filepath))?;
+    let mut parts: Vec<&str> = content.split('\n').collect();
+    if parts.last() == Some(&"") {
+        parts.pop();
+    }
+    let disk: Vec<&str> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let disk_hashes: Vec<String> = disk.iter().map(|line| compute_stored_hash(line)).collect();
+
+    let index: Vec<(i64, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT sequence_id, COALESCE(line_hash, '') FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+        )?;
+        let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let index_hashes: Vec<&str> = index.iter().map(|(_, hash)| hash.as_str()).collect();
+    let disk_refs: Vec<&str> = disk_hashes.iter().map(String::as_str).collect();
+
+    let mut assigned: Vec<Option<i64>> = vec![None; disk.len()];
+    let mut retired: HashMap<&str, VecDeque<i64>> = HashMap::new();
+
+    for op in similar::capture_diff_slices(similar::Algorithm::Patience, &index_hashes, &disk_refs) {
+        let (old_range, new_range) = (op.old_range(), op.new_range());
+        match op.tag() {
+            similar::DiffTag::Equal => {
+                for (old_idx, new_idx) in old_range.zip(new_range) {
+                    assigned[new_idx] = Some(index[old_idx].0);
+                }
             }
-            let (seq, hash) = resolve_line_id(&conn, session_id, id)?;
-            targeted_lines.push((seq, hash));
+            similar::DiffTag::Delete | similar::DiffTag::Replace => {
+                for old_idx in old_range {
+                    retired.entry(index_hashes[old_idx]).or_default().push_back(index[old_idx].0);
+                }
+            }
+            similar::DiffTag::Insert => {}
         }
+    }
 
-        // 3. Read new file from disk and compute line hashes
-        let path = std::path::Path::new(filepath);
-        let content = std::fs::read_to_string(path).context("Failed to read file for resync")?;
-        
-        // Split by lines (supporting CRLF/LF)
-        let lines_on_disk: Vec<&str> = content.lines().map(|l| {
-            l.strip_suffix('\r').unwrap_or(l)
-        }).collect();
-
-        // Stored hashes carry the sequence numbers across the resync; the
-        // surfaced prefixes answer whether a targeted line survived, since
-        // that is the width the caller's target_id carries.
-        let mut disk_line_hashes = Vec::with_capacity(lines_on_disk.len());
-        let mut disk_hash_counts = std::collections::HashMap::with_capacity(lines_on_disk.len());
-        for line in &lines_on_disk {
-            let hash = compute_stored_hash(line);
-            *disk_hash_counts.entry(hash[..4].to_string()).or_insert(0) += 1;
-            disk_line_hashes.push(hash);
-        }
-
-        // 4. Verify that all targeted line hashes exist uniquely in the new disk file
-        for (_, hash) in &targeted_lines {
-            let count = disk_hash_counts.get(hash).cloned().unwrap_or(0);
-            if count == 0 {
-                anyhow::bail!("CONCURRENCY_ERROR: Targeted line with hash '{}' has been modified or deleted externally.", hash);
-            } else if count > 1 {
-                anyhow::bail!("CONCURRENCY_ERROR: Targeted line with hash '{}' is ambiguous in the new file (multiple matches).", hash);
+    // A moved line reads as a delete plus an insert. Where an inserted line
+    // matches a retired one exactly, it is that same line in a new place, so
+    // it keeps its identity.
+    for (new_idx, slot) in assigned.iter_mut().enumerate() {
+        if slot.is_none() {
+            if let Some(queue) = retired.get_mut(disk_hashes[new_idx].as_str()) {
+                *slot = queue.pop_front();
             }
         }
+    }
 
-        // 5. Perform the resync inside a transaction
-        let tx = conn.transaction()?;
-        
-        // Retrieve all current lines in DB to match
+    let mut next_seq = index.iter().map(|(seq, _)| *seq).max().unwrap_or(0) + 1;
+    let seqs: Vec<i64> = assigned.into_iter().map(|slot| slot.unwrap_or_else(|| {
+        let seq = next_seq;
+        next_seq += 1;
+        seq
+    })).collect();
+
+    for (seq, hash) in &targeted {
+        if !seqs.contains(seq) {
+            bail!(
+                "CONCURRENCY_ERROR: Targeted line with hash '{}' has been modified or deleted externally.",
+                hash
+            );
+        }
+    }
+
+    let parent_contexts = compute_parent_contexts(filepath, &content);
+    let crlf_val = if content.contains("\r\n") { 1 } else { 0 };
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
+    {
         let mut stmt = tx.prepare(
-            "SELECT sequence_id, line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order"
-        )?;
-        let mut db_lines = Vec::new();
-        let mut rows = stmt.query(rusqlite::params![session_id])?;
-        while let Some(row) = rows.next()? {
-            let seq: i64 = row.get(0)?;
-            let hash_opt: Option<String> = row.get(1)?;
-            db_lines.push((seq, hash_opt));
-        }
-        drop(rows);
-        drop(stmt);
-
-        // Group db lines by hash to match in order of appearance
-        let mut db_hash_to_seqs = std::collections::HashMap::new();
-        for (seq, hash_opt) in db_lines {
-            let hash = hash_opt.unwrap_or_else(|| "".to_string());
-            if !hash.is_empty() {
-                db_hash_to_seqs.entry(hash).or_insert_with(std::collections::VecDeque::new).push_back(seq);
-            }
-        }
-
-        // Also find max sequence_id to allocate for new/modified lines
-        let max_seq: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(sequence_id), 0) FROM lines WHERE session_id = ?1",
-            rusqlite::params![session_id],
-            |row| row.get(0)
-        )?;
-        let mut next_seq = max_seq + 1;
-
-        let parent_contexts = compute_parent_contexts(filepath, &content);
-
-        // Clean existing lines
-        tx.execute("DELETE FROM lines WHERE session_id = ?1", rusqlite::params![session_id])?;
-
-        // Re-insert matched lines
-        let mut insert_stmt = tx.prepare(
             "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5)"
         )?;
-
-        for (idx, hash) in disk_line_hashes.into_iter().enumerate() {
-            let content = &lines_on_disk[idx];
-            let seq = if let Some(seqs) = db_hash_to_seqs.get_mut(&hash) {
-                if let Some(s) = seqs.pop_front() {
-                    s
-                } else {
-                    let s = next_seq;
-                    next_seq += 1;
-                    s
-                }
-            } else {
-                let s = next_seq;
-                next_seq += 1;
-                s
-            };
-
-            let sort_order = (idx + 1) as f64;
-            let p_ctx = parent_contexts.get(idx).cloned().flatten();
-            insert_stmt.execute(rusqlite::params![
+        for (idx, seq) in seqs.iter().enumerate() {
+            stmt.execute(rusqlite::params![
                 session_id,
                 seq,
-                compute_stored_hash(content),
-                sort_order,
-                p_ctx
+                disk_hashes[idx],
+                ((idx + 1) as f64) * 1000.0,
+                parent_contexts.get(idx).cloned().flatten(),
             ])?;
         }
-        drop(insert_stmt);
-
-        // Update session's file_hash, mtime, and crlf
-        let file_hash = compute_sha256(filepath)?;
-        let new_mtime = path.metadata()?.modified()?
-            .duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
-        let has_crlf = content.contains("\r\n");
-        let crlf_val = if has_crlf { 1 } else { 0 };
-
-        tx.execute(
-            "UPDATE sessions SET file_hash = ?1, mtime = ?2, line_ending_crlf = ?3, last_accessed_at = ?4 WHERE session_id = ?5",
-            rusqlite::params![file_hash, new_mtime, crlf_val, SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64, session_id],
-        )?;
-
-        tx.commit()?;
-        Ok(())
     }
+    tx.execute(
+        "UPDATE sessions SET file_hash = ?1, mtime = ?2, line_ending_crlf = ?3, last_accessed_at = ?4 WHERE session_id = ?5",
+        rusqlite::params![disk_file_hash, disk_mtime, crlf_val, now, session_id],
+    )?;
+    tx.commit()?;
+
+    Ok(seqs.len())
 }
 
 fn is_binary_file(path: &str) -> Result<bool> {
@@ -913,19 +922,13 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
         .duration_since(UNIX_EPOCH)?.as_secs() as i64;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
-    // Check if session already exists and file mtime/hash matches
-    let existing = {
-        let mut stmt = conn.prepare(
-            "SELECT session_id FROM sessions WHERE filepath = ?1 AND file_hash = ?2 AND mtime = ?3"
-        )?;
-        match stmt.query_row(rusqlite::params![filepath, file_hash, mtime], |row| {
-            row.get::<_, String>(0)
-        }) {
-            Ok(session_id) => Some(session_id),
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(err) => return Err(anyhow::Error::from(err).context("Failed to query existing session")),
-        }
-    };
+    // A session for this path, and whether the file still looks the way the
+    // session last saw it.
+    let existing: Option<(String, bool)> = conn.query_row(
+        "SELECT session_id, file_hash = ?2 AND mtime = ?3 FROM sessions WHERE filepath = ?1",
+        rusqlite::params![filepath, file_hash, mtime],
+        |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+    ).optional().context("Failed to query existing session")?;
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
@@ -934,15 +937,21 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
         None
     };
 
-    if let Some(session_id) = existing {
-        // Reuse session
-        conn.execute("UPDATE sessions SET last_accessed_at = ?1 WHERE session_id = ?2;", rusqlite::params![now, session_id])
-            .context("Failed to update last_accessed_at for reused session")?;
-        let total_lines: usize = conn.query_row(
-            "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
-            rusqlite::params![session_id],
-            |row| row.get(0)
-        )?;
+    if let Some((session_id, unchanged)) = existing {
+        // The one gate every entry point passes through: a file that moved
+        // under us is reconciled here, not rebuilt, so the ids an agent is
+        // holding survive whatever happened outside the tool.
+        let total_lines = if unchanged {
+            conn.execute("UPDATE sessions SET last_accessed_at = ?1 WHERE session_id = ?2;", rusqlite::params![now, session_id])
+                .context("Failed to update last_accessed_at for reused session")?;
+            conn.query_row(
+                "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
+                rusqlite::params![session_id],
+                |row| row.get(0)
+            )?
+        } else {
+            reconcile_index(&mut conn, &session_id, filepath, &[])?
+        };
         return Ok(SessionMetadata {
             session_id,
             total_lines,
@@ -1437,15 +1446,32 @@ mod tests {
         assert_eq!(metadata1.file_hash, metadata2.file_hash);
         assert_eq!(metadata1.mtime, metadata2.mtime);
         
+        let repository = SqliteSessionRepository;
+        let ids_before: Vec<i64> = repository
+            .fetch_lines_range(&metadata1.session_id, 1, metadata1.total_lines)?
+            .into_iter()
+            .map(|(seq, _, _)| seq)
+            .collect();
+
         fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n    // extra line\n}\n")?;
         let metadata3 = init_edit_session(filepath_str, false)?;
-        assert_ne!(metadata1.session_id, metadata3.session_id);
+        // The session is reconciled rather than rebuilt, so it keeps its
+        // identity and the lines that survived keep their sequence numbers.
+        assert_eq!(metadata1.session_id, metadata3.session_id);
         assert_ne!(metadata1.file_hash, metadata3.file_hash);
         assert_eq!(metadata3.total_lines, 4);
+
+        let ids_after: Vec<i64> = repository
+            .fetch_lines_range(&metadata3.session_id, 1, metadata3.total_lines)?
+            .into_iter()
+            .map(|(seq, _, _)| seq)
+            .collect();
+        assert_eq!(&ids_after[..2], &ids_before[..2], "unchanged lines lost their ids");
+        assert_eq!(ids_after[3], ids_before[2], "the moved closing brace lost its id");
+        assert!(!ids_before.contains(&ids_after[2]), "the inserted line reused an id");
         
-        // The store holds no text, so the rebuilt session is checked through
-        // the buffer the repository serves from disk.
-        let repository = SqliteSessionRepository;
+        // The store holds no text, so content is checked through the buffer
+        // the repository serves from disk.
         let lines: Vec<String> = repository
             .fetch_lines_range(&metadata3.session_id, 1, metadata3.total_lines)?
             .into_iter()

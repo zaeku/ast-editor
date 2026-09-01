@@ -28,9 +28,9 @@ go to stderr with a non-zero exit status.
 
 Tools: `view_lines`, `edit_lines`, `create_lines`, `inspect_ast`, `dump_ast`.
 
-The same binary also serves MCP over JSON-RPC on stdin (`ast-editor` with no
-arguments, or `ast-editor mcp`) for clients that expect that. Prefer the
-command form: it keeps no tool schemas resident in context.
+The same binary serves MCP over JSON-RPC on stdin when asked — `ast-editor mcp`
+— for clients that expect that. Prefer the command form: it keeps no tool
+schemas resident in context.
 
 ---
 

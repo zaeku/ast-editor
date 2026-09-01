@@ -18,16 +18,22 @@ When agentic workflows attempt to edit code using traditional string-replacement
 
 ---
 
+## 📦 Install
+
+```bash
+just install     # binary to ~/.agents/bin, grammars to ~/.agents/share/ast-editor
+just --list      # the other tasks
+```
+
+`AST_EDITOR_PREFIX` chooses a different prefix. The binary finds its grammars
+relative to itself, so nothing needs to be exported; `AST_EDITOR_WASM_DIR`
+overrides that for an unusual layout.
+
+---
+
 ## 🚀 Two Ways to Call It
 
 The tools are the same either way; only the envelope differs.
-
-**MCP server** — the default, and what an MCP client launches:
-
-```bash
-ast-editor          # serve JSON-RPC over stdin
-ast-editor mcp      # the same, named explicitly
-```
 
 **Command line** — one tool, one call, arguments as the same JSON object the
 MCP call takes:
@@ -36,6 +42,15 @@ MCP call takes:
 ast-editor view_lines '{"filepath":"/path/to/file.rs"}'
 ast-editor edit_lines '{"filepath":"/path/to/file.rs","apply":"p1f"}'
 ast-editor --help
+```
+
+**MCP server** — for clients that expect one. It has to be asked for, because
+a client mounting this over MCP keeps every tool schema in its context for the
+whole conversation:
+
+```bash
+ast-editor mcp                    # serve JSON-RPC over stdin
+just install-mcp ~/.claude.json   # register it in a client config
 ```
 
 The tool's own output goes to stdout with no JSON-RPC wrapper, so it pipes:

@@ -9,9 +9,8 @@ use tokio::io::{stdin, stdout, AsyncBufReadExt, BufReader, AsyncWriteExt};
 const USAGE: &str = "\
 ast-editor — line-precise editing over tree-sitter
 
-    ast-editor                       serve MCP over JSON-RPC on stdin
-    ast-editor mcp                   the same, named explicitly
     ast-editor <tool> '<json args>'  call one tool and print its output
+    ast-editor mcp                   serve MCP over JSON-RPC on stdin
     ast-editor --help                this text
 
 Tool arguments are the same JSON object the MCP call takes, so anything the
@@ -26,7 +25,10 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.first().map(String::as_str) {
-        None | Some("mcp") => {
+        // Serving MCP has to be asked for. It used to be what a bare
+        // invocation did, which meant the command form was the exception in a
+        // tool whose documented interface is the command form.
+        Some("mcp") => {
             init_tracing(tracing::Level::INFO);
             serve_mcp().await
         }
@@ -34,6 +36,11 @@ async fn main() -> anyhow::Result<()> {
             print!("{}", USAGE);
             println!("\nTools: {}", tool_names().join(", "));
             Ok(())
+        }
+        None => {
+            eprint!("{}", USAGE);
+            eprintln!("\nTools: {}", tool_names().join(", "));
+            std::process::exit(2);
         }
         Some(tool) => {
             init_tracing(tracing::Level::WARN);

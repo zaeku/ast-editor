@@ -103,3 +103,14 @@ fn test_mcp_mode_still_answers_json_rpc() {
     assert_eq!(response["jsonrpc"], "2.0");
     assert!(response["result"]["content"][0]["text"].as_str().unwrap().contains("fn main() {}"));
 }
+
+#[test]
+fn test_a_bare_invocation_asks_rather_than_serving() {
+    // Serving MCP used to be what this did. A client configured without the
+    // subcommand would otherwise sit waiting on stdin, so it has to fail.
+    let out = ast_editor("bare", &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty(), "usage went to stdout");
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("ast-editor mcp"), "{}", text);
+}

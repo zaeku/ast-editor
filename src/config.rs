@@ -86,12 +86,23 @@ pub fn clear_langs_map_for_testing() {
 
 /// Returns the path to the WebAssembly grammar files directory (resources/wasm).
 pub fn get_wasm_dir() -> PathBuf {
+    if let Some(dir) = env::var_os("AST_EDITOR_WASM_DIR") {
+        return PathBuf::from(dir);
+    }
     if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
         return PathBuf::from(manifest_dir).join("resources").join("wasm");
     }
     if let Ok(exe_path) = env::current_exe() {
-        if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
-            return parent.join("resources").join("wasm");
+        if let Some(prefix) = exe_path.parent().and_then(|p| p.parent()) {
+            // An installed layout: the binary in <prefix>/bin, its grammars in
+            // <prefix>/share/ast-editor/wasm, so nothing is dropped in the
+            // prefix root that other tools share.
+            let installed = prefix.join("share").join("ast-editor").join("wasm");
+            if installed.is_dir() {
+                return installed;
+            }
+            // A self-contained deployment: grammars beside the binary's parent.
+            return prefix.join("resources").join("wasm");
         }
     }
     PathBuf::from("./resources/wasm")

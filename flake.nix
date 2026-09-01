@@ -17,6 +17,7 @@
             pkgs.clippy
             pkgs.rustfmt
             pkgs.rust-analyzer
+            pkgs.just
           ];
         };
       });

@@ -16,7 +16,6 @@ pub fn retrieve_and_format_lines(
     only_ids: bool,
     wrap_trigger_length: usize,
 ) -> Result<FormattedLinesResult> {
-    repository.ensure_hashes_range(session_id, start_line, end_line)?;
 
     let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
     let mut id_items = Vec::new();
@@ -185,7 +184,6 @@ pub fn format_definition_json(
     start_line: usize,
     end_line: usize,
 ) -> Result<String> {
-    repository.ensure_hashes_range(session_id, start_line, end_line)?;
     let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
 
     let mut items = Vec::new();

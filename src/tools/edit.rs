@@ -289,24 +289,14 @@ pub async fn edit_lines_dry_run(
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;
 
-    let total_lines = repository.get_total_lines(&session_id)?;
-    let backup_lines = repository.fetch_lines_range(&session_id, 1, total_lines)?;
-    let is_crlf = repository.get_session_crlf(&session_id)?;
-    let line_ending = if is_crlf { "\r\n" } else { "\n" };
-    let join = |lines: &[(i64, Option<String>, String)]| {
-        lines.iter().map(|(_, _, content)| content.as_str()).collect::<Vec<_>>().join(line_ending) + line_ending
-    };
+    let line_ending = if repository.get_session_crlf(&session_id)? { "\r\n" } else { "\n" };
+    let original_content = fs::read_to_string(filepath)?;
 
-    let applied = (|| -> Result<String> {
-        repository.apply_line_edits(filepath, &session_id, &edits)?;
-        let new_total_lines = repository.get_total_lines(&session_id)?;
-        Ok(join(&repository.fetch_lines_range(&session_id, 1, new_total_lines)?))
-    })();
+    // A preview is a plan that is never committed, so there is nothing to undo.
+    let (buffer, _) = repository.plan_line_edits(&session_id, &edits)?;
+    let preview_content = buffer.join(line_ending);
 
-    repository.restore_session_lines(&session_id, &backup_lines)?;
-    let preview_content = applied?;
-
-    let diff = similar::TextDiff::from_lines(&join(&backup_lines), &preview_content)
+    let diff = similar::TextDiff::from_lines(&original_content, &preview_content)
         .unified_diff()
         .context_radius(3)
         .header(filepath, filepath)
@@ -373,19 +363,12 @@ pub async fn edit_lines_with_validation(
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;
 
-    // Make a backup of the current lines in case syntax validation fails
-    let total_lines = repository.get_total_lines(&session_id)?;
-    let backup_lines = repository.fetch_lines_range(&session_id, 1, total_lines)?;
+    let line_ending = if repository.get_session_crlf(&session_id)? { "\r\n" } else { "\n" };
 
-    // Apply the edits using the repository
-    let newly_modified_ids = repository.apply_line_edits(filepath, &session_id, &edits)?;
-
-    // Reconstruct the final content
-    let new_total_lines = repository.get_total_lines(&session_id)?;
-    let new_lines = repository.fetch_lines_range(&session_id, 1, new_total_lines)?;
-    let is_crlf = repository.get_session_crlf(&session_id)?;
-    let line_ending = if is_crlf { "\r\n" } else { "\n" };
-    let final_content = new_lines.iter().map(|(_, _, content)| content.as_str()).collect::<Vec<_>>().join(line_ending) + line_ending;
+    // Plan the batch without persisting it. Nothing is committed until the
+    // content it produces has been accepted, so a rejected edit needs no undo.
+    let (buffer, newly_modified_ids) = repository.plan_line_edits(&session_id, &edits)?;
+    let final_content = buffer.join(line_ending);
 
     // Validate syntax
     let validation = validate_syntax(filepath, &final_content, parser_manager).await;
@@ -395,9 +378,6 @@ pub async fn edit_lines_with_validation(
         SyntaxValidationResult::Warnings(warns) => Some(warns),
         SyntaxValidationResult::SyntaxErrors { errors, contexts, _raw_ast: _ } => {
             if strict_validation {
-                // Rollback: restore backup lines
-                repository.restore_session_lines(&session_id, &backup_lines)?;
-                
                 // Construct a detailed error message
                 let mut err_msg = format!(
                     "Validation error: Syntactical errors detected in code after edits. Compilation/AST verification aborted.\n"
@@ -413,6 +393,7 @@ pub async fn edit_lines_with_validation(
             } else {
                 // Permissive Mode: Write to disk and save, but return status "saved_with_errors" with details
                 fs::write(filepath, &final_content)?;
+                repository.commit_buffer(&session_id, &buffer)?;
                 repository.smart_resync(filepath, &session_id, &[])?;
 
                 let config = crate::tools::metadata::get_config();
@@ -447,12 +428,11 @@ pub async fn edit_lines_with_validation(
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => {
             if strict_validation {
-                // Rollback: restore backup lines
-                repository.restore_session_lines(&session_id, &backup_lines)?;
                 anyhow::bail!("Validation error: Failed to parse code for syntax validation: {}", reason);
             } else {
                 // Permissive Mode: Write to disk, but return "saved" with error reason message
                 fs::write(filepath, &final_content)?;
+                repository.commit_buffer(&session_id, &buffer)?;
                 repository.smart_resync(filepath, &session_id, &[])?;
 
                 let config = crate::tools::metadata::get_config();
@@ -480,6 +460,7 @@ pub async fn edit_lines_with_validation(
 
     // Save to disk
     fs::write(filepath, &final_content)?;
+    repository.commit_buffer(&session_id, &buffer)?;
     
     // Resync database session to update parent contexts, line hashes, and mtime/file_hash metadata
     repository.smart_resync(filepath, &session_id, &[])?;

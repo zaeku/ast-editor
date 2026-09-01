@@ -818,3 +818,38 @@ async fn test_failed_dry_run_mints_no_preview_id() {
     assert_eq!(preview["syntax_valid"], false);
     assert!(preview["preview_id"].is_null());
 }
+
+#[tokio::test]
+async fn test_store_holds_no_file_text() {
+    let _lock = acquire_db_lock();
+    let secret = "let api_key = \"correct-horse-battery-staple\";";
+    let file = TestFile::new("no_text.rs", &format!("fn main() {{\n    {}\n}}\n", secret));
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    // Touch every path that populates the index.
+    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
+    edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::Update,
+        target_id: Some(target_id),
+        content: Some(format!("    {}", secret)),
+        ..Default::default()
+    }], &pm).await.unwrap();
+
+    // Invariant 9: the index is an index, not a copy. Nothing in the database
+    // file should contain the text of the lines it tracks.
+    let db = session_db::get_db_path().unwrap();
+    // Recent writes sit in the write-ahead log until it is folded back in.
+    let raw: Vec<u8> = [db.clone(), db.with_extension("db-wal")]
+        .iter()
+        .filter_map(|path| fs::read(path).ok())
+        .flatten()
+        .collect();
+    assert!(
+        !raw.windows(secret.len()).any(|w| w == secret.as_bytes()),
+        "the store contains file text at {}",
+        db.display()
+    );
+}

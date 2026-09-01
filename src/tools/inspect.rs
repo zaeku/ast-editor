@@ -108,7 +108,6 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     let mut session_id_opt = None;
     match repository.init_session(&args.file, false) {
         Ok(meta) => {
-            crate::tools::session_db::start_background_hash_worker(meta.session_id.clone());
             session_id_opt = Some(meta.session_id);
         }
         Err(e) => {

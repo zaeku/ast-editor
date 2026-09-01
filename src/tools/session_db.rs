@@ -3,11 +3,10 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::fs;
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tree_sitter::{WasmStore, Parser};
 
-fn get_db_path() -> Result<PathBuf> {
+pub fn get_db_path() -> Result<PathBuf> {
     let mut path = if cfg!(test) {
         std::env::temp_dir().join("line-editor-test")
     } else {
@@ -60,7 +59,6 @@ fn create_tables(conn: &Connection) -> Result<()> {
             session_id TEXT NOT NULL,
             sequence_id INTEGER NOT NULL,
             line_hash TEXT,
-            content TEXT NOT NULL,
             sort_order REAL NOT NULL,
             parent_context TEXT,
             FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -89,6 +87,12 @@ fn create_tables(conn: &Connection) -> Result<()> {
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN line_ending_crlf INTEGER DEFAULT 0;", []);
     // Add parent_context column to lines if not present
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN parent_context TEXT;", []);
+    // Content used to be cached here. Drop it, and with it every row built
+    // under the old schema: line_hash was four characters wide then, and the
+    // index rebuilds itself from disk on next access anyway.
+    if conn.execute("ALTER TABLE lines DROP COLUMN content;", []).is_ok() {
+        conn.execute("DELETE FROM lines;", []).context("Failed to clear the pre-index line cache")?;
+    }
 
     Ok(())
 }
@@ -155,30 +159,9 @@ pub fn resolve_line_id(db_conn: &rusqlite::Connection, session_id: &str, id_str:
     if id_str.contains('#') {
         parse_line_id(id_str)
     } else {
-        // 1. Populate any missing hashes (lazy evaluation)
+        // The id carries the surfaced prefix of the stored hash.
         let mut stmt = db_conn.prepare(
-            "SELECT id, content FROM lines WHERE session_id = ?1 AND line_hash IS NULL"
-        )?;
-        let mut rows = stmt.query([session_id])?;
-        let mut updates = Vec::new();
-        while let Some(row) = rows.next()? {
-            let id: i64 = row.get(0)?;
-            let content: String = row.get(1)?;
-            let h = compute_line_hash(&content);
-            updates.push((id, h));
-        }
-        drop(rows);
-        drop(stmt);
-        for (id, h) in updates {
-            db_conn.execute(
-                "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                rusqlite::params![h, id]
-            )?;
-        }
-
-        // 2. Query for matches
-        let mut stmt = db_conn.prepare(
-            "SELECT sequence_id, line_hash FROM lines WHERE session_id = ?1 AND line_hash = ?2"
+            "SELECT sequence_id, substr(line_hash, 1, 4) FROM lines WHERE session_id = ?1 AND substr(line_hash, 1, 4) = ?2"
         )?;
         let mut rows = stmt.query(rusqlite::params![session_id, id_str])?;
         let mut matches = Vec::new();
@@ -428,10 +411,61 @@ impl LineBuffer {
     }
 }
 
+/// The path a session tracks. Content lives on disk, so most operations need
+/// to get back to it from a session id alone.
+fn session_filepath(conn: &Connection, session_id: &str) -> Result<String> {
+    conn.query_row(
+        "SELECT filepath FROM sessions WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    ).with_context(|| format!("No session found for session_id={}", session_id))
+}
+
+/// Read a session's file and pair each line with the identity the index holds
+/// for it. The index stores order and identity; the text comes from disk.
+///
+/// If the index and the file disagree on length the index is stale, and the
+/// caller is served a fresh one built from disk — the same rebuild the tool
+/// has always fallen back to. Phase 2 replaces this with a real reconcile.
+fn load_buffer(conn: &Connection, session_id: &str) -> Result<LineBuffer> {
+    let filepath = session_filepath(conn, session_id)?;
+    let content = fs::read_to_string(&filepath)
+        .with_context(|| format!("Failed to read file for line buffer: {}", filepath))?;
+
+    let mut parts: Vec<&str> = content.split('\n').collect();
+    if parts.last() == Some(&"") {
+        parts.pop();
+    }
+    let disk: Vec<String> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect();
+
+    let index: Vec<(i64, Option<String>)> = {
+        let mut stmt = conn.prepare(
+            "SELECT sequence_id, parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+        )?;
+        let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let lines = if index.len() == disk.len() {
+        disk.into_iter().zip(index).map(|(content, (seq, parent_context))| BufLine {
+            seq,
+            content,
+            parent_context,
+        }).collect()
+    } else {
+        disk.into_iter().enumerate().map(|(idx, content)| BufLine {
+            seq: idx as i64 + 1,
+            content,
+            parent_context: None,
+        }).collect()
+    };
+
+    Ok(LineBuffer::new(lines))
+}
+
 pub trait SessionRepository: Send + Sync {
     fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata>;
     fn get_total_lines(&self, session_id: &str) -> Result<usize>;
-    fn ensure_hashes_range(&self, session_id: &str, start_line: usize, end_line: usize) -> Result<()>;
     fn fetch_lines_range(
         &self,
         session_id: &str,
@@ -439,17 +473,12 @@ pub trait SessionRepository: Send + Sync {
         end_line: usize,
     ) -> Result<Vec<(i64, Option<String>, String)>>;
     fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>>;
-    fn apply_line_edits(
-        &self,
-        filepath: &str,
-        session_id: &str,
-        edits: &[LineEdit],
-    ) -> Result<Vec<String>>; // returns modified IDs
-    fn restore_session_lines(
-        &self,
-        session_id: &str,
-        lines: &[(i64, Option<String>, String)],
-    ) -> Result<()>;
+    /// Work out what a batch would produce, touching nothing. Returns the
+    /// resulting buffer and the ids the batch would report.
+    fn plan_line_edits(&self, session_id: &str, edits: &[LineEdit]) -> Result<(LineBuffer, Vec<String>)>;
+    /// Persist a planned buffer as the session's new index. Call only once the
+    /// buffer's content has been accepted and written to disk.
+    fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()>;
     fn update_session_metadata(
         &self,
         session_id: &str,
@@ -494,21 +523,11 @@ impl SessionRepository for SqliteSessionRepository {
 
     fn find_matching_lines(&self, session_id: &str, query: &str) -> Result<Vec<usize>> {
         let conn = get_db_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT row_number FROM (
-                SELECT ROW_NUMBER() OVER (ORDER BY sort_order) as row_number, content 
-                FROM lines 
-                WHERE session_id = ?1
-             ) WHERE content LIKE ?2"
-        )?;
-        let like_pattern = format!("%{}%", query);
-        let mut rows = stmt.query(rusqlite::params![session_id, like_pattern])?;
-        let mut matches = Vec::new();
-        while let Some(row) = rows.next()? {
-            let row_num: usize = row.get(0)?;
-            matches.push(row_num);
-        }
-        Ok(matches)
+        let buffer = load_buffer(&conn, session_id)?;
+        Ok(buffer.lines.iter().enumerate()
+            .filter(|(_, line)| line.content.contains(query))
+            .map(|(idx, _)| idx + 1)
+            .collect())
     }
 
     fn get_session_crlf(&self, session_id: &str) -> Result<bool> {
@@ -521,11 +540,6 @@ impl SessionRepository for SqliteSessionRepository {
         Ok(crlf != 0)
     }
 
-    fn ensure_hashes_range(&self, session_id: &str, start_line: usize, end_line: usize) -> Result<()> {
-        let conn = get_db_connection()?;
-        ensure_hashes_for_range(&conn, session_id, start_line, end_line)
-    }
-
     fn fetch_lines_range(
         &self,
         session_id: &str,
@@ -533,105 +547,48 @@ impl SessionRepository for SqliteSessionRepository {
         end_line: usize,
     ) -> Result<Vec<(i64, Option<String>, String)>> {
         let conn = get_db_connection()?;
-        let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
-        let offset = start_line.saturating_sub(1);
-
-        let mut stmt = conn.prepare(
-            "SELECT sequence_id, line_hash, content FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
-        )?;
-
-        let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
-        let mut results = Vec::new();
-        while let Some(row) = rows.next()? {
-            results.push((row.get(0)?, row.get(1)?, row.get(2)?));
+        let buffer = load_buffer(&conn, session_id)?;
+        let from = start_line.saturating_sub(1);
+        let to = std::cmp::min(end_line, buffer.lines.len());
+        if from >= to {
+            return Ok(Vec::new());
         }
-        Ok(results)
+        Ok(buffer.lines[from..to].iter()
+            .map(|line| (line.seq, Some(compute_line_hash(&line.content)), line.content.clone()))
+            .collect())
     }
 
     fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>> {
         let conn = get_db_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT content FROM lines WHERE session_id = ?1 AND sequence_id = ?2"
-        )?;
-        match stmt.query_row(rusqlite::params![session_id, sequence_id], |row| row.get::<_, String>(0)) {
-            Ok(content) => Ok(Some(content)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(err) => Err(anyhow::Error::from(err)),
-        }
+        let buffer = load_buffer(&conn, session_id)?;
+        Ok(buffer.lines.iter().find(|line| line.seq == sequence_id).map(|line| line.content.clone()))
     }
 
-    fn apply_line_edits(
-        &self,
-        _filepath: &str,
-        session_id: &str,
-        edits: &[LineEdit],
-    ) -> Result<Vec<String>> {
+    fn plan_line_edits(&self, session_id: &str, edits: &[LineEdit]) -> Result<(LineBuffer, Vec<String>)> {
+        let conn = get_db_connection()?;
+        let mut buffer = load_buffer(&conn, session_id)?;
+        let modified_ids = buffer.apply(edits)?;
+        Ok((buffer, modified_ids))
+    }
+
+    fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()> {
         let mut conn = get_db_connection()?;
         let tx = conn.transaction()?;
-
-        let mut buffer = {
-            let mut stmt = tx.prepare(
-                "SELECT sequence_id, content, parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
-            )?;
-            let rows = stmt.query_map([session_id], |row| Ok(BufLine {
-                seq: row.get(0)?,
-                content: row.get(1)?,
-                parent_context: row.get(2)?,
-            }))?;
-            LineBuffer::new(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-        };
-
-        let modified_ids = buffer.apply(edits)?;
-
         tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
+                "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5);"
             )?;
             for (idx, line) in buffer.lines.iter().enumerate() {
                 stmt.execute(rusqlite::params![
                     session_id,
                     line.seq,
-                    compute_line_hash(&line.content),
-                    line.content,
+                    compute_stored_hash(&line.content),
                     ((idx + 1) as f64) * 1000.0,
                     line.parent_context,
                 ])?;
             }
         }
-
-        tx.commit()?;
-        Ok(modified_ids)
-    }
-
-    fn restore_session_lines(
-        &self,
-        session_id: &str,
-        lines: &[(i64, Option<String>, String)],
-    ) -> Result<()> {
-        let mut conn = get_db_connection()?;
-        let tx = conn.transaction()?;
-
-        let contexts: HashMap<i64, Option<String>> = {
-            let mut stmt = tx.prepare("SELECT sequence_id, parent_context FROM lines WHERE session_id = ?1")?;
-            let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-
-        tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
-
-        {
-            let mut stmt = tx.prepare(
-                "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
-            )?;
-
-            for (idx, (seq, hash_opt, content)) in lines.iter().enumerate() {
-                let sort_order = ((idx + 1) as f64) * 1000.0;
-                let parent_context = contexts.get(seq).cloned().flatten();
-                stmt.execute(rusqlite::params![session_id, seq, hash_opt, content, sort_order, parent_context])?;
-            }
-        }
-
         tx.commit()?;
         Ok(())
     }
@@ -750,28 +707,6 @@ impl SessionRepository for SqliteSessionRepository {
     ) -> Result<()> {
         let mut conn = get_db_connection()?;
         
-        // 1. Populate any missing line hashes in DB for this session
-        {
-            let mut stmt = conn.prepare(
-                "SELECT id, content FROM lines WHERE session_id = ?1 AND line_hash IS NULL"
-            )?;
-            let mut to_update = Vec::new();
-            let mut rows = stmt.query(rusqlite::params![session_id])?;
-            while let Some(row) = rows.next()? {
-                let id: i64 = row.get(0)?;
-                let content: String = row.get(1)?;
-                let hash = compute_line_hash(&content);
-                to_update.push((id, hash));
-            }
-            drop(rows);
-            drop(stmt);
-            for (id, h) in to_update {
-                conn.execute(
-                    "UPDATE lines SET line_hash = ?1 WHERE id = ?2",
-                    rusqlite::params![h, id]
-                )?;
-            }
-        }
 
         // 2. Resolve target IDs in the DB session
         let mut targeted_lines = Vec::new();
@@ -792,11 +727,14 @@ impl SessionRepository for SqliteSessionRepository {
             l.strip_suffix('\r').unwrap_or(l)
         }).collect();
 
+        // Stored hashes carry the sequence numbers across the resync; the
+        // surfaced prefixes answer whether a targeted line survived, since
+        // that is the width the caller's target_id carries.
         let mut disk_line_hashes = Vec::with_capacity(lines_on_disk.len());
         let mut disk_hash_counts = std::collections::HashMap::with_capacity(lines_on_disk.len());
         for line in &lines_on_disk {
-            let hash = compute_line_hash(line);
-            *disk_hash_counts.entry(hash.clone()).or_insert(0) += 1;
+            let hash = compute_stored_hash(line);
+            *disk_hash_counts.entry(hash[..4].to_string()).or_insert(0) += 1;
             disk_line_hashes.push(hash);
         }
 
@@ -851,7 +789,7 @@ impl SessionRepository for SqliteSessionRepository {
 
         // Re-insert matched lines
         let mut insert_stmt = tx.prepare(
-            "INSERT INTO lines (session_id, sequence_id, content, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+            "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5)"
         )?;
 
         for (idx, hash) in disk_line_hashes.into_iter().enumerate() {
@@ -875,8 +813,7 @@ impl SessionRepository for SqliteSessionRepository {
             insert_stmt.execute(rusqlite::params![
                 session_id,
                 seq,
-                content,
-                hash,
+                compute_stored_hash(content),
                 sort_order,
                 p_ctx
             ])?;
@@ -1036,7 +973,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     let mut lines_count = 0;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order, parent_context) VALUES (?1, ?2, NULL, ?3, ?4, ?5);"
+            "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5);"
         )?;
 
         // Split by lines, preserving empty final lines
@@ -1050,15 +987,13 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
             let sort_order = (seq as f64) * 1000.0;
             let trimmed_line = line_content.strip_suffix('\r').unwrap_or(line_content);
             let p_ctx = parent_contexts.get(idx).cloned().flatten();
-            stmt.execute(rusqlite::params![session_id, seq, trimmed_line, sort_order, p_ctx])
+            stmt.execute(rusqlite::params![session_id, seq, compute_stored_hash(trimmed_line), sort_order, p_ctx])
                 .context("Failed to insert line")?;
             lines_count += 1;
         }
     }
 
     tx.commit().context("Failed to commit SQLite transaction")?;
-
-    start_background_hash_worker(session_id.clone());
 
     Ok(SessionMetadata {
         session_id,
@@ -1070,12 +1005,22 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     })
 }
 
-pub fn compute_line_hash(content: &str) -> String {
+/// The hash kept in the index. Reconciliation aligns disk lines against stored
+/// rows before any sequence number is known, so this is the only key available
+/// there and needs enough width that a file's lines do not collide.
+pub fn compute_stored_hash(content: &str) -> String {
     use sha1::{Sha1, Digest};
     let mut hasher = Sha1::new();
     hasher.update(content.as_bytes());
-    let hex = format!("{:x}", hasher.finalize());
-    hex[..4].to_string()
+    format!("{:x}", hasher.finalize())[..16].to_string()
+}
+
+/// The hash surfaced to agents inside `{sequence_id:x}#{hash}`. It is a prefix
+/// of the stored hash, so the short form can be checked against a stored row
+/// without keeping a second column. The sequence number does the identifying
+/// here, which is why four characters are enough.
+pub fn compute_line_hash(content: &str) -> String {
+    compute_stored_hash(content)[..4].to_string()
 }
 
 static WASM_ENGINE: once_cell::sync::Lazy<wasmtime::Engine> = once_cell::sync::Lazy::new(|| {
@@ -1229,100 +1174,7 @@ pub fn compute_parent_contexts(filepath: &str, content: &str) -> Vec<Option<Stri
     contexts
 }
 
-fn ensure_hashes_for_range(conn: &Connection, session_id: &str, start_line: usize, end_line: usize) -> Result<()> {
-    let limit = if end_line >= start_line { end_line - start_line + 1 } else { 0 };
-    let offset = start_line.saturating_sub(1);
 
-    let mut stmt = conn.prepare(
-        "SELECT id, content, line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order LIMIT ?2 OFFSET ?3"
-    )?;
-    
-    let mut rows = stmt.query(rusqlite::params![session_id, limit, offset])?;
-    let mut updates = Vec::new();
-    while let Some(row) = rows.next()? {
-        let id: i64 = row.get(0)?;
-        let content: String = row.get(1)?;
-        let line_hash: Option<String> = row.get(2)?;
-        if line_hash.is_none() {
-            let hash = compute_line_hash(&content);
-            updates.push((id, hash));
-        }
-    }
-
-    if !updates.is_empty() {
-        let mut update_stmt = conn.prepare("UPDATE lines SET line_hash = ?1 WHERE id = ?2;")?;
-        for (id, hash) in updates {
-            update_stmt.execute(rusqlite::params![hash, id])?;
-        }
-    }
-    
-    Ok(())
-}
-
-pub fn start_background_hash_worker(session_id: String) {
-    #[cfg(test)]
-    {
-        let conn = match get_db_connection() {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        let filepath: String = match conn.query_row(
-            "SELECT filepath FROM sessions WHERE session_id = ?1",
-            [&session_id],
-            |row| row.get(0)
-        ) {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-        if !filepath.contains("bg_code.rs") {
-            return;
-        }
-    }
-    if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            let mut conn = match get_db_connection() {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            let tx = match conn.transaction() {
-                Ok(t) => t,
-                Err(_) => return,
-            };
-            
-            let mut updates = Vec::new();
-            {
-                let mut stmt = match tx.prepare("SELECT id, content FROM lines WHERE session_id = ?1 AND line_hash IS NULL") {
-                    Ok(s) => s,
-                    Err(_) => return,
-                };
-                let query_res = stmt.query([&session_id]);
-                if let Ok(mut rows) = query_res {
-                    while let Ok(Some(row)) = rows.next() {
-                        if let (Ok(id), Ok(content)) = (row.get::<_, i64>(0), row.get::<_, String>(1)) {
-                            let hash = compute_line_hash(&content);
-                            updates.push((id, hash));
-                        }
-                    }
-                }
-            }
-            
-            if !updates.is_empty() {
-                let mut update_stmt = match tx.prepare("UPDATE lines SET line_hash = ?1 WHERE id = ?2;") {
-                    Ok(s) => s,
-                    Err(_) => return,
-                };
-                for (id, hash) in updates {
-                    if update_stmt.execute(rusqlite::params![hash, id]).is_err() {
-                        return;
-                    }
-                }
-            }
-            
-            let _ = tx.commit();
-        });
-    }
-}
 
 #[cfg(test)]
 #[allow(clippy::await_holding_lock)]
@@ -1586,10 +1438,14 @@ mod tests {
         assert_ne!(metadata1.file_hash, metadata3.file_hash);
         assert_eq!(metadata3.total_lines, 4);
         
-        let conn = get_db_connection()?;
-        let mut stmt = conn.prepare("SELECT content FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
-        let lines: Vec<String> = stmt.query_map([&metadata3.session_id], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
+        // The store holds no text, so the rebuilt session is checked through
+        // the buffer the repository serves from disk.
+        let repository = SqliteSessionRepository;
+        let lines: Vec<String> = repository
+            .fetch_lines_range(&metadata3.session_id, 1, metadata3.total_lines)?
+            .into_iter()
+            .map(|(_, _, content)| content)
+            .collect();
         assert_eq!(lines, vec![
             "fn main() {".to_string(),
             "    println!(\"Hello!\");".to_string(),
@@ -1602,92 +1458,14 @@ mod tests {
     }
 
     #[test]
-    fn test_line_hashing_and_lazy_populating() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
-        let conn = Connection::open_in_memory()?;
-        create_tables(&conn)?;
-
-        // Test compute_line_hash
-        let hash = compute_line_hash("hello world");
-        assert_eq!(hash.len(), 4);
-        assert_eq!(hash, "2aae"); // sha1 prefix
-        
-        let hash2 = compute_line_hash("hello world");
-        assert_eq!(hash, hash2);
-
-        // Setup a dummy session
-        let session_id = "test_session_id";
-        conn.execute(
-            "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
-            rusqlite::params!["dummy.rs", session_id, "hash", 100, 100],
-        )?;
-
-        // Insert three lines with line_hash = NULL
-        conn.execute(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);",
-            rusqlite::params![session_id, 1, "line 1 content", 1000.0],
-        )?;
-        conn.execute(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);",
-            rusqlite::params![session_id, 2, "line 2 content", 2000.0],
-        )?;
-        conn.execute(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, content, sort_order) VALUES (?1, ?2, NULL, ?3, ?4);",
-            rusqlite::params![session_id, 3, "line 3 content", 3000.0],
-        )?;
-
-        // Ensure hashes only for lines 1 and 2
-        ensure_hashes_for_range(&conn, session_id, 1, 2)?;
-
-        // Retrieve lines and check hashes
-        let mut stmt = conn.prepare("SELECT sequence_id, line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
-        let results: Vec<(i64, Option<String>)> = stmt.query_map([session_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?.collect::<Result<_, _>>()?;
-
-        assert_eq!(results[0].0, 1);
-        assert!(results[0].1.is_some());
-        assert_eq!(results[0].1.as_ref().unwrap(), &compute_line_hash("line 1 content"));
-
-        assert_eq!(results[1].0, 2);
-        assert!(results[1].1.is_some());
-        assert_eq!(results[1].1.as_ref().unwrap(), &compute_line_hash("line 2 content"));
-
-        assert_eq!(results[2].0, 3);
-        assert!(results[2].1.is_none());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_background_hash_worker() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
-        let temp_dir = std::env::temp_dir().join("line-editor-test-bg-worker");
-        if temp_dir.exists() {
-            fs::remove_dir_all(&temp_dir)?;
+    fn test_surfaced_hash_is_a_prefix_of_the_stored_hash() {
+        // The index keeps the wide hash; ids carry its first four characters,
+        // so a short id can be checked against a stored row directly.
+        for content in ["", "fn main() {", "    let a = 1;", "}"] {
+            let stored = compute_stored_hash(content);
+            assert_eq!(stored.len(), 16);
+            assert_eq!(compute_line_hash(content), stored[..4]);
         }
-        fs::create_dir_all(&temp_dir)?;
-        let file_path = temp_dir.join("bg_code.rs");
-        fs::write(&file_path, "line 1\nline 2\n")?;
-
-        let metadata = init_edit_session(file_path.to_str().unwrap(), false)?;
-        
-        // Wait for the background worker to finish hashing
-        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-
-        let conn = get_db_connection()?;
-        let mut stmt = conn.prepare("SELECT line_hash FROM lines WHERE session_id = ?1 ORDER BY sort_order")?;
-        let hashes: Vec<Option<String>> = stmt.query_map([&metadata.session_id], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
-
-        assert_eq!(hashes.len(), 2);
-        assert!(hashes[0].is_some());
-        assert!(hashes[1].is_some());
-        assert_eq!(hashes[0].as_ref().unwrap(), &compute_line_hash("line 1"));
-        assert_eq!(hashes[1].as_ref().unwrap(), &compute_line_hash("line 2"));
-
-        fs::remove_dir_all(&temp_dir)?;
-        Ok(())
     }
 
     #[tokio::test]

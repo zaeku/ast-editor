@@ -1,42 +1,79 @@
 ---
 name: ast-editor
 description: >
-  Inspects code structure, finds target lines, and performs transactionally-validated line-level code edits using Tree-sitter. Resilient to syntax errors.
+  Inspects code structure, finds target lines, and performs transactionally-validated line-level code edits using Tree-sitter. Resilient to syntax errors. Invoked as the `ast-editor` command.
 ---
 
 # AST-based Code Editor and Inspector Skill
 
-This skill provides a powerful **general-purpose line-level text editing framework** for all text files (including Markdown, plain text, etc.), while **additionally** providing robust Abstract Syntax Tree (AST) query and syntax validation tools for 21 supported programming and configuration languages. It operates as a Model Context Protocol (MCP) server to eliminate terminal command execution warnings.
+A **general-purpose line-level editing framework** for any text file (Markdown,
+plain text, configuration), which **additionally** provides Abstract Syntax Tree
+queries and syntax validation for 21 programming and configuration languages.
+
+## 🚀 Invocation
+
+Run the `ast-editor` command with a tool name and its arguments as one JSON
+object:
+
+```bash
+ast-editor view_lines '{"filepath":"/abs/path/file.rs","start_line":40,"end_line":80}'
+ast-editor edit_lines '{"filepath":"/abs/path/file.rs","edits":[{"op":"update","target_id":"2#0759","content":"    let a = 2;"}]}'
+ast-editor --help
+```
+
+The arguments are exactly the tool schema, so anything
+[api_specification.md](references/api_specification.md) describes works here
+unchanged. Output goes to stdout with no wrapper and pipes normally; failures
+go to stderr with a non-zero exit status.
+
+Tools: `view_lines`, `edit_lines`, `create_lines`, `inspect_ast`, `dump_ast`.
+
+The same binary also serves MCP over JSON-RPC on stdin (`ast-editor` with no
+arguments, or `ast-editor mcp`) for clients that expect that. Prefer the
+command form: it keeps no tool schemas resident in context.
 
 ---
 
-## 🌟 Core Value Proposition (Why Use This Tool?)
+## 🌟 Why Use This Tool?
 
-Unlike standard search-and-replace tools (e.g., `replace_file_content`), the `ast-editor` tool suite offers several distinct advantages for LLM agents:
+1. **Shift-Invariant Targeting** — lines are addressed by stable IDs
+   (`"1#dfca"`), not by number. Inserting or deleting lines elsewhere does not
+   move them, so a batch of edits cannot slide out of alignment.
+2. **Duplicate Safety** — search-and-replace overwrites the wrong line when a
+   pattern repeats. A Line ID names one line.
+3. **Reuse IDs Across Turns** — an ID stays valid while its line is unchanged,
+   and survives edits elsewhere in the file, restarts, and reformatting by an
+   external formatter. Re-reading the file to find a line you already have an
+   ID for is wasted context.
+4. **Verify Before Committing** — `"dry_run": true` returns the unified diff
+   and syntax result an edit batch would produce, without writing. A batch that
+   validates also returns a short `preview_id`; pass it back as `apply` with
+   the same `filepath` to commit that exact batch without resending `edits`:
 
-1. **Shift-Invariant Targeting**:
-   - targets specific lines using stable Line IDs (e.g., `"1#dfca"`).
-   - Inserting or deleting lines in one part of a file does not shift the Line IDs of other lines. Your edits will never collision or misalign due to index shifting.
-2. **Duplicate Safety**:
-   - Traditional search-and-replace tools can overwrite the wrong line if duplicate patterns exist. By targeting unique Line IDs, `edit_lines` guarantees that the exact intended line is modified.
-3. **Double-turn Avoidance (Token Savings)**:
-   - Line IDs remain stable if the content is unchanged. You can reuse previous Line IDs directly in subsequent edits without calling `view_lines` again, saving massive token counts.
-4. **Permissive Graceful Degradation**:
-   - Bypasses syntax validation on markdown/text files and configuration files, writing edits cleanly to disk even if compiler infrastructure is absent.
+   ```bash
+   ID=$(ast-editor edit_lines '{"filepath":"/abs/path/f.rs","edits":[…],"dry_run":true}' | jq -r .preview_id)
+   ast-editor edit_lines "{\"filepath\":\"/abs/path/f.rs\",\"apply\":\"$ID\"}"
+   ```
+
+5. **Graceful Degradation** — Markdown, text, and configuration files are
+   written with warnings rather than rejected, and edits still apply when no
+   parser is available for the language.
 
 ---
 
-## 🧭 Document & Reference Index
+## 🧭 Reference Index
 
-To keep your context window thin and efficient, do not load large specifications. Instead, reference only the document matching your immediate task:
+Load only the document your immediate task needs; none of these belong in
+context by default.
 
-- **JSON Schemas & API Parameters**: [api_specification.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/api_specification.md) (All inputs, outputs, and JSON payloads templates)
-- **Advanced Editing Workflows**: [usage_guides.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/usage_guides.md) (Smart resync details, replace_range guidelines, editing long lines)
-- **Language Specific Guides (S-Expression Queries & Tools)**:
-  - **Rust**: [rust.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/rust.md)
-  - **Python**: [python.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/python.md)
-  - **Nix**: [nix.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/nix.md)
-  - **JavaScript & TypeScript**: [javascript.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/javascript.md)
-  - **Markup & Configurations**: [markup.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/markup.md)
-  - **Swift**: [swift.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/swift.md)
-  - **Shell Scripts**: [shell.md](file:///Users/zaeku/workspace/Tools%20for%20Agents/ast-editor/agent_skill/references/languages/shell.md)
+- **JSON schemas, parameters, payloads** — [api_specification.md](references/api_specification.md)
+- **Editing workflows** — [usage_guides.md](references/usage_guides.md)
+  (concurrent-edit resync, `replace_range`, long lines)
+- **S-expression queries per language** —
+  [rust](references/languages/rust.md),
+  [python](references/languages/python.md),
+  [javascript & typescript](references/languages/javascript.md),
+  [nix](references/languages/nix.md),
+  [swift](references/languages/swift.md),
+  [shell](references/languages/shell.md),
+  [markup & configuration](references/languages/markup.md)

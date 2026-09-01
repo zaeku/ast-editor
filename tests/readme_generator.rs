@@ -301,23 +301,4 @@ async fn generate_readme() {
         &templates_dir.join("api_specification.tpl.md"),
         manifest_dir.join("agent_skill").join("references").join("api_specification.md"),
     );
-
-    // Read generated SKILL.md to sync with the global config folder later
-    let skill_path = manifest_dir.join("agent_skill").join("SKILL.md");
-    let skill_content = fs::read_to_string(skill_path).unwrap();
-
-
-
-    // 9. Copy to global config folder if home_dir is found
-    if let Some(mut global_skill_path) = dirs::home_dir() {
-        global_skill_path.push(".gemini");
-        global_skill_path.push("config");
-        global_skill_path.push("plugins");
-        global_skill_path.push("custom-developer-plugin");
-        global_skill_path.push("skills");
-        global_skill_path.push("ast-editor");
-        let _ = fs::create_dir_all(&global_skill_path);
-        global_skill_path.push("SKILL.md");
-        fs::write(global_skill_path, skill_content).unwrap();
-    }
 }

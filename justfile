@@ -7,6 +7,7 @@
 prefix := env('AST_EDITOR_PREFIX', env('HOME') / '.agents')
 bin_dir := prefix / 'bin'
 share_dir := prefix / 'share' / 'ast-editor'
+skill_dir := prefix / 'skills' / 'ast-editor'
 
 [private]
 default:
@@ -32,13 +33,19 @@ lint:
 doc:
     cargo test --test readme_generator
 
+# The binary is no use to an agent that has not been told the command exists,
+# so this installs both halves.
+
+# Install the binary, its grammars, and the skill.
+install: install-bin install-skill
+
 # The binary lands in <prefix>/bin and the grammars in
 # <prefix>/share/ast-editor/wasm, which is where the binary looks for them
 # relative to itself — so nothing needs to be exported to use it. Set
 # AST_EDITOR_WASM_DIR to override that for an unusual layout.
 
-# Install the binary and its grammars for this machine.
-install: build
+# Install just the binary and its grammars.
+install-bin: build
     mkdir -p '{{bin_dir}}' '{{share_dir}}/wasm'
     install -m 755 target/release/ast-editor '{{bin_dir}}/ast-editor'
     cp resources/wasm/*.wasm resources/wasm/languages.json '{{share_dir}}/wasm/'
@@ -46,11 +53,23 @@ install: build
     @echo 'grammars  {{share_dir}}/wasm'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
+# Copied rather than fetched by a skills installer: this is a local skill, not
+# a published one. Regenerates the API reference first so it cannot ship stale.
+
+# Install just the skill document and its references.
+install-skill: doc
+    mkdir -p '{{skill_dir}}'
+    rm -rf '{{skill_dir}}/references'
+    cp agent_skill/SKILL.md '{{skill_dir}}/SKILL.md'
+    cp -R agent_skill/references '{{skill_dir}}/references'
+    find '{{skill_dir}}' -name '.DS_Store' -delete
+    @echo 'installed {{skill_dir}}'
+
 # Remove what `install` placed.
 uninstall:
     rm -f '{{bin_dir}}/ast-editor'
-    rm -rf '{{share_dir}}'
-    @echo 'removed {{bin_dir}}/ast-editor and {{share_dir}}'
+    rm -rf '{{share_dir}}' '{{skill_dir}}'
+    @echo 'removed {{bin_dir}}/ast-editor, {{share_dir}} and {{skill_dir}}'
 
 # Separate from `install` on purpose: a client that mounts this over MCP keeps
 # every tool schema in its context for the whole conversation, which is the cost

@@ -65,6 +65,7 @@ fn create_tables(conn: &Connection) -> Result<()> {
             session_id TEXT NOT NULL,
             sequence_id INTEGER NOT NULL,
             line_hash TEXT,
+            norm_hash TEXT,
             sort_order REAL NOT NULL,
             parent_context TEXT,
             FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -93,6 +94,7 @@ fn create_tables(conn: &Connection) -> Result<()> {
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN line_ending_crlf INTEGER DEFAULT 0;", []);
     // Add parent_context column to lines if not present
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN parent_context TEXT;", []);
+    let _ = conn.execute("ALTER TABLE lines ADD COLUMN norm_hash TEXT;", []);
     // Content used to be cached here. Drop it, and with it every row built
     // under the old schema: line_hash was four characters wide then, and the
     // index rebuilds itself from disk on next access anyway.
@@ -583,13 +585,14 @@ impl SessionRepository for SqliteSessionRepository {
         tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5);"
+                "INSERT INTO lines (session_id, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
             )?;
             for (idx, line) in buffer.lines.iter().enumerate() {
                 stmt.execute(rusqlite::params![
                     session_id,
                     line.seq,
                     compute_stored_hash(&line.content),
+                    compute_normalized_hash(&line.content),
                     ((idx + 1) as f64) * 1000.0,
                     line.parent_context,
                 ])?;
@@ -765,18 +768,19 @@ fn reconcile_index(
     let disk: Vec<&str> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
     let disk_hashes: Vec<String> = disk.iter().map(|line| compute_stored_hash(line)).collect();
 
-    let index: Vec<(i64, String)> = {
+    let index: Vec<(i64, String, String)> = {
         let mut stmt = conn.prepare(
-            "SELECT sequence_id, COALESCE(line_hash, '') FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+            "SELECT sequence_id, COALESCE(line_hash, ''), COALESCE(norm_hash, '') FROM lines WHERE session_id = ?1 ORDER BY sort_order"
         )?;
-        let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
-    let index_hashes: Vec<&str> = index.iter().map(|(_, hash)| hash.as_str()).collect();
+    let index_hashes: Vec<&str> = index.iter().map(|(_, hash, _)| hash.as_str()).collect();
     let disk_refs: Vec<&str> = disk_hashes.iter().map(String::as_str).collect();
 
     let mut assigned: Vec<Option<i64>> = vec![None; disk.len()];
     let mut retired: HashMap<&str, VecDeque<i64>> = HashMap::new();
+    let mut respaced: HashMap<&str, VecDeque<i64>> = HashMap::new();
 
     for op in similar::capture_diff_slices(similar::Algorithm::Patience, &index_hashes, &disk_refs) {
         let (old_range, new_range) = (op.old_range(), op.new_range());
@@ -789,6 +793,7 @@ fn reconcile_index(
             similar::DiffTag::Delete | similar::DiffTag::Replace => {
                 for old_idx in old_range {
                     retired.entry(index_hashes[old_idx]).or_default().push_back(index[old_idx].0);
+                    respaced.entry(index[old_idx].2.as_str()).or_default().push_back(index[old_idx].0);
                 }
             }
             similar::DiffTag::Insert => {}
@@ -806,7 +811,18 @@ fn reconcile_index(
         }
     }
 
-    let mut next_seq = index.iter().map(|(seq, _)| *seq).max().unwrap_or(0) + 1;
+    // Then the same pass ignoring whitespace, so a formatter respacing the
+    // file leaves every line holding the id the agent already has.
+    let disk_norms: Vec<String> = disk.iter().map(|line| compute_normalized_hash(line)).collect();
+    for (new_idx, slot) in assigned.iter_mut().enumerate() {
+        if slot.is_none() {
+            if let Some(queue) = respaced.get_mut(disk_norms[new_idx].as_str()) {
+                *slot = queue.pop_front();
+            }
+        }
+    }
+
+    let mut next_seq = index.iter().map(|(seq, _, _)| *seq).max().unwrap_or(0) + 1;
     let seqs: Vec<i64> = assigned.into_iter().map(|slot| slot.unwrap_or_else(|| {
         let seq = next_seq;
         next_seq += 1;
@@ -830,13 +846,14 @@ fn reconcile_index(
     tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5)"
+            "INSERT INTO lines (session_id, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
         )?;
         for (idx, seq) in seqs.iter().enumerate() {
             stmt.execute(rusqlite::params![
                 session_id,
                 seq,
                 disk_hashes[idx],
+                disk_norms[idx],
                 ((idx + 1) as f64) * 1000.0,
                 parent_contexts.get(idx).cloned().flatten(),
             ])?;
@@ -987,7 +1004,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     let mut lines_count = 0;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5);"
+            "INSERT INTO lines (session_id, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
         )?;
 
         // Split by lines, preserving empty final lines
@@ -1001,7 +1018,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
             let sort_order = (seq as f64) * 1000.0;
             let trimmed_line = line_content.strip_suffix('\r').unwrap_or(line_content);
             let p_ctx = parent_contexts.get(idx).cloned().flatten();
-            stmt.execute(rusqlite::params![session_id, seq, compute_stored_hash(trimmed_line), sort_order, p_ctx])
+            stmt.execute(rusqlite::params![session_id, seq, compute_stored_hash(trimmed_line), compute_normalized_hash(trimmed_line), sort_order, p_ctx])
                 .context("Failed to insert line")?;
             lines_count += 1;
         }
@@ -1027,6 +1044,14 @@ pub fn compute_stored_hash(content: &str) -> String {
     let mut hasher = Sha1::new();
     hasher.update(content.as_bytes());
     format!("{:x}", hasher.finalize())[..16].to_string()
+}
+
+/// A hash of the line with every space removed, so respacing it does not
+/// change the result. Collapsing runs of whitespace instead would not be
+/// enough: formatters add and remove spaces around operators and delimiters,
+/// not just at the margin.
+pub fn compute_normalized_hash(content: &str) -> String {
+    compute_stored_hash(&content.chars().filter(|c| !c.is_whitespace()).collect::<String>())
 }
 
 /// The hash surfaced to agents inside `{sequence_id:x}#{hash}`. It is a prefix

@@ -127,46 +127,61 @@ lines; no content is required on either side.
 
 Reconciling the index against disk:
 
-- **Unchanged** line → keep its ID and fractional key; refresh cached `mtime`.
-- **Inserted** line → allocate a fresh ID, assign a fractional key between its
-  neighbors.
+- **Unchanged** line → keep its ID; refresh cached `mtime`.
 - **Deleted** line → delete the row. No tombstone; see §5.2.
-- **Moved** line → same ID, new fractional key.
+- **Inserted** line → allocate a fresh ID, unless it reclaims one below.
+- **Moved** line → reads as a delete plus an insert. An inserted line whose
+  hash matches a deleted one is that same line relocated, and reclaims its ID.
+  Ties go in order of appearance.
 
 `similar`, added for the dry-run diff, provides the algorithm.
 
-### 4.4 Disambiguation with `parent_context`
+### 4.4 Disambiguation
 
-When two candidate matches are otherwise equal, prefer the alignment whose
-surrounding structural context matches. This reduces mis-mapping in repetitive
-blocks.
+Duplicate lines are separated by position: the diff's anchors fix where each
+run of identical lines belongs, so `parent_context` is not consulted. It stays
+a display concern, feeding the enclosing-context list in `view_lines`.
 
 ### 4.5 Edit-time conflict policy
 
-When reconciliation at edit time finds that a **targeted** line was changed or
-deleted on disk, fail with a `CONCURRENCY_CONFLICT` error naming the offending
-IDs rather than guessing. Non-targeted changes reconcile silently. This
-supersedes `smart_resync` and gives it a concrete diff algorithm.
+When reconciliation at edit time finds that a **targeted** line did not
+survive, fail with `CONCURRENCY_ERROR` naming it rather than guessing which
+line was meant. Non-targeted changes reconcile silently.
 
-### 4.6 Structural-hash cosmetic-change gate
+The edit path therefore reconciles *before* the read path can, carrying the ids
+its batch targets: the gate in §4.2 knows nothing about targets, so were it to
+run first it would retire the targeted line quietly and the edit would fail
+later with a confusing "line not found".
+
+### 4.6 Whitespace-insensitive fallback matching
 
 A line hash is fragile against formatters: after `prettier`, `black`, or
-`cargo fmt` every line's hash changes though no logic did, forcing a large
-low-confidence re-alignment. Compute a **structural hash** of the enclosing AST
-node — a hash over the tree-sitter node that skips comment nodes and normalizes
-whitespace, covering node kinds plus trimmed leaf text. Formatting-only edits
-leave it identical.
+`cargo fmt` every respaced line hashes differently though nothing about it
+changed, and each one would draw a fresh id.
 
-- If a region's on-disk structural hash equals the stored one, treat its lines
-  as unchanged-cosmetic: preserve their IDs, refresh the line hashes, and skip
-  the line diff for that region. A full-file reformat becomes an
-  identity-preserving event instead of a mass re-ID.
-- Only regions whose structural hash differs fall through to §4.3.
-- Responses may carry a `change_kind` of `cosmetic` or `logic` per touched
-  region, which is also useful for dry-run reporting.
+Each row therefore carries a second hash of the line with **every space
+removed**. Reconciliation runs it as a third pass, after §4.3's diff and the
+exact-match reclaim: a line the diff called new, whose spacing-free hash
+matches one it called deleted, is that same line respaced and keeps its id.
+Collapsing runs of whitespace instead would not be enough, because formatters
+add and remove spaces around operators and delimiters rather than only at the
+margin.
 
-The gate is an optimization and a confidence signal; correctness still rests on
-the line diff for regions that actually changed.
+The original design specified a structural hash over the enclosing tree-sitter
+node, skipping comments and normalising whitespace, used as a per-region gate.
+This is the smaller thing that satisfies the invariant the gate existed for
+(§6.6): a reformat preserves every id. It also does less. A formatter that
+re-wraps lines — splitting one long line into three — changes line identity in
+a way no line-level hash can carry, and the AST version would not carry it
+either, since the region's line count changed. What the AST version would add
+is insensitivity to comment-only edits and a cheaper path for large files;
+neither is worth a tree-sitter parse on every reconcile until something asks
+for it. Recorded in [the backlog](../backlog.md).
+
+An edit whose target was respaced under it is still refused, because the hash
+in the agent's `target_id` no longer matches the line. Preserving the id keeps
+the agent's *other* ids valid, which is the point; it does not promise that a
+stale target still applies.
 
 ## 5. Phase 3 — Durable identity
 
@@ -279,8 +294,7 @@ nothing once no agent is still holding an ID for that file.
    exactly the disk lines, in the same order.
 5. **Targeted-conflict safety**: an edit to a line whose on-disk content changed
    under it fails loudly, never silently mis-targets.
-6. **Cosmetic invariance**: running a formatter over a whole file preserves
-   every `line_id`.
+6. **Cosmetic invariance**: respacing a whole file preserves every `line_id`.
 7. **Insertion endurance**: 1,000 consecutive insertions between the same pair
    of lines keep a correct order and mint no duplicate IDs.
 8. **Duplicate-line safety**: a file whose lines are not unique reconciles

@@ -966,3 +966,25 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
     );
     assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn main() {\n    let a = 123;\n    let b = 99;\n}\n");
 }
+
+#[tokio::test]
+async fn test_reformatting_preserves_every_id() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("reconcile_format.rs", "fn main() {\n    let a = 1;\n    let b = a + 2;\n}\n");
+    let repository = SqliteSessionRepository;
+
+    let before = index_pairs(&repository, file.path_str());
+    assert_eq!(before.len(), 4);
+
+    // A formatter respaces the whole file without changing what it means.
+    fs::write(file.path_str(), "fn main( )   {\n\tlet a=1;\n        let b   =   a+2;\n}\n").unwrap();
+
+    let after = index_pairs(&repository, file.path_str());
+    assert_eq!(after.len(), 4);
+    let ids_before: Vec<i64> = before.iter().map(|(seq, _)| *seq).collect();
+    let ids_after: Vec<i64> = after.iter().map(|(seq, _)| *seq).collect();
+    assert_eq!(ids_after, ids_before, "a reformat re-identified lines");
+
+    // The index tracks the new spelling, not the old one.
+    assert_eq!(after[1].1, "\tlet a=1;");
+}

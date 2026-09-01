@@ -20,6 +20,13 @@ store and are blocked on it.
   plus enough recorded content to reconstruct an old state — so price it as
   reversing §3 and §5.2 of the active spec, not as an addition to them.
   *Needed when:* an agent is observed losing work to a checkout.
+- **Structural-hash cosmetic gate** (§5.5) — hash the enclosing tree-sitter
+  node, skipping comments, and use it as a per-region gate during
+  reconciliation. Phase 2b shipped a whitespace-insensitive line hash instead,
+  which satisfies the same invariant; the AST version would add insensitivity
+  to comment-only edits and skip the line diff for untouched regions.
+  *Needed when:* comment churn is observed costing ids, or reconciliation shows
+  up as slow on large files. Costs a parse on every reconcile.
 - **Blame backfill from git-held history** (§5.0) — lazily cache id-maps for
   commit SHAs the tool never witnessed live, to improve blame fidelity.
   *Needed when:* something actually asks the tool for blame.

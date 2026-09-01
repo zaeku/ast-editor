@@ -18,7 +18,38 @@ When agentic workflows attempt to edit code using traditional string-replacement
 
 ---
 
-## 🛠️ MCP Tool Suite
+## 🚀 Two Ways to Call It
+
+The tools are the same either way; only the envelope differs.
+
+**MCP server** — the default, and what an MCP client launches:
+
+```bash
+ast-editor          # serve JSON-RPC over stdin
+ast-editor mcp      # the same, named explicitly
+```
+
+**Command line** — one tool, one call, arguments as the same JSON object the
+MCP call takes:
+
+```bash
+ast-editor view_lines '{"filepath":"/path/to/file.rs"}'
+ast-editor edit_lines '{"filepath":"/path/to/file.rs","apply":"p1f"}'
+ast-editor --help
+```
+
+The tool's own output goes to stdout with no JSON-RPC wrapper, so it pipes:
+
+```bash
+ast-editor edit_lines '{"filepath":"...","edits":[...],"dry_run":true}' | jq -r .preview_id
+```
+
+Failures print to stderr and exit non-zero. Because the arguments *are* the
+tool schema, there is no second interface to keep in step with it.
+
+---
+
+## 🛠️ Tool Suite
 
 ### 1. `create_lines`
 Creates a brand-new file with initial content, JIT-initializes its database editing session, and returns the line list with unique line IDs in a single atomic step.

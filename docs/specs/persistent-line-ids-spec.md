@@ -10,8 +10,9 @@ file content at all.
 
 Split out of [the original design](../archive/2026-07-12-persistent-line-ids-and-reconciliation-design.md).
 Git-checkpoint compaction, semantic-path targeting, the entity layer, and the
-content-addressed storage rewrite are in [the backlog](../backlog.md) and are
-not part of this spec. Do not start this before
+content-addressed storage rewrite are out of scope: what might still become
+work is in [the backlog](../backlog.md), and what was reasoned out of existence
+is in [discarded](../discarded.md). Do not start this before
 [dry-run preview](dry-run-preview-spec.md), which ships on the current model.
 
 ## 1. Objectives
@@ -29,8 +30,8 @@ not part of this spec. Do not start this before
 ### Non-Goals
 
 - Reconstructing history the tool never witnessed, or restoring the ID map that
-  was live at an older commit. Both are backlog items, and dropping them is what
-  removes tombstones and compaction from this spec.
+  was live at an older commit. Dropping both is what removes tombstones and
+  compaction from this spec; see [discarded](../discarded.md).
 - Cross-machine ID synchronization.
 - Real-time collaborative editing. The target is sequential reconciliation, not
   live merge. Two agents editing one file concurrently is out of scope by
@@ -176,8 +177,8 @@ re-wraps lines — splitting one long line into three — changes line identity 
 a way no line-level hash can carry, and the AST version would not carry it
 either, since the region's line count changed. What the AST version would add
 is insensitivity to comment-only edits and a cheaper path for large files;
-neither is worth a tree-sitter parse on every reconcile until something asks
-for it. Recorded in [the backlog](../backlog.md).
+neither is worth a tree-sitter parse on every reconcile. Recorded in
+[discarded](../discarded.md).
 
 An edit whose target was respaced under it is still refused, because the hash
 in the agent's `target_id` no longer matches the line. Preserving the id keeps
@@ -196,7 +197,7 @@ format is unchanged, so no agent-facing contract changes.
 ### 5.2 No tombstones
 
 The original design retained deleted rows as tombstones. That was required only
-to restore the ID map live at an older commit, which is now a backlog item.
+to restore the ID map live at an older commit, a goal since dropped.
 Non-reuse is guaranteed by the monotonic counter on the file row alone, so a
 deleted line's row is deleted outright and the store tracks live lines only.
 This removes the growth that motivated the compaction phase.
@@ -209,7 +210,7 @@ rewrites the whole ordered run as evenly spaced values, so no midpoint is ever
 subdivided and the mantissa is never approached. A fractional key would buy
 only the ability to renumber one row instead of all of them, which is a
 throughput concern and not one this tool has. Recorded in
-[the backlog](../backlog.md).
+[discarded](../discarded.md).
 
 ## 6. Schema
 
@@ -238,9 +239,8 @@ lines (
 ```
 
 The original design renamed these to `files` and `file_key`, matching the shift
-from a session to a durable entry. The rename is not done: it touches every
-query for no change in behaviour, and `session_id` already *is* the durable
-key. Worth doing alongside the next change that rewrites these queries anyway.
+from a session to a durable entry. Not done, and not planned on its own; see
+[discarded](../discarded.md).
 
 Following a file across a rename is a backlog item. Until then the key is
 derived from the path, and a rename starts a new entry.

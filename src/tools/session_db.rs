@@ -48,13 +48,21 @@ pub(crate) fn get_db_connection() -> Result<Connection> {
 }
 
 fn create_tables(conn: &Connection) -> Result<()> {
+    let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |row| row.get(0))?;
+    if auto_vacuum != 2 {
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
+        // The mode change only takes effect once the file is rewritten.
+        conn.execute_batch("VACUUM;").context("Failed to switch the store to incremental vacuum")?;
+    }
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sessions (
             filepath TEXT PRIMARY KEY,
             session_id TEXT UNIQUE NOT NULL,
             file_hash TEXT NOT NULL,
             mtime INTEGER NOT NULL,
-            last_accessed_at INTEGER NOT NULL
+            last_accessed_at INTEGER NOT NULL,
+            next_line_id INTEGER NOT NULL DEFAULT 1
         );",
         [],
     ).context("Failed to create sessions table")?;
@@ -95,6 +103,7 @@ fn create_tables(conn: &Connection) -> Result<()> {
     // Add parent_context column to lines if not present
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN parent_context TEXT;", []);
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN norm_hash TEXT;", []);
+    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN next_line_id INTEGER NOT NULL DEFAULT 1;", []);
     // Content used to be cached here. Drop it, and with it every row built
     // under the old schema: line_hash was four characters wide then, and the
     // index rebuilds itself from disk on next access anyway.
@@ -225,9 +234,16 @@ fn strip_line_ending(content: &str) -> String {
 }
 
 impl LineBuffer {
-    pub fn new(lines: Vec<BufLine>) -> Self {
-        let next_seq = lines.iter().map(|l| l.seq).max().unwrap_or(0) + 1;
+    /// `next_seq` is the file's monotonic counter. Deriving it from the lines
+    /// that happen to survive would hand a deleted line's number to the next
+    /// one inserted.
+    pub fn new(lines: Vec<BufLine>, next_seq: i64) -> Self {
         Self { lines, next_seq }
+    }
+
+    /// How far the counter has advanced, to be stored back with the file.
+    pub fn next_seq(&self) -> i64 {
+        self.next_seq
     }
 
     fn take_seq(&mut self) -> i64 {
@@ -454,7 +470,7 @@ fn load_buffer(conn: &Connection, session_id: &str) -> Result<LineBuffer> {
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
 
-    let lines = if index.len() == disk.len() {
+    let lines: Vec<BufLine> = if index.len() == disk.len() {
         disk.into_iter().zip(index).map(|(content, (seq, parent_context))| BufLine {
             seq,
             content,
@@ -468,7 +484,13 @@ fn load_buffer(conn: &Connection, session_id: &str) -> Result<LineBuffer> {
         }).collect()
     };
 
-    Ok(LineBuffer::new(lines))
+    let stored_next: i64 = conn.query_row(
+        "SELECT next_line_id FROM sessions WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    ).unwrap_or(1);
+    let highest_live = lines.iter().map(|line| line.seq).max().unwrap_or(0);
+    Ok(LineBuffer::new(lines, std::cmp::max(stored_next, highest_live + 1)))
 }
 
 pub trait SessionRepository: Send + Sync {
@@ -508,8 +530,8 @@ pub trait SessionRepository: Send + Sync {
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
 }
 
-/// Previews older than this are pruned whenever a new one is stored. A preview
-/// is only useful for as long as the file it was computed against is unchanged.
+/// Previews older than this are pruned. A preview is only useful while the file
+/// it was computed against is unchanged, so this is a backstop, not a lifetime.
 const PREVIEW_TTL_SECONDS: i64 = 3600;
 
 pub struct SqliteSessionRepository;
@@ -822,7 +844,13 @@ fn reconcile_index(
         }
     }
 
-    let mut next_seq = index.iter().map(|(seq, _, _)| *seq).max().unwrap_or(0) + 1;
+    let stored_next: i64 = conn.query_row(
+        "SELECT next_line_id FROM sessions WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    ).unwrap_or(1);
+    let highest = index.iter().map(|(seq, _, _)| *seq).max().unwrap_or(0);
+    let mut next_seq = std::cmp::max(stored_next, highest + 1);
     let seqs: Vec<i64> = assigned.into_iter().map(|slot| slot.unwrap_or_else(|| {
         let seq = next_seq;
         next_seq += 1;
@@ -860,8 +888,8 @@ fn reconcile_index(
         }
     }
     tx.execute(
-        "UPDATE sessions SET file_hash = ?1, mtime = ?2, line_ending_crlf = ?3, last_accessed_at = ?4 WHERE session_id = ?5",
-        rusqlite::params![disk_file_hash, disk_mtime, crlf_val, now, session_id],
+        "UPDATE sessions SET file_hash = ?1, mtime = ?2, line_ending_crlf = ?3, last_accessed_at = ?4, next_line_id = ?5 WHERE session_id = ?6",
+        rusqlite::params![disk_file_hash, disk_mtime, crlf_val, now, next_seq, session_id],
     )?;
     tx.commit()?;
 
@@ -905,11 +933,20 @@ pub fn check_language_supported(path: &str) -> bool {
     )
 }
 
+/// How long a file's entry outlives its last use. Evicting one costs nothing
+/// but the stability of that file's ids, so the window only has to outlast the
+/// task an agent is in the middle of.
+const SESSION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
+
 fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-    let ttl_limit = now - 1800; // 30 minutes
-    conn.execute("DELETE FROM sessions WHERE last_accessed_at < ?1;", [ttl_limit])
+    conn.execute("DELETE FROM sessions WHERE last_accessed_at < ?1;", [now - SESSION_TTL_SECONDS])
         .context("Failed to clean up stale sessions")?;
+    conn.execute("DELETE FROM previews WHERE created_at < ?1;", [now - PREVIEW_TTL_SECONDS])
+        .context("Failed to clean up expired previews")?;
+    // Deleting rows only moves pages to the free list; this hands them back to
+    // the filesystem.
+    conn.pragma_query_value(None, "incremental_vacuum", |_| Ok(())).ok();
     Ok(())
 }
 
@@ -1023,6 +1060,11 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
             lines_count += 1;
         }
     }
+
+    tx.execute(
+        "UPDATE sessions SET next_line_id = ?1 WHERE session_id = ?2",
+        rusqlite::params![lines_count as i64 + 1, session_id],
+    ).context("Failed to seed the line id counter")?;
 
     tx.commit().context("Failed to commit SQLite transaction")?;
 
@@ -1370,8 +1412,10 @@ mod tests {
         create_tables(&conn)?;
         
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-        let stale_time = now - 2000;
-        let fresh_time = now - 500;
+        // Expressed against the window itself, so widening it does not quietly
+        // turn this into a test of nothing.
+        let stale_time = now - SESSION_TTL_SECONDS - 1;
+        let fresh_time = now - SESSION_TTL_SECONDS / 2;
         
         conn.execute(
             "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",

@@ -41,8 +41,8 @@ not part of this spec. Do not start this before
 The current model ([session_db.rs](../../src/tools/session_db.rs)) keys a
 session by `filepath` and stores each line as `(session_id, sequence_id,
 line_hash, content, sort_order REAL, parent_context)`, surfacing IDs as
-`{sequence_id:x}#{hash}` (e.g. `1#77cf`). Three weaknesses motivate the work,
-in the order this spec addresses them.
+`{sequence_id:x}#{hash}` (e.g. `1#77cf`). Two weaknesses motivate the work, in
+the order this spec addresses them.
 
 1. **The store is a second copy of the codebase.** `lines.content` holds every
    line of every file touched. It buys nothing: `init_edit_session` computes
@@ -53,9 +53,10 @@ in the order this spec addresses them.
    IDs it was tracking exactly when a concurrent change occurred. `smart_resync`
    narrows this to the case where targeted lines survive intact, but the
    fallback is still a full rebuild.
-3. **`sort_order REAL` precision exhaustion.** Fractional midpoint insertion
-   between two adjacent lines exhausts the `f64` mantissa after roughly 50
-   consecutive insertions between the same pair.
+The original design counted `sort_order REAL` precision exhaustion as a third:
+midpoint insertion between two adjacent lines exhausts the `f64` mantissa after
+roughly 50 insertions between the same pair. Phase 1 removed the midpoints, so
+it no longer applies — see §5.3.
 
 ## 3. Phase 1 — Index, not copy
 
@@ -202,64 +203,47 @@ This removes the growth that motivated the compaction phase.
 
 ### 5.3 Ordering
 
-Replace `sort_order REAL` with a lexicographic fractional key (LexoRank-style,
-base-62) stored as `TEXT`:
-
-- Ordering is the natural lexicographic sort of the key.
-- Insertion between two keys `A < C` produces `B` with `A < B < C` by string
-  midpoint, which never exhausts — the string grows a character when needed.
-- A periodic rebalance renormalizes keys and touches only ordering keys.
-
-Identity and order are decoupled: reordering never changes a `line_id`, and
-re-IDing never happens on reorder.
+`sort_order REAL` stays. The precision worry that motivated replacing it with a
+lexicographic fractional key does not apply to what phase 1 built: an edit
+rewrites the whole ordered run as evenly spaced values, so no midpoint is ever
+subdivided and the mantissa is never approached. A fractional key would buy
+only the ability to renumber one row instead of all of them, which is a
+throughput concern and not one this tool has. Recorded in
+[the backlog](../backlog.md).
 
 ## 6. Schema
 
 ```sql
--- One row per tracked file (durable, replaces ephemeral "sessions")
-files (
-    file_key       TEXT PRIMARY KEY,
-    rel_path       TEXT,
-    working_hash   TEXT NOT NULL,      -- hash of current disk content
-    working_mtime  INTEGER NOT NULL,
-    next_line_id   INTEGER NOT NULL,   -- monotonic, never reused
-    last_accessed_at INTEGER NOT NULL, -- eviction axis, see §7
+sessions (
+    filepath         TEXT PRIMARY KEY,
+    session_id       TEXT UNIQUE NOT NULL,
+    file_hash        TEXT NOT NULL,      -- hash of current disk content
+    mtime            INTEGER NOT NULL,
+    next_line_id     INTEGER NOT NULL,   -- monotonic, never reused
+    last_accessed_at INTEGER NOT NULL,   -- eviction axis, see §7
     line_ending_crlf INTEGER DEFAULT 0
 )
 
 -- Index over the file's live lines. No content.
 lines (
-    file_key        TEXT NOT NULL,
-    line_id         INTEGER NOT NULL,
-    frac_order      TEXT NOT NULL,     -- LexoRank-style fractional key
-    line_hash       INTEGER NOT NULL,  -- >= 64-bit, for reconciliation (§3.3)
-    structural_hash TEXT,              -- cosmetic-change gate (§4.6)
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT NOT NULL,
+    sequence_id     INTEGER NOT NULL,   -- durable identity
+    line_hash       TEXT,               -- >= 64-bit, for reconciliation (§3.3)
+    norm_hash       TEXT,               -- spacing-free, for §4.6
+    sort_order      REAL NOT NULL,
     parent_context  TEXT,
-    PRIMARY KEY (file_key, line_id),
-    FOREIGN KEY (file_key) REFERENCES files(file_key) ON DELETE CASCADE
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 )
 ```
 
-Index: `idx_lines_file_order (file_key, frac_order)` for ordered reads.
+The original design renamed these to `files` and `file_key`, matching the shift
+from a session to a durable entry. The rename is not done: it touches every
+query for no change in behaviour, and `session_id` already *is* the durable
+key. Worth doing alongside the next change that rewrites these queries anyway.
 
-`file_key` is a durable key rather than a bare path, so a rename need not orphan
-a file's IDs. How renames are detected is a backlog item; until then a
-path-derived key is acceptable and a rename behaves as it does today.
-
-### Migration
-
-- `sessions.filepath` → `files.file_key` / `rel_path`; `sessions.file_hash` and
-  `mtime` → `files.working_hash` / `working_mtime`.
-- `lines.sequence_id` → `lines.line_id`; seed
-  `files.next_line_id = MAX(sequence_id) + 1`.
-- `lines.sort_order REAL` → `lines.frac_order TEXT`: a one-time conversion
-  assigns evenly-spaced keys in current `sort_order` order.
-- `lines.content` is dropped; `line_hash` is recomputed at the wider width on
-  first reconciliation.
-
-`create_tables` already uses idempotent `CREATE TABLE IF NOT EXISTS` plus
-additive `ALTER TABLE` guards. Dropping a column is not additive, so this one
-migration rebuilds the table.
+Following a file across a rename is a backlog item. Until then the key is
+derived from the path, and a rename starts a new entry.
 
 ## 7. Cache lifecycle
 
@@ -268,28 +252,25 @@ a file's rows loses no data — only ID stability, and only for that file. The
 question is never whether eviction is safe but what it costs, and it costs
 nothing once no agent is still holding an ID for that file.
 
-- **Eviction axis**: least-recently-accessed, as today. The current TTL of 30
-  minutes is too short once IDs are meant to survive restarts; a window of days
-  fits how long an agent may stay on a task. The exact figure is a tuning knob,
-  not a design constant.
-- **When cleanup runs**: today only `init_edit_session` prunes, so expired rows
-  sit until the next session opens. Pruning belongs on every entry point.
-- **Reclaiming disk**: deleting rows does not shrink the database. Measured on a
-  live store, 342 of 627 pages were free — 55% of a 2.4 MB file holding 445 KB
-  of live text — because `auto_vacuum` is off. Enable incremental auto-vacuum
-  and reclaim during cleanup. Changing the mode on an existing database
-  requires setting the pragma and then running a full `VACUUM` once.
-- **Preview TTL**: `PREVIEW_TTL_SECONDS` is an hour, longer than the session
-  window. Previews depend on the file hash rather than the session so they
-  still work, but the two should be brought into line.
+- **Eviction axis**: least-recently-accessed. The window is
+  `SESSION_TTL_SECONDS`, widened from 30 minutes to 7 days: the old figure
+  predated IDs being expected to outlive a restart, and expired an agent's IDs
+  over a lunch break.
+- **When cleanup runs**: on `init_edit_session`, which every entry point calls,
+  so no separate hook is needed. Expired previews are pruned there too rather
+  than only when a new one is stored.
+- **Reclaiming disk**: deleting rows moves pages to the free list without
+  returning them, which had left 342 of 627 pages free in a live store. The
+  store now runs in `auto_vacuum = INCREMENTAL`, with a pass on each cleanup;
+  an existing database is switched by one full `VACUUM` at open.
 
 ## 8. Invariants (test targets)
 
 1. **ID durability**: a `line_id` never changes for the life of the file's
    entry, across restarts, external edits, and moves.
 2. **No reuse**: a retired `line_id` is never reassigned while the entry lives.
-3. **Order/identity independence**: reordering changes only `frac_order`;
-   rebalancing never changes a `line_id`.
+3. **Order/identity independence**: reordering changes only `sort_order`;
+   renumbering it never changes a `sequence_id`.
 4. **Reconciliation soundness**: after reconciliation the index's lines are
    exactly the disk lines, in the same order.
 5. **Targeted-conflict safety**: an edit to a line whose on-disk content changed

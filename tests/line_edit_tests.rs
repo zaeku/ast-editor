@@ -988,3 +988,62 @@ async fn test_reformatting_preserves_every_id() {
     // The index tracks the new spelling, not the old one.
     assert_eq!(after[1].1, "\tlet a=1;");
 }
+
+#[tokio::test]
+async fn test_a_deleted_id_is_never_reissued() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("no_reuse.rs", "fn main() {\n    let a = 1;\n}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    // Delete the last line of the file, retiring the highest id in use.
+    let doomed = live_id(&repository, file.path_str(), 3);
+    edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::Delete,
+        target_id: Some(doomed.clone()),
+        ..Default::default()
+    }], &pm).await.unwrap();
+    let retired: i64 = i64::from_str_radix(doomed.split('#').next().unwrap(), 16).unwrap();
+
+    // Invariant 2: a retired id is never reassigned to a different line.
+    let res = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::Append,
+        content: Some("}".to_string()),
+        ..Default::default()
+    }], &pm).await.unwrap();
+    let val: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let minted = val["modified_ids"][0].as_str().unwrap();
+    let minted_seq = i64::from_str_radix(minted.split('#').next().unwrap(), 16).unwrap();
+    assert_ne!(minted_seq, retired, "id {} was handed out twice", retired);
+}
+
+#[tokio::test]
+async fn test_repeated_insertion_between_the_same_pair() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("endurance.rs", "fn main() {\n}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    // Invariant 7: ordering does not degrade under repeated insertion at one
+    // point, and no id is handed out twice.
+    let mut seen = std::collections::HashSet::new();
+    for n in 0..200 {
+        let anchor = live_id(&repository, file.path_str(), 1);
+        let res = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+            op: EditOp::InsertAfter,
+            target_id: Some(anchor),
+            content: Some(format!("    let v{} = {};", n, n)),
+            ..Default::default()
+        }], &pm).await.unwrap();
+        let val: serde_json::Value = serde_json::from_str(&res).unwrap();
+        let minted = val["modified_ids"][0].as_str().unwrap().split('#').next().unwrap().to_string();
+        assert!(seen.insert(minted.clone()), "id {} was handed out twice", minted);
+    }
+
+    // Each insert went in right after line 1, so the file reads in reverse.
+    let content = fs::read_to_string(file.path_str()).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 202);
+    assert_eq!(lines[1], "    let v199 = 199;");
+    assert_eq!(lines[200], "    let v0 = 0;");
+}

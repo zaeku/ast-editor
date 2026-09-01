@@ -27,6 +27,19 @@ store and are blocked on it.
   to comment-only edits and skip the line diff for untouched regions.
   *Needed when:* comment churn is observed costing ids, or reconciliation shows
   up as slow on large files. Costs a parse on every reconcile.
+- **Lexicographic fractional ordering** (§4.2) — replace `sort_order REAL` with
+  a LexoRank-style `TEXT` key so an insertion renumbers one row instead of the
+  whole file. Purely throughput: the precision exhaustion the original design
+  worried about cannot occur now that an edit rewrites the ordered run as
+  evenly spaced values. *Needed when:* rewriting every row per edit shows up on
+  a large file.
+- **Rename `sessions`/`session_id` to `files`/`file_key`** — the names still
+  describe an ephemeral session that the entry outlived. No behaviour change,
+  every query touched, so fold it into the next change that rewrites them.
+- **Follow a file across a rename** (§15 "D") — match by content and structural
+  hash, with git rename detection as a corroborating hint. Today the key is
+  path-derived, so a rename starts a fresh entry and loses the file's ids.
+  *Needed when:* renames losing ids becomes a real complaint.
 - **Blame backfill from git-held history** (§5.0) — lazily cache id-maps for
   commit SHAs the tool never witnessed live, to improve blame fidelity.
   *Needed when:* something actually asks the tool for blame.
@@ -41,9 +54,6 @@ store and are blocked on it.
 - **Entity-qualified handles / path-free global editing** (§9.5) — editing by
   entity handle with no file path. Gated on agent-session ownership management,
   not on the editing core. Deferred indefinitely.
-- **Durable `file_key` with rename tracking** (§15 "D") — follow renames by
-  content and structural hash, with git rename detection as a corroborating hint
-  only. *Needed when:* renames losing IDs becomes a real complaint.
 - **Impact / blast-radius analysis** (§13) — using the identity layer to answer
   what a change reaches.
 - **SSOT-as-SQLite: content-addressed versioning with git projection** (§16) —

@@ -2,12 +2,17 @@ use anyhow::{Result, Context, bail};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
+use std::env;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tree_sitter::{WasmStore, Parser};
 
 pub fn get_db_path() -> Result<PathBuf> {
-    let mut path = if cfg!(test) {
+    let mut path = if let Some(dir) = env::var_os("AST_EDITOR_CACHE_DIR") {
+        PathBuf::from(dir)
+    } else if cfg!(test) {
+        // Only reaches unit tests: the tests/ crate links this library built
+        // without the flag, so integration tests set the variable above.
         std::env::temp_dir().join("line-editor-test")
     } else {
         let mut p = dirs::home_dir().context("Failed to get home directory")?;

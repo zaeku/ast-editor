@@ -26,7 +26,19 @@ impl Drop for CleanupGuard {
     }
 }
 
+/// Point this test binary's store at a directory of its own. Integration
+/// tests link the library built without cfg(test), and the two test binaries
+/// run as separate processes that no in-process lock can serialise.
+fn isolate_store() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::temp_dir().join(format!("ast-editor-test-{}", std::process::id()));
+        std::env::set_var("AST_EDITOR_CACHE_DIR", dir);
+    });
+}
+
 fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
+    isolate_store();
     match ast_editor::tools::TEST_DB_LOCK.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),

@@ -57,5 +57,15 @@ store and are blocked on it.
 - **CLI mode** — `argv[1]` dispatches straight to
   [`ToolDispatcher::call_tool`](../src/tools/mod.rs), with the JSON-RPC loop
   kept behind an `mcp` subcommand. No spec needed.
+- **Integration tests share the user's real cache** — `get_db_path` picks a
+  temporary database under `cfg!(test)`, but that flag is off for the `tests/`
+  crate, which links the library built without it. So everything under
+  `tests/` reads and writes `~/.cache/line-editor/sessions.db`, the same file
+  a real session uses: a test run evicts the user's sessions, and the user's
+  sessions can leave rows a test then trips over. Harmless today because the
+  store is disposable, but worth closing before phase 2 makes reconciliation
+  depend on what the index holds. The fix is a runtime override — an env var
+  the test harness sets — rather than a compile-time flag that does not reach
+  integration tests.
 - **`session_db.rs` is 2,000 lines** — larger than `edit.rs`. Split it during
   phase 1 of the active spec, which rewrites much of it anyway.

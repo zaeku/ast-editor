@@ -1107,3 +1107,69 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
     let replacement = after.iter().find(|(seq, _)| !ids.contains(seq)).expect("no fresh id was minted");
     assert!(!ids.contains(&replacement.0));
 }
+
+/// run_inspect answers in the MCP envelope. The report is the JSON inside it.
+async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value {
+    let res = ast_editor::tools::inspect::run_inspect(
+        ast_editor::tools::inspect::InspectArgs {
+            file: path.to_string(),
+            query: None,
+            template: template.map(str::to_string),
+            include_code: Some(false),
+            code_format: None,
+            output_file: None,
+        },
+        &std::sync::Arc::new(create_test_parser_manager()),
+    ).await.unwrap();
+    serde_json::from_str(res["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn test_inspect_without_a_query_says_so_and_still_describes_the_file() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("outline.rs", "fn alpha() {\n    let a = 1;\n}\n\nfn beta() {\n}\n");
+    let pm = create_test_parser_manager();
+
+    let res = inspect_report(file.path_str(), None).await;
+    let _ = &pm;
+
+    // Asking nothing must not look like finding nothing.
+    assert!(res["query"].is_null(), "{}", res);
+    assert!(res["message"].as_str().unwrap().contains("nothing was searched for"), "{}", res);
+
+    // And the call still says what is in the file, with ids to act on.
+    let outline = res["outline"].as_array().unwrap();
+    let names: Vec<&str> = outline.iter().map(|e| e["signature"].as_str().unwrap()).collect();
+    assert_eq!(names, vec!["fn alpha() {", "fn beta() {"], "{:?}", names);
+    for entry in outline {
+        assert!(entry["start_id"].as_str().unwrap().contains('#'), "{}", entry);
+        assert!(entry["end_id"].as_str().unwrap().contains('#'), "{}", entry);
+    }
+}
+
+#[tokio::test]
+async fn test_a_structural_match_carries_the_ids_that_edit_it() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("bridge.rs", "fn keep() {\n}\n\nfn doomed() {\n    let x = 1;\n}\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let res = inspect_report(file.path_str(), Some("functions")).await;
+
+    let doomed = res["matches"].as_array().unwrap().iter()
+        .find(|m| m["text"].as_str().unwrap().contains("doomed"))
+        .expect("the function was not matched");
+
+    // The ids the query returned go straight to edit_lines, with no call in
+    // between to turn line numbers into ids.
+    let out = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
+        op: EditOp::ReplaceRange,
+        target_id: Some(doomed["start_id"].as_str().unwrap().to_string()),
+        end_target_id: Some(doomed["end_id"].as_str().unwrap().to_string()),
+        content: Some("// gone".to_string()),
+        ..Default::default()
+    }], &pm).await.unwrap();
+    let val: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(val["status"], "success");
+    assert_eq!(fs::read_to_string(file.path_str()).unwrap(), "fn keep() {\n}\n\n// gone\n");
+}

@@ -28,8 +28,17 @@ pub struct InspectResult {
     pub filepath: String,
     pub language: String,
     pub has_syntax_errors: bool,
+    /// The s-expression that was run. Null means none was asked for, which is
+    /// a different thing from a search that matched nothing.
+    pub query: Option<String>,
     pub match_count: usize,
     pub matches: Vec<InspectMatch>,
+    /// Present only when no query was given: the file's top-level definitions,
+    /// so the call still says something about the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Vec<OutlineEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -54,8 +63,39 @@ pub struct InspectMatch {
     pub start_column: usize,
     pub end_line: usize,
     pub end_column: usize,
+    /// The line ids `edit_lines` targets, so a match found by structure can be
+    /// edited without a second call to locate it by number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_id: Option<String>,
     pub text: String,
     pub definition: Option<InspectDefinition>,
+}
+
+/// One top-level definition, listed when no query was given.
+#[derive(Debug, Serialize)]
+pub struct OutlineEntry {
+    pub kind: String,
+    pub signature: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_id: Option<String>,
+}
+
+/// The id `edit_lines` would take for a line number, if a session exists.
+fn line_id_at(
+    repository: &impl SessionRepository,
+    session_id: &Option<String>,
+    line: usize,
+) -> Option<String> {
+    let session_id = session_id.as_ref()?;
+    let row = repository.fetch_lines_range(session_id, line, line).ok()?.into_iter().next()?;
+    let (seq, hash, _) = row;
+    Some(format!("{:x}#{}", seq, hash?))
 }
 
 #[derive(Debug, Serialize)]
@@ -67,6 +107,93 @@ pub struct InspectDefinition {
     pub end_column: usize,
     pub block_hash: String,
     pub text: String,
+}
+
+/// The s-expression a named template stands for, or None when the language
+/// has no such template.
+fn template_query(lang: &str, template: &str) -> Option<String> {
+    match (lang, template) {
+            // Rust
+            ("rust", "functions") => Some("(function_item) @function".to_string()),
+            ("rust", "classes") => Some("(struct_item) @class".to_string()),
+            ("rust", "imports") => Some("(use_declaration) @import".to_string()),
+            ("rust", "traits") => Some("(trait_item) @trait".to_string()),
+            ("rust", "impls") => Some("(impl_item) @impl".to_string()),
+
+            // Python
+            ("python", "functions") => Some("(function_definition) @function".to_string()),
+            ("python", "classes") => Some("(class_definition) @class".to_string()),
+            ("python", "imports") => Some("(import_statement) @import".to_string()),
+
+            // Go
+            ("go", "functions") => Some("[(function_declaration) (method_declaration)] @function".to_string()),
+            ("go", "classes") => Some("(type_declaration) @class".to_string()),
+            ("go", "imports") => Some("(import_declaration) @import".to_string()),
+            ("go", "interfaces") => Some("(type_declaration (type_spec type: (interface_type))) @interface".to_string()),
+            ("go", "structs") => Some("(type_declaration (type_spec type: (struct_type))) @struct".to_string()),
+
+            // JavaScript / TypeScript / TSX
+            ("javascript" | "typescript" | "tsx", "functions") => Some("[(function_declaration) (arrow_function) (method_definition)] @function".to_string()),
+            ("javascript" | "typescript" | "tsx", "classes") => Some("(class_declaration) @class".to_string()),
+            ("javascript" | "typescript" | "tsx", "imports") => Some("(import_statement) @import".to_string()),
+
+            // Java
+            ("java", "functions") => Some("(method_declaration) @function".to_string()),
+            ("java", "classes") => Some("[(class_declaration) (interface_declaration)] @class".to_string()),
+            ("java", "imports") => Some("(import_declaration) @import".to_string()),
+
+            // C / C++
+            ("c" | "cpp", "functions") => Some("(function_definition) @function".to_string()),
+            ("c" | "cpp", "classes") => Some("[(struct_specifier) (class_specifier)] @class".to_string()),
+            ("c" | "cpp", "imports") => Some("(preproc_include) @import".to_string()),
+            ("c" | "cpp", "macros") => Some("[(preproc_def) (preproc_function_def)] @macro".to_string()),
+
+            // Bash
+            ("bash", "functions") => Some("(function_definition) @function".to_string()),
+
+            _ => None,
+        }
+}
+
+/// The file's top-level definitions, using whichever templates the language
+/// declares. Each entry carries the line ids `edit_lines` takes, so an outline
+/// is enough to act on.
+fn outline_of(
+    language: &tree_sitter::Language,
+    root: tree_sitter::Node,
+    code: &str,
+    repository: &impl SessionRepository,
+    session_id: &Option<String>,
+    lang_name: &str,
+) -> Vec<OutlineEntry> {
+    let mut entries = Vec::new();
+
+    for template in ["classes", "functions"] {
+        let Some(query_str) = template_query(lang_name, template) else { continue };
+        let Ok(query) = Query::new(language, &query_str) else { continue };
+
+        let mut cursor = QueryCursor::new();
+        let mut found = cursor.matches(&query, root, code.as_bytes());
+        while let Some(m) = found.next() {
+            for capture in m.captures {
+                let node = capture.node;
+                let start_line = node.start_position().row + 1;
+                let end_line = node.end_position().row + 1;
+                let text = node.utf8_text(code.as_bytes()).unwrap_or("");
+                entries.push(OutlineEntry {
+                    kind: query.capture_names()[capture.index as usize].to_string(),
+                    signature: text.lines().next().unwrap_or("").trim().to_string(),
+                    start_line,
+                    end_line,
+                    start_id: line_id_at(repository, session_id, start_line),
+                    end_id: line_id_at(repository, session_id, end_line),
+                });
+            }
+        }
+    }
+
+    entries.sort_by_key(|entry| entry.start_line);
+    entries
 }
 
 pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<Value> {
@@ -135,54 +262,15 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         hint = Some("Warning: Syntax errors detected in source file. Tree-sitter query matching might be incomplete or fail to find some symbols due to structural errors.".to_string());
     }
     
-    // Choose query S-expression based on template
-    let query_str = if let Some(ref q) = args.query {
-        Some(q.clone())
-    } else if let Some(ref temp) = args.template {
-        match (lang_name, temp.as_str()) {
-            // Rust
-            ("rust", "functions") => Some("(function_item) @function".to_string()),
-            ("rust", "classes") => Some("(struct_item) @class".to_string()),
-            ("rust", "imports") => Some("(use_declaration) @import".to_string()),
-            ("rust", "traits") => Some("(trait_item) @trait".to_string()),
-            ("rust", "impls") => Some("(impl_item) @impl".to_string()),
-
-            // Python
-            ("python", "functions") => Some("(function_definition) @function".to_string()),
-            ("python", "classes") => Some("(class_definition) @class".to_string()),
-            ("python", "imports") => Some("(import_statement) @import".to_string()),
-
-            // Go
-            ("go", "functions") => Some("[(function_declaration) (method_declaration)] @function".to_string()),
-            ("go", "classes") => Some("(type_declaration) @class".to_string()),
-            ("go", "imports") => Some("(import_declaration) @import".to_string()),
-            ("go", "interfaces") => Some("(type_declaration (type_spec type: (interface_type))) @interface".to_string()),
-            ("go", "structs") => Some("(type_declaration (type_spec type: (struct_type))) @struct".to_string()),
-
-            // JavaScript / TypeScript / TSX
-            ("javascript" | "typescript" | "tsx", "functions") => Some("[(function_declaration) (arrow_function) (method_definition)] @function".to_string()),
-            ("javascript" | "typescript" | "tsx", "classes") => Some("(class_declaration) @class".to_string()),
-            ("javascript" | "typescript" | "tsx", "imports") => Some("(import_statement) @import".to_string()),
-
-            // Java
-            ("java", "functions") => Some("(method_declaration) @function".to_string()),
-            ("java", "classes") => Some("[(class_declaration) (interface_declaration)] @class".to_string()),
-            ("java", "imports") => Some("(import_declaration) @import".to_string()),
-
-            // C / C++
-            ("c" | "cpp", "functions") => Some("(function_definition) @function".to_string()),
-            ("c" | "cpp", "classes") => Some("[(struct_specifier) (class_specifier)] @class".to_string()),
-            ("c" | "cpp", "imports") => Some("(preproc_include) @import".to_string()),
-            ("c" | "cpp", "macros") => Some("[(preproc_def) (preproc_function_def)] @macro".to_string()),
-
-            // Bash
-            ("bash", "functions") => Some("(function_definition) @function".to_string()),
-
-            _ => None,
-        }
-    } else {
-        None
+    // What to search for: an explicit query, a named template, or — when
+    // neither was given — nothing. The last case is reported as such rather
+    // than as a search that found no matches.
+    let query_str = match (&args.query, &args.template) {
+        (Some(q), _) => Some(q.clone()),
+        (None, Some(temp)) => template_query(lang_name, temp),
+        (None, None) => None,
     };
+    let searched = args.query.is_some() || args.template.is_some();
 
     if let (Some(ref template), None) = (&args.template, &query_str) {
         status = "warning".to_string();
@@ -247,13 +335,17 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                             None
                         };
 
+                        let start_line = start_position.row + 1;
+                        let end_line = end_position.row + 1;
                         matches.push(InspectMatch {
                             pattern_index: m.pattern_index,
                             capture_name,
-                            start_line: start_position.row + 1,
+                            start_line,
                             start_column: start_position.column + 1,
-                            end_line: end_position.row + 1,
+                            end_line,
                             end_column: end_position.column + 1,
+                            start_id: line_id_at(&repository, &session_id_opt, start_line),
+                            end_id: line_id_at(&repository, &session_id_opt, end_line),
                             text: node_text,
                             definition,
                         });
@@ -314,13 +406,29 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         }
     }
 
+    // Nothing was asked for. Say so, and say what is in the file, so the caller
+    // is not left reading an empty result as an empty file.
+    let (outline, message) = if searched {
+        (None, None)
+    } else {
+        let entries = outline_of(&language, root_node, &code, &repository, &session_id_opt, lang_name);
+        let note = "No query or template was given, so nothing was searched for; \
+             listing the file's top-level definitions instead. \
+             Pass \"template\": \"functions\" (or classes, imports, …) or a \
+             Tree-sitter s-expression in \"query\" to search.".to_string();
+        (Some(entries), Some(note))
+    };
+
     let result = InspectResult {
         status: status.clone(),
         filepath: args.file,
         language: lang_name.to_string(),
         has_syntax_errors,
+        query: query_str.clone(),
         match_count: matches.len(),
         matches,
+        outline,
+        message,
         hint: final_hint.clone(),
     };
 
@@ -486,6 +594,9 @@ pub fn run_markdown_inspect(
 
     let result = InspectResult {
         status: status.clone(),
+        query: None,
+        outline: None,
+        message: None,
         filepath: args.file.clone(),
         language: "markdown".to_string(),
         has_syntax_errors: false,
@@ -654,6 +765,8 @@ fn collect_markdown_matches<'a>(
             start_column,
             end_line,
             end_column,
+            start_id: line_id_at(repository, session_id_opt, start_line),
+            end_id: line_id_at(repository, session_id_opt, end_line),
             text: node_text,
             definition,
         });

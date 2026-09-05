@@ -11,6 +11,7 @@ ast-editor — line-precise editing over tree-sitter
 
     ast-editor <tool> '<json args>'  call one tool and print its output
     ast-editor mcp                   serve MCP over JSON-RPC on stdin
+    ast-editor --version             version, and the grammars it can reach
     ast-editor --help                this text
 
 Tool arguments are the same JSON object the MCP call takes, so anything the
@@ -31,6 +32,10 @@ async fn main() -> anyhow::Result<()> {
         Some("mcp") => {
             init_tracing(tracing::Level::INFO);
             serve_mcp().await
+        }
+        Some("--version") | Some("-V") | Some("version") => {
+            print!("{}", version_report());
+            Ok(())
         }
         Some("--help") | Some("-h") | Some("help") => {
             print!("{}", USAGE);
@@ -63,6 +68,31 @@ fn init_tracing(level: tracing::Level) {
         .with_writer(std::io::stderr)
         .with_env_filter(EnvFilter::from_default_env().add_directive(level.into()))
         .init();
+}
+
+/// The binary's version and the grammar set it is paired with. A grammar
+/// directory that does not match the binary is the likeliest cause of a file
+/// that will not parse, so it is reported rather than left to be guessed at.
+fn version_report() -> String {
+    let mut out = format!("ast-editor {}\n", env!("CARGO_PKG_VERSION"));
+    let wasm_dir = ast_editor::config::get_wasm_dir();
+    out.push_str(&format!("grammars {}\n", wasm_dir.display()));
+
+    match ast_editor::config::describe_languages(&wasm_dir) {
+        Ok(languages) => {
+            let missing: Vec<&str> = languages.iter()
+                .filter(|(_, present)| !present)
+                .map(|(name, _)| name.as_str())
+                .collect();
+            let names: Vec<&str> = languages.iter().map(|(name, _)| name.as_str()).collect();
+            out.push_str(&format!("         {} declared: {}\n", names.len(), names.join(", ")));
+            if !missing.is_empty() {
+                out.push_str(&format!("         {} MISSING: {}\n", missing.len(), missing.join(", ")));
+            }
+        }
+        Err(err) => out.push_str(&format!("         unreadable: {:#}\n", err)),
+    }
+    out
 }
 
 fn tool_names() -> Vec<String> {

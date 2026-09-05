@@ -49,10 +49,15 @@ The tools are the same either way; only the envelope differs.
 MCP call takes:
 
 ```bash
-ast-editor view_lines '{"filepath":"/path/to/file.rs"}'
+ast-editor view_lines '{"filepath":"/path/to/file.rs","query":"fn main"}'
 ast-editor edit_lines '{"filepath":"/path/to/file.rs","apply":"p1f"}'
+ast-editor --version
 ast-editor --help
 ```
+
+`view_lines` takes a `query` and `inspect_ast` matches carry `start_id` /
+`end_id`, so finding a line by content or by structure already yields the IDs
+that edit it — no line numbers, and no `grep` pass first.
 
 **MCP server** — for clients that expect one. It has to be asked for, because
 a client mounting this over MCP keeps every tool schema in its context for the

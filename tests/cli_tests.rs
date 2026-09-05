@@ -114,3 +114,15 @@ fn test_a_bare_invocation_asks_rather_than_serving() {
     let text = String::from_utf8_lossy(&out.stderr);
     assert!(text.contains("ast-editor mcp"), "{}", text);
 }
+
+#[test]
+fn test_version_reports_the_grammar_set_it_is_paired_with() {
+    // A binary and a grammar directory that do not match is the likeliest
+    // reason a file will not parse, so --version names both.
+    let out = ast_editor("version", &["--version"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.starts_with("ast-editor "), "{}", text);
+    assert!(text.contains("grammars "), "{}", text);
+    assert!(text.contains("rust"), "the grammar list is missing: {}", text);
+}

@@ -47,6 +47,26 @@ fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
 static LANGUAGES_MAP_CACHE: once_cell::sync::Lazy<std::sync::Mutex<HashMap<PathBuf, HashMap<String, String>>>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
+/// The languages the grammar directory actually provides, and whether each
+/// one's wasm file is present. Reported by `--version`, where a missing
+/// grammar is the likeliest reason a file will not parse.
+pub fn describe_languages(wasm_dir: &Path) -> Result<Vec<(String, bool)>> {
+    let mut described: Vec<(String, bool)> = init_languages_map(wasm_dir)?
+        .values()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|wasm_file| {
+            let name = wasm_file
+                .strip_suffix(".wasm").unwrap_or(wasm_file)
+                .strip_prefix("tree-sitter-").unwrap_or(wasm_file)
+                .to_string();
+            (name, wasm_dir.join(wasm_file).is_file())
+        })
+        .collect();
+    described.sort();
+    Ok(described)
+}
+
 /// Dynamically lookup wasm grammar file name for a given file extension under a custom raw wasm directory.
 pub fn get_wasm_file(wasm_dir: &Path, ext: &str) -> Result<String> {
     let lookup_key = if ext.starts_with('.') {

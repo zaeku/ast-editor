@@ -27,10 +27,40 @@ unchanged. Output goes to stdout with no wrapper and pipes normally; failures
 go to stderr with a non-zero exit status.
 
 Tools: `view_lines`, `edit_lines`, `create_lines`, `inspect_ast`, `dump_ast`.
+`ast-editor --version` reports the grammar set the binary is paired with, which
+is the first thing to check when a file will not parse.
 
 The same binary serves MCP over JSON-RPC on stdin when asked — `ast-editor mcp`
 — for clients that expect that. Prefer the command form: it keeps no tool
 schemas resident in context.
+
+---
+
+## 🔎 Finding What to Edit
+
+You never need a line number, and never need `grep` first. Two ways in, both
+returning the line IDs `edit_lines` takes:
+
+**By content** — `view_lines` takes a `query`, with optional `context_lines`:
+
+```bash
+ast-editor view_lines '{"filepath":"/abs/path/f.rs","query":"get_wasm_dir","context_lines":2}'
+```
+
+**By structure** — `inspect_ast` matches carry `start_id` and `end_id`, so a
+whole definition can be replaced in the next call:
+
+```bash
+ast-editor inspect_ast '{"filepath":"/abs/path/f.rs","template":"functions"}'
+# → matches[].start_id / end_id
+ast-editor edit_lines '{"filepath":"/abs/path/f.rs","edits":[
+  {"op":"replace_range","target_id":"<start_id>","end_target_id":"<end_id>","content":"…"}]}'
+```
+
+Called with neither `query` nor `template`, `inspect_ast` searches for nothing
+and says so: `"query": null`, an empty `matches`, and an `outline` of the
+file's top-level definitions with their IDs. An empty `matches` alongside a
+null `query` means nothing was asked for — not that the file is empty.
 
 ---
 

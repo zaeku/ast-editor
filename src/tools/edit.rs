@@ -489,16 +489,6 @@ pub async fn edit_lines(
     edit_lines_with_validation(repository, filepath, edits, false, parser_manager).await
 }
 
-#[deprecated(since = "0.1.0", note = "use edit_lines instead")]
-pub async fn apply_line_edits(
-    repository: &impl SessionRepository,
-    filepath: &str,
-    edits: Vec<LineEdit>,
-    parser_manager: &crate::parser::ParserManager,
-) -> Result<String> {
-    edit_lines(repository, filepath, edits, parser_manager).await
-}
-
 #[cfg(test)]
 #[allow(clippy::await_holding_lock)]
 mod tests {

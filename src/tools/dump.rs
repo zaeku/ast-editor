@@ -10,8 +10,7 @@ use crate::parser::ParserManager;
 
 #[derive(Debug, Deserialize)]
 pub struct DumpArgs {
-    #[serde(alias = "filepath")]
-    pub file: String,
+    pub filepath: String,
 }
 
 fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, max_depth: usize, out: &mut String) {
@@ -60,7 +59,7 @@ fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, m
 }
 
 pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
-    let file_path = Path::new(&args.file);
+    let file_path = Path::new(&args.filepath);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
     }
@@ -214,7 +213,7 @@ mod tests {
 
         let pm = Arc::new(ParserManager::new().unwrap());
         let args = DumpArgs {
-            file: file_path.to_string_lossy().to_string(),
+            filepath: file_path.to_string_lossy().to_string(),
         };
 
         let text = run_dump(args, &pm).await.unwrap();

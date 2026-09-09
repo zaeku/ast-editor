@@ -98,20 +98,6 @@ fn test_version_reports_the_grammar_set_it_is_paired_with() {
 }
 
 #[test]
-fn test_the_old_operation_name_says_what_replaced_it() {
-    let file = scratch("renamed.rs", "fn main() {\n    let a = 1;\n}\n");
-    let out = ast_editor("renamed", &["edit_lines", &format!(
-        r#"{{"filepath":"{}","edits":[{{"op":"update","target_id":"2#0759","content":"x"}}]}}"#,
-        file.display()
-    )]);
-    assert!(!out.status.success());
-    let text = String::from_utf8_lossy(&out.stderr);
-    assert!(text.contains("now called 'replace'"), "{}", text);
-    // The rename is not a silent alias: the edit did not happen.
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "fn main() {\n    let a = 1;\n}\n");
-}
-
-#[test]
 fn test_a_tool_takes_a_path_and_options_instead_of_json() {
     let file = scratch("flags.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
     let out = ast_editor("flags", &[

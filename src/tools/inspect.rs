@@ -11,8 +11,7 @@ use crate::tools::session_db::{SessionRepository, SqliteSessionRepository};
 
 #[derive(Debug, Deserialize)]
 pub struct InspectArgs {
-    #[serde(alias = "filepath")]
-    pub file: String,
+    pub filepath: String,
     pub query: Option<String>,
     pub template: Option<String>,
     pub include_code: Option<bool>,
@@ -195,7 +194,7 @@ fn outline_of(
 }
 
 pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
-    let file_path = Path::new(&args.file);
+    let file_path = Path::new(&args.filepath);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
     }
@@ -231,7 +230,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     // JIT edit session pre-caching
     let repository = SqliteSessionRepository;
     let mut session_id_opt = None;
-    match repository.init_session(&args.file, false) {
+    match repository.init_session(&args.filepath, false) {
         Ok(meta) => {
             session_id_opt = Some(meta.session_id);
         }
@@ -390,7 +389,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                args.file.hash(&mut hasher);
+                args.filepath.hash(&mut hasher);
                 let hash_val = format!("{:x}", hasher.finish());
                 let filename = format!(
                     "inspect_output_{}_{}.json",
@@ -419,7 +418,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
 
     let result = InspectResult {
         status: status.clone(),
-        filepath: args.file,
+        filepath: args.filepath,
         language: lang_name.to_string(),
         has_syntax_errors,
         query: query_str.clone(),
@@ -568,7 +567,7 @@ pub fn run_markdown_inspect(
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                args.file.hash(&mut hasher);
+                args.filepath.hash(&mut hasher);
                 let hash_val = format!("{:x}", hasher.finish());
                 let filename = format!(
                     "inspect_output_{}_{}.json",
@@ -587,7 +586,7 @@ pub fn run_markdown_inspect(
         query: None,
         outline: None,
         message: None,
-        filepath: args.file.clone(),
+        filepath: args.filepath.clone(),
         language: "markdown".to_string(),
         has_syntax_errors: false,
         match_count: matches.len(),
@@ -843,7 +842,7 @@ fn main() {}
 
         // Test Headings
         let args = InspectArgs {
-            file: "test.md".to_string(),
+            filepath: "test.md".to_string(),
             query: None,
             template: Some("headings".to_string()),
             include_code: Some(true),
@@ -857,7 +856,7 @@ fn main() {}
 
         // Test Codeblocks
         let args = InspectArgs {
-            file: "test.md".to_string(),
+            filepath: "test.md".to_string(),
             query: None,
             template: Some("code_blocks".to_string()),
             include_code: Some(true),
@@ -871,7 +870,7 @@ fn main() {}
 
         // Test Links
         let args = InspectArgs {
-            file: "test.md".to_string(),
+            filepath: "test.md".to_string(),
             query: None,
             template: Some("links".to_string()),
             include_code: Some(true),
@@ -885,7 +884,7 @@ fn main() {}
 
         // Test Tables
         let args = InspectArgs {
-            file: "test.md".to_string(),
+            filepath: "test.md".to_string(),
             query: None,
             template: Some("tables".to_string()),
             include_code: Some(true),
@@ -898,7 +897,7 @@ fn main() {}
 
         // Test Lists
         let args = InspectArgs {
-            file: "test.md".to_string(),
+            filepath: "test.md".to_string(),
             query: None,
             template: Some("lists".to_string()),
             include_code: Some(true),
@@ -911,7 +910,7 @@ fn main() {}
 
         // Test Query matching case-insensitive
         let args = InspectArgs {
-            file: "test.md".to_string(),
+            filepath: "test.md".to_string(),
             query: Some("paragraph".to_string()),
             template: None,
             include_code: Some(true),
@@ -940,7 +939,7 @@ fn main() {}
             let file_path = temp_dir.join(filename);
             std::fs::write(&file_path, code).unwrap();
             let args = InspectArgs {
-                file: file_path.to_string_lossy().to_string(),
+                filepath: file_path.to_string_lossy().to_string(),
                 query: None,
                 template: Some(template.to_string()),
                 include_code: Some(true),
@@ -1004,7 +1003,7 @@ fn main() {}
 
         // 1. Test using 'file' field
         let args_file = InspectArgs {
-            file: file_path.to_string_lossy().to_string(),
+            filepath: file_path.to_string_lossy().to_string(),
             query: Some("(binding attrpath: (attrpath (identifier) @attr))".to_string()),
             template: None,
             include_code: Some(true),

@@ -220,17 +220,6 @@ pub fn view_lines(
     })
 }
 
-#[deprecated(since = "0.1.0", note = "use view_lines instead")]
-pub fn view_session_lines(
-    repository: &impl SessionRepository,
-    filepath: &str,
-    start_line: usize,
-    end_line: usize,
-    only_ids: Option<bool>,
-) -> Result<ViewLinesOutput> {
-    view_lines(repository, filepath, Some(start_line), Some(end_line), only_ids, None, None)
-}
-
 pub fn create_lines(
     repository: &impl SessionRepository,
     filepath: &str,

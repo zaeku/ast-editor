@@ -37,10 +37,6 @@ impl ToolDispatcher {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "file": {
-                            "type": "string",
-                            "description": "Path to the file to inspect (deprecated, use filepath instead)"
-                        },
                         "filepath": {
                             "type": "string",
                             "description": "Absolute path to the file to inspect"
@@ -76,10 +72,6 @@ impl ToolDispatcher {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "file": {
-                            "type": "string",
-                            "description": "Path to the file to inspect (deprecated, use filepath instead)"
-                        },
                         "filepath": {
                             "type": "string",
                             "description": "Absolute path to the file to inspect"
@@ -281,18 +273,7 @@ impl ToolDispatcher {
                     edit::apply_preview(&repository, filepath, preview_id, strict_validation, parser_manager).await?
                 } else {
                     let edits_val = arguments.get("edits").context("Missing edits array")?;
-                    let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())
-                        .map_err(|err| {
-                            // `update` was this operation's name until it was
-                            // renamed for symmetry with replace_range and
-                            // replace_substring. Say so once rather than
-                            // accepting both names forever.
-                            if err.to_string().contains("update") {
-                                anyhow::anyhow!("{}. The 'update' operation is now called 'replace'.", err)
-                            } else {
-                                anyhow::Error::from(err)
-                            }
-                        })?;
+                    let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
                     if dry_run {
                         edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager).await?
                     } else {

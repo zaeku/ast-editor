@@ -1112,7 +1112,7 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
 async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value {
     let res = ast_editor::tools::inspect::run_inspect(
         ast_editor::tools::inspect::InspectArgs {
-            file: path.to_string(),
+            filepath: path.to_string(),
             query: None,
             template: template.map(str::to_string),
             include_code: Some(false),

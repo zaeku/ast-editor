@@ -3,12 +3,10 @@ use std::fs;
 use std::path::Path;
 use anyhow::{Result, Context, bail};
 use serde::Deserialize;
-use serde_json::Value;
 use tree_sitter::Node;
 
 use crate::parser::ParserManager;
 
-use crate::tools::{McpTextContent, McpToolResult};
 
 #[derive(Debug, Deserialize)]
 pub struct DumpArgs {
@@ -61,7 +59,7 @@ fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, m
     }
 }
 
-pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Result<Value> {
+pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
     let file_path = Path::new(&args.file);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
@@ -131,13 +129,7 @@ pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Re
         format!("{}{}", header, formatted_tree)
     };
 
-    Ok(serde_json::to_value(McpToolResult {
-        content: vec![McpTextContent {
-            content_type: "text".to_string(),
-            text: final_text,
-        }],
-        is_error: None,
-    })?)
+    Ok(final_text)
 }
 
 fn format_comrak_node<'a>(
@@ -225,9 +217,7 @@ mod tests {
             file: file_path.to_string_lossy().to_string(),
         };
 
-        let res = run_dump(args, &pm).await.unwrap();
-        let value: McpToolResult = serde_json::from_value(res).unwrap();
-        let text = &value.content[0].text;
+        let text = run_dump(args, &pm).await.unwrap();
 
         assert!(text.contains("[tree-sitter-dump-tree]"));
         assert!(text.contains("Document [1:1 - 7:3]"));

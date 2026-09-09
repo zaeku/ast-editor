@@ -179,15 +179,5 @@ async fn call_once(tool: &str, args: &[String]) -> anyhow::Result<String> {
 /// Dispatch one tool call that is already built.
 async fn call_with(tool: &str, arguments: serde_json::Value) -> anyhow::Result<String> {
     let parser_manager = Arc::new(ParserManager::new()?);
-    let result = ToolDispatcher::new().call_tool(tool, arguments, &parser_manager).await?;
-
-    let texts: Vec<&str> = result.get("content")
-        .and_then(|content| content.as_array())
-        .map(|blocks| blocks.iter().filter_map(|b| b.get("text")?.as_str()).collect())
-        .unwrap_or_default();
-
-    if texts.is_empty() {
-        return Ok(serde_json::to_string_pretty(&result)?);
-    }
-    Ok(texts.join("\n"))
+    ToolDispatcher::new().call_tool(tool, arguments, &parser_manager).await
 }

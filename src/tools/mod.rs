@@ -7,26 +7,11 @@ pub mod metadata;
 pub mod formatter;
 pub mod script;
 
-use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::sync::Arc;
 use anyhow::{Result, bail, Context};
 
 use crate::parser::ParserManager;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct McpTextContent {
-    #[serde(rename = "type")]
-    pub content_type: String,
-    pub text: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct McpToolResult {
-    pub content: Vec<McpTextContent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_error: Option<bool>,
-}
 
 pub struct ToolDispatcher;
 
@@ -238,7 +223,8 @@ impl ToolDispatcher {
     }
 
     /// Invokes the appropriate tool based on name and deserialized arguments.
-    pub async fn call_tool(&self, name: &str, arguments: Value, parser_manager: &Arc<ParserManager>) -> Result<Value> {
+    /// Run one tool and return the text it prints.
+    pub async fn call_tool(&self, name: &str, arguments: Value, parser_manager: &Arc<ParserManager>) -> Result<String> {
         match name {
             "inspect_ast" => {
                 let args = serde_json::from_value(arguments)?;
@@ -258,7 +244,7 @@ impl ToolDispatcher {
                 let repository = session_db::SqliteSessionRepository;
                 let res = view::view_lines(&repository, filepath, start_line, end_line, only_ids, query, context_lines)?;
                 
-                let mut content = Vec::new();
+                let mut blocks = Vec::new();
                 if let Some(code) = res.lines_text {
                     let ext = std::path::Path::new(filepath)
                         .extension()
@@ -280,22 +266,10 @@ impl ToolDispatcher {
                         "sh" => "bash",
                         _ => "text",
                     };
-                    let formatted_code = format!("```{}\n{}\n```", lang, code);
-                    content.push(McpTextContent {
-                        content_type: "text".to_string(),
-                        text: formatted_code,
-                    });
+                    blocks.push(format!("```{}\n{}\n```", lang, code));
                 }
-                
-                content.push(McpTextContent {
-                    content_type: "text".to_string(),
-                    text: res.metadata_json,
-                });
-                
-                Ok(serde_json::to_value(McpToolResult {
-                    content,
-                    is_error: None,
-                })?)
+                blocks.push(res.metadata_json);
+                Ok(blocks.join("\n"))
             }
             "edit_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
@@ -325,10 +299,7 @@ impl ToolDispatcher {
                         edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?
                     }
                 };
-                Ok(serde_json::to_value(McpToolResult {
-                    content: vec![McpTextContent { content_type: "text".to_string(), text }],
-                    is_error: None,
-                })?)
+                Ok(text)
             }
             "create_lines" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
@@ -336,10 +307,7 @@ impl ToolDispatcher {
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
                 let repository = session_db::SqliteSessionRepository;
                 let text = view::create_lines(&repository, filepath, content, return_ids)?;
-                Ok(serde_json::to_value(McpToolResult {
-                    content: vec![McpTextContent { content_type: "text".to_string(), text }],
-                    is_error: None,
-                })?)
+                Ok(text)
             }
             _ => bail!("Unknown tool: {}", name),
         }

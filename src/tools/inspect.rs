@@ -3,13 +3,11 @@ use std::fs;
 use std::path::Path;
 use anyhow::{Result, Context, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use std::hash::{Hash, Hasher};
 
 use crate::parser::ParserManager;
 use crate::tools::session_db::{SessionRepository, SqliteSessionRepository};
-use crate::tools::{McpTextContent, McpToolResult};
 
 #[derive(Debug, Deserialize)]
 pub struct InspectArgs {
@@ -196,7 +194,7 @@ fn outline_of(
     entries
 }
 
-pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<Value> {
+pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
     let file_path = Path::new(&args.file);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
@@ -473,15 +471,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         pretty_json
     };
 
-    let is_err = if status == "error" { Some(true) } else { None };
-
-    Ok(serde_json::to_value(McpToolResult {
-        content: vec![McpTextContent {
-            content_type: "text".to_string(),
-            text: returned_text,
-        }],
-        is_error: is_err,
-    })?)
+    Ok(returned_text)
 }
 
 pub(crate) async fn run_gc(outputs_dir: std::path::PathBuf) {
@@ -517,7 +507,7 @@ pub fn run_markdown_inspect(
     args: &InspectArgs,
     repository: &impl SessionRepository,
     session_id_opt: &Option<String>,
-) -> Result<Value> {
+) -> Result<String> {
     let arena = comrak::Arena::new();
     let mut options = comrak::Options::default();
     options.extension.table = true;
@@ -648,15 +638,7 @@ pub fn run_markdown_inspect(
         pretty_json
     };
 
-    let is_err = if status == "error" { Some(true) } else { None };
-
-    Ok(serde_json::to_value(McpToolResult {
-        content: vec![McpTextContent {
-            content_type: "text".to_string(),
-            text: returned_text,
-        }],
-        is_error: is_err,
-    })?)
+    Ok(returned_text)
 }
 
 fn collect_markdown_matches<'a>(
@@ -869,8 +851,7 @@ fn main() {}
             output_file: None,
         };
         let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
-        let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-        let text = &res.content[0].text;
+        let text = &res_val;
         assert!(text.contains(r#""capture_name": "Heading""#));
         assert!(text.contains(r##""text": "# Heading 1"##));
 
@@ -884,8 +865,7 @@ fn main() {}
             output_file: None,
         };
         let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
-        let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-        let text = &res.content[0].text;
+        let text = &res_val;
         assert!(text.contains(r#""capture_name": "CodeBlock""#));
         assert!(text.contains("fn main()"));
 
@@ -899,8 +879,7 @@ fn main() {}
             output_file: None,
         };
         let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
-        let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-        let text = &res.content[0].text;
+        let text = &res_val;
         assert!(text.contains(r#""capture_name": "Link""#));
         assert!(text.contains(r#""capture_name": "Image""#));
 
@@ -914,8 +893,7 @@ fn main() {}
             output_file: None,
         };
         let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
-        let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-        let text = &res.content[0].text;
+        let text = &res_val;
         assert!(text.contains(r#""capture_name": "Table""#));
 
         // Test Lists
@@ -928,8 +906,7 @@ fn main() {}
             output_file: None,
         };
         let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
-        let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-        let text = &res.content[0].text;
+        let text = &res_val;
         assert!(text.contains(r#""capture_name": "List""#));
 
         // Test Query matching case-insensitive
@@ -942,8 +919,7 @@ fn main() {}
             output_file: None,
         };
         let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
-        let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-        let text = &res.content[0].text;
+        let text = &res_val;
         assert!(text.contains(r#""capture_name": "Paragraph""#));
     }
     #[tokio::test]
@@ -972,8 +948,7 @@ fn main() {}
                 output_file: None,
             };
             let res_val = run_inspect(args, pm).await.unwrap();
-            let res: McpToolResult = serde_json::from_value(res_val).unwrap();
-            let text = &res.content[0].text;
+            let text = &res_val;
             assert!(
                 text.contains(expected_contains),
                 "Expected text to contain '{}' for template '{}' of file '{}'. Got: {}",
@@ -1036,9 +1011,7 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val1 = run_inspect(args_file, &pm).await.unwrap();
-        let res1: McpToolResult = serde_json::from_value(res_val1).unwrap();
-        let text1 = &res1.content[0].text;
+        let text1 = run_inspect(args_file, &pm).await.unwrap();
         assert!(text1.contains("x"));
 
         // 2. Test using 'filepath' alias field (deserialized manually in code or via serde)
@@ -1047,9 +1020,7 @@ fn main() {}
             "query": "(binding attrpath: (attrpath (identifier) @attr))"
         });
         let args_filepath: InspectArgs = serde_json::from_value(json_input).unwrap();
-        let res_val2 = run_inspect(args_filepath, &pm).await.unwrap();
-        let res2: McpToolResult = serde_json::from_value(res_val2).unwrap();
-        let text2 = &res2.content[0].text;
+        let text2 = run_inspect(args_filepath, &pm).await.unwrap();
         assert!(text2.contains("x"));
     }
 

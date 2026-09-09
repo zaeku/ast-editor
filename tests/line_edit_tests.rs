@@ -1108,7 +1108,7 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
     assert!(!ids.contains(&replacement.0));
 }
 
-/// run_inspect answers in the MCP envelope. The report is the JSON inside it.
+/// run_inspect prints a JSON report; this is it, parsed.
 async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value {
     let res = ast_editor::tools::inspect::run_inspect(
         ast_editor::tools::inspect::InspectArgs {
@@ -1121,7 +1121,7 @@ async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value
         },
         &std::sync::Arc::new(create_test_parser_manager()),
     ).await.unwrap();
-    serde_json::from_str(res["content"][0]["text"].as_str().unwrap()).unwrap()
+    serde_json::from_str(&res).unwrap()
 }
 
 #[tokio::test]

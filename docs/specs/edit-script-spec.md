@@ -126,6 +126,12 @@ A payload of zero lines is allowed and means empty content, which is how
 The batch is applied exactly as the JSON form applies it: in order, as one
 transaction, with one validation pass at the end.
 
+One consequence is worth stating, because a script makes it easy to write: a
+line id carries a hash of that line's content, so a directive cannot target a
+line an earlier directive in the same batch changed. The id captured before the
+batch no longer describes the line, and the edit is refused rather than applied
+to whatever is there now. Target distinct lines, or split the batch.
+
 ## 4. Failing
 
 Every one of these fails the whole batch, writes nothing, and names the line
@@ -137,6 +143,7 @@ number in the script:
   unknown.
 - A payload on an operation that takes none, or a missing payload on one that
   requires it.
+- `replace_substring`, which is named only to say where it lives instead.
 
 Errors carry the script line number, because a heredoc has no other landmark.
 
@@ -154,3 +161,5 @@ Errors carry the script line number, because a heredoc has no other landmark.
    showing the two forms share one engine.
 7. A batch of several directives is one transaction: if the result fails
    validation under `--strict`, none of it is written.
+8. A directive targeting a line an earlier directive changed is refused, and
+   the file is left alone.

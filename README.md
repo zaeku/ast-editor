@@ -55,6 +55,18 @@ ast-editor --version
 ast-editor --help
 ```
 
+Editing has a second form that takes a script on stdin, so code needs no
+escaping at all — see [the format](docs/specs/edit-script-spec.md):
+
+```bash
+ast-editor edit src/config.rs <<'EOF'
+replace 2#0759 ```
+    let msg = format!("can't parse {:?}: {}", path, err);
+```
+delete 7c#aabb
+EOF
+```
+
 `view_lines` takes a `query` and `inspect_ast` matches carry `start_id` /
 `end_id`, so finding a line by content or by structure already yields the IDs
 that edit it — no line numbers, and no `grep` pass first.

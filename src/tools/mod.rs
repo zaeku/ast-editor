@@ -5,6 +5,7 @@ pub mod view;
 pub mod edit;
 pub mod metadata;
 pub mod formatter;
+pub mod script;
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;

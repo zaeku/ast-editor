@@ -2,6 +2,7 @@ use ast_editor::parser::ParserManager;
 use ast_editor::mcp::{McpServer, JsonRpcRequest};
 use ast_editor::tools::ToolDispatcher;
 use std::sync::Arc;
+use anyhow::Context;
 use tracing::{info, error, debug};
 use tracing_subscriber::EnvFilter;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, BufReader, AsyncWriteExt};
@@ -9,10 +10,21 @@ use tokio::io::{stdin, stdout, AsyncBufReadExt, BufReader, AsyncWriteExt};
 const USAGE: &str = "\
 ast-editor — line-precise editing over tree-sitter
 
+    ast-editor edit <file> < script  apply an edit script read from stdin
     ast-editor <tool> '<json args>'  call one tool and print its output
     ast-editor mcp                   serve MCP over JSON-RPC on stdin
     ast-editor --version             version, and the grammars it can reach
     ast-editor --help                this text
+
+An edit script carries code with no escaping, one directive per line, each
+block fenced with three or more backticks:
+
+    ast-editor edit src/config.rs <<'EOF'
+    replace_range 3f#a1b2 4c#d3e4 ```
+        let a = 1;
+    ```
+    delete 6b#99aa
+    EOF
 
 Tool arguments are the same JSON object the MCP call takes, so anything the
 tool schemas describe works here unchanged:
@@ -32,6 +44,19 @@ async fn main() -> anyhow::Result<()> {
         Some("mcp") => {
             init_tracing(tracing::Level::INFO);
             serve_mcp().await
+        }
+        Some("edit") => {
+            init_tracing(tracing::Level::WARN);
+            match run_edit_script(&args[1..]).await {
+                Ok(output) => {
+                    println!("{}", output);
+                    Ok(())
+                }
+                Err(err) => {
+                    eprintln!("{:#}", err);
+                    std::process::exit(1);
+                }
+            }
         }
         Some("--version") | Some("-V") | Some("version") => {
             print!("{}", version_report());
@@ -99,6 +124,42 @@ fn tool_names() -> Vec<String> {
     ToolDispatcher::new().list_tools().iter()
         .filter_map(|tool| tool.get("name")?.as_str().map(str::to_string))
         .collect()
+}
+
+/// Apply an edit script read from stdin. The script says what to change; every
+/// flag before it is the same option the JSON form takes.
+async fn run_edit_script(args: &[String]) -> anyhow::Result<String> {
+    use std::io::Read;
+
+    let mut filepath = None;
+    let mut dry_run = false;
+    let mut strict = false;
+    for arg in args {
+        match arg.as_str() {
+            "--dry-run" => dry_run = true,
+            "--strict" => strict = true,
+            flag if flag.starts_with('-') => anyhow::bail!("Unknown option '{}' for edit.", flag),
+            path if filepath.is_none() => filepath = Some(path.to_string()),
+            extra => anyhow::bail!("edit takes one file; also given '{}'.", extra),
+        }
+    }
+    let filepath = filepath.context("edit needs a file: ast-editor edit <file> < script")?;
+
+    let mut script = String::new();
+    std::io::stdin().read_to_string(&mut script).context("Failed to read the edit script from stdin")?;
+    if script.trim().is_empty() {
+        anyhow::bail!("The edit script is empty. It is read from stdin, so pass it as a heredoc.");
+    }
+
+    let edits = ast_editor::tools::script::parse(&script)?;
+
+    let parser_manager = ParserManager::new()?;
+    let repository = ast_editor::tools::session_db::SqliteSessionRepository;
+    if dry_run {
+        ast_editor::tools::edit::edit_lines_dry_run(&repository, &filepath, edits, &parser_manager).await
+    } else {
+        ast_editor::tools::edit::edit_lines_with_validation(&repository, &filepath, edits, strict, &parser_manager).await
+    }
 }
 
 /// Run one tool and return what it printed, so the shell sees the tool's own

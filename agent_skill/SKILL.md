@@ -17,9 +17,37 @@ object:
 
 ```bash
 ast-editor view_lines '{"filepath":"/abs/path/file.rs","start_line":40,"end_line":80}'
-ast-editor edit_lines '{"filepath":"/abs/path/file.rs","edits":[{"op":"replace","target_id":"2#0759","content":"    let a = 2;"}]}'
 ast-editor --help
 ```
+
+**Editing uses a script on stdin, not JSON.** One directive per line, each
+block fenced with three or more backticks, so code goes in exactly as written —
+no quoting, no `\n`, no escaping of any kind:
+
+```bash
+ast-editor edit /abs/path/file.rs <<'EOF'
+replace 2#0759 ```
+    let msg = format!("can't parse {:?}: {}", path, err);
+```
+replace_range 5a#7788 6b#99aa ```
+    fn replaced() {
+    }
+```
+delete 7c#aabb
+EOF
+```
+
+Directives: `replace <id>`, `replace_range <start> <end>`, `insert_after <id>`,
+`insert_before <id>`, `append`, `prepend` (all with a block); `delete <id>` and
+`move <start> [<end>] before|after <dest>` (no block). Add `--dry-run` or
+`--strict` after the file.
+
+If the content itself contains a line of three backticks, open with four — the
+closing fence must be at least as long, exactly as in Markdown.
+
+Within one batch, do not target a line an earlier directive changed: the id
+carries that line's content hash, so it no longer matches and the batch is
+refused.
 
 The arguments are exactly the tool schema, so anything
 [api_specification.md](references/api_specification.md) describes works here

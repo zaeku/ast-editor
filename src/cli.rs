@@ -6,7 +6,7 @@
 //! the schema says it is.
 //!
 //! The JSON form still works — a bare `{...}`, or `--json '{...}'` — because
-//! the schema describes shapes a flag cannot carry, such as `edit_lines`'s
+//! the schema describes shapes a flag cannot carry, such as `edit`'s
 //! array of edits.
 
 use anyhow::{Context, Result, bail};
@@ -17,7 +17,7 @@ use crate::tools::ToolDispatcher;
 /// The tool a command-line name means. On the command line the binary name
 /// already says these are about a syntax tree, so the `_lines` and `_ast`
 /// suffixes carry nothing: any unambiguous prefix names the tool, and `view`
-/// is `view_lines`.
+/// is `view`.
 pub fn resolve(tool: &str) -> Result<String> {
     let names: Vec<String> = ToolDispatcher::new().list_tools().iter()
         .filter_map(|candidate| candidate["name"].as_str().map(str::to_string))
@@ -48,7 +48,7 @@ fn schema_of(tool: &str) -> Result<Value> {
 }
 
 /// An absolute path, so that a session is keyed the same however the caller
-/// spelled it. The file need not exist yet: `create_lines` makes one.
+/// spelled it. The file need not exist yet: `create` makes one.
 pub fn absolute(path: &str) -> Result<String> {
     let path = std::path::Path::new(path);
     if path.is_absolute() {
@@ -195,9 +195,9 @@ mod tests {
 
     #[test]
     fn test_a_prefix_names_the_tool_it_can_only_mean() {
-        assert_eq!(resolve("view").unwrap(), "view_lines");
-        assert_eq!(resolve("inspect").unwrap(), "inspect_ast");
-        assert_eq!(resolve("create").unwrap(), "create_lines");
+        assert_eq!(resolve("view").unwrap(), "view");
+        assert_eq!(resolve("inspect").unwrap(), "inspect");
+        assert_eq!(resolve("create").unwrap(), "create");
         // The written-out name keeps working, and an unknown one still says so.
         assert_eq!(resolve("dump_ast").unwrap(), "dump_ast");
         assert!(resolve("nope").is_err());
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_flags_become_the_properties_the_schema_names() {
-        let parsed = arguments("view_lines", &args(&["/tmp/x.rs", "--start-line", "40", "--end-line", "80"])).unwrap();
+        let parsed = arguments("view", &args(&["/tmp/x.rs", "--start-line", "40", "--end-line", "80"])).unwrap();
         assert_eq!(parsed["filepath"], "/tmp/x.rs");
         assert_eq!(parsed["start_line"], 40);
         assert_eq!(parsed["end_line"], 80);
@@ -215,21 +215,21 @@ mod tests {
 
     #[test]
     fn test_a_boolean_flag_needs_no_value() {
-        let parsed = arguments("view_lines", &args(&["/tmp/x.rs", "--only-ids"])).unwrap();
+        let parsed = arguments("view", &args(&["/tmp/x.rs", "--only-ids"])).unwrap();
         assert_eq!(parsed["only_ids"], true);
     }
 
     #[test]
     fn test_a_boolean_takes_the_written_form_too() {
         // What a caller writes when transcribing `"include_code": false`.
-        let explicit = arguments("inspect_ast", &args(&["/tmp/x.rs", "--include-code", "false"])).unwrap();
+        let explicit = arguments("inspect", &args(&["/tmp/x.rs", "--include-code", "false"])).unwrap();
         assert_eq!(explicit["include_code"], false);
         assert!(explicit["filepath"].as_str().unwrap().ends_with("/tmp/x.rs"));
 
-        let negated = arguments("inspect_ast", &args(&["/tmp/x.rs", "--no-include-code"])).unwrap();
+        let negated = arguments("inspect", &args(&["/tmp/x.rs", "--no-include-code"])).unwrap();
         assert_eq!(negated["include_code"], false);
 
-        let bare = arguments("inspect_ast", &args(&["/tmp/x.rs", "--include-code"])).unwrap();
+        let bare = arguments("inspect", &args(&["/tmp/x.rs", "--include-code"])).unwrap();
         assert_eq!(bare["include_code"], true);
     }
 
@@ -237,7 +237,7 @@ mod tests {
     fn test_a_relative_path_becomes_absolute() {
         // A session is keyed by the path string, so the same file reached from
         // two directories must not become two sessions.
-        let parsed = arguments("view_lines", &args(&["some/where.rs"])).unwrap();
+        let parsed = arguments("view", &args(&["some/where.rs"])).unwrap();
         let path = parsed["filepath"].as_str().unwrap();
         assert!(std::path::Path::new(path).is_absolute(), "{}", path);
         assert!(path.ends_with("some/where.rs"), "{}", path);
@@ -245,33 +245,33 @@ mod tests {
 
     #[test]
     fn test_the_json_form_still_works_both_ways() {
-        let bare = arguments("view_lines", &args(&[r#"{"filepath":"/tmp/x.rs","only_ids":true}"#])).unwrap();
+        let bare = arguments("view", &args(&[r#"{"filepath":"/tmp/x.rs","only_ids":true}"#])).unwrap();
         assert_eq!(bare["only_ids"], true);
 
-        let flagged = arguments("view_lines", &args(&["--json", r#"{"filepath":"/tmp/x.rs"}"#, "--start-line", "3"])).unwrap();
+        let flagged = arguments("view", &args(&["--json", r#"{"filepath":"/tmp/x.rs"}"#, "--start-line", "3"])).unwrap();
         assert_eq!(flagged["filepath"], "/tmp/x.rs");
         assert_eq!(flagged["start_line"], 3);
     }
 
     #[test]
     fn test_an_unknown_option_lists_the_ones_that_exist() {
-        let err = arguments("view_lines", &args(&["/tmp/x.rs", "--nope", "1"])).unwrap_err().to_string();
+        let err = arguments("view", &args(&["/tmp/x.rs", "--nope", "1"])).unwrap_err().to_string();
         assert!(err.contains("--nope"), "{}", err);
         assert!(err.contains("--start-line"), "the real options are not listed: {}", err);
     }
 
     #[test]
     fn test_a_wrong_value_says_what_was_wanted() {
-        let err = arguments("view_lines", &args(&["/tmp/x.rs", "--start-line", "forty"])).unwrap_err().to_string();
+        let err = arguments("view", &args(&["/tmp/x.rs", "--start-line", "forty"])).unwrap_err().to_string();
         assert!(err.contains("whole number"), "{}", err);
 
-        let err = arguments("inspect_ast", &args(&["/tmp/x.rs", "--template", "nope"])).unwrap_err().to_string();
+        let err = arguments("inspect", &args(&["/tmp/x.rs", "--template", "nope"])).unwrap_err().to_string();
         assert!(err.contains("functions"), "the allowed values are not listed: {}", err);
     }
 
     #[test]
     fn test_a_shape_no_option_can_carry_says_where_to_put_it() {
-        let err = arguments("edit_lines", &args(&["/tmp/x.rs", "--edits", "[]"])).unwrap_err().to_string();
+        let err = arguments("edit", &args(&["/tmp/x.rs", "--edits", "[]"])).unwrap_err().to_string();
         assert!(err.contains("--json"), "{}", err);
         assert!(err.contains("ast-editor edit"), "{}", err);
     }

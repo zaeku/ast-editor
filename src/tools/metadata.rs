@@ -17,7 +17,7 @@ static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
 #[derive(Deserialize)]
 pub struct ToolConfig {
     pub only_ids_wrap_trigger_length: usize,
-    pub view_lines_response_tip: String,
+    pub view_response_tip: String,
     pub warning_cumulative_limit: String,
     pub warning_line_cap: String,
     pub error_no_query_match: String,
@@ -57,11 +57,11 @@ mod tests {
 
     #[test]
     fn test_metadata_retrieval() {
-        let view_desc = get_tool_description("view_lines");
+        let view_desc = get_tool_description("view");
         assert!(view_desc.contains("Retrieve file lines"));
         assert!(view_desc.contains("Line IDs"));
 
-        let edit_desc = get_tool_description("edit_lines");
+        let edit_desc = get_tool_description("edit");
         assert!(edit_desc.contains("Apply edits"));
 
         let dump_tip = get_tool_tip("dump_ast");
@@ -73,6 +73,6 @@ mod tests {
     fn test_config_retrieval() {
         let config = get_config();
         assert_eq!(config.only_ids_wrap_trigger_length, 1000);
-        assert!(config.view_lines_response_tip.contains("edit_lines"));
+        assert!(config.view_response_tip.contains("edit"));
     }
 }

@@ -32,8 +32,8 @@ impl ToolDispatcher {
     pub fn list_tools(&self) -> Vec<Value> {
         vec![
             serde_json::json!({
-                "name": "inspect_ast",
-                "description": metadata::get_tool_description("inspect_ast"),
+                "name": "inspect",
+                "description": metadata::get_tool_description("inspect"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -80,8 +80,8 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "view_lines",
-                "description": metadata::get_tool_description("view_lines"),
+                "name": "view",
+                "description": metadata::get_tool_description("view"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -114,8 +114,8 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "edit_lines",
-                "description": metadata::get_tool_description("edit_lines"),
+                "name": "edit",
+                "description": metadata::get_tool_description("edit"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -189,8 +189,8 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "create_lines",
-                "description": metadata::get_tool_description("create_lines"),
+                "name": "create",
+                "description": metadata::get_tool_description("create"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -218,7 +218,7 @@ impl ToolDispatcher {
     /// Run one tool and return the text it prints.
     pub async fn call_tool(&self, name: &str, arguments: Value, parser_manager: &Arc<ParserManager>) -> Result<String> {
         match name {
-            "inspect_ast" => {
+            "inspect" => {
                 let args = serde_json::from_value(arguments)?;
                 inspect::run_inspect(args, parser_manager).await
             }
@@ -226,7 +226,7 @@ impl ToolDispatcher {
                 let args = serde_json::from_value(arguments)?;
                 dump::run_dump(args, parser_manager).await
             }
-            "view_lines" => {
+            "view" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
                 let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
@@ -263,7 +263,7 @@ impl ToolDispatcher {
                 blocks.push(res.metadata_json);
                 Ok(blocks.join("\n"))
             }
-            "edit_lines" => {
+            "edit" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let strict_validation = arguments.get("strict_validation").and_then(|v| v.as_bool()).unwrap_or(false);
                 let dry_run = arguments.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -282,7 +282,7 @@ impl ToolDispatcher {
                 };
                 Ok(text)
             }
-            "create_lines" => {
+            "create" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
                 let content = arguments.get("content").and_then(|v| v.as_str()).context("Missing content")?;
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());

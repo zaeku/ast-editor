@@ -5,7 +5,7 @@ This document details the AST queries, templates, and compiler/linter integratio
 ---
 
 ## 1. Syntax Inspection Template
-The `"functions"`, `"classes"`, and `"imports"` templates are supported via `inspect_ast`.
+The `"functions"`, `"classes"`, and `"imports"` templates are supported via `inspect`.
 
 ## 2. Common S-Expression Queries
 *   **List All Functions/Methods**: `(function_definition name: (identifier) @function)`

@@ -50,11 +50,11 @@ skill document calls the command by name.
 ## 🚀 How to Call It
 
 One tool, one call. A tool is named by any unambiguous prefix, so the `_lines`
-and `_ast` suffixes can be left off (`view` is `view_lines`):
+and `_ast` suffixes can be left off (`view` is `view`):
 
 ```bash
-ast-editor view_lines src/main.rs --query "fn main"
-ast-editor inspect_ast src/main.rs --template functions
+ast-editor view src/main.rs --query "fn main"
+ast-editor inspect src/main.rs --template functions
 ast-editor edit src/main.rs --apply p1f
 ast-editor --version
 ast-editor --help
@@ -78,7 +78,7 @@ delete 7c#aabb
 EOF
 ```
 
-`view_lines` takes a `query` and `inspect_ast` matches carry `start_id` /
+`view` takes a `query` and `inspect` matches carry `start_id` /
 `end_id`, so finding a line by content or by structure already yields the IDs
 that edit it — no line numbers, and no `grep` pass first.
 
@@ -95,81 +95,81 @@ schema, there is no second interface to keep in step with it.
 
 ## 🛠️ Tool Suite
 
-### 1. `create_lines`
+### 1. `create`
 Creates a brand-new file with initial content, JIT-initializes its database editing session, and returns the line list with unique line IDs in a single atomic step.
 *   **Safety**: Fails with `FILE_ALREADY_EXISTS` if the target path is not empty.
 
 #### Input Schema
-{{create_lines_schema}}
+{{create_schema}}
 
 #### Usage Examples
 
 ##### Default Example (`return_ids = false`)
 ###### Input
-{{create_lines_input_default}}
+{{create_input_default}}
 
 ###### Output
-{{create_lines_output_default}}
+{{create_output_default}}
 
 ##### Example with Line IDs (`return_ids = true`)
 ###### Input
-{{create_lines_input_ids}}
+{{create_input_ids}}
 
 ###### Output
-{{create_lines_output_ids}}
+{{create_output_ids}}
 
 #### 🛡️ Catastrophic Truncation Prevention / Why not `write_lines`
 
 Lazy agents often try to rewrite whole files to apply simple changes. When a network hiccup or token limit is reached mid-stream, it causes catastrophic mid-file truncation and permanent data loss.
 
-To prevent this, `create_lines` intentionally blocks overwriting (`FILE_ALREADY_EXISTS`) to act as a safety guardrail forcing surgical line-level edits (`edit_lines`) for existing files.
+To prevent this, `create` intentionally blocks overwriting (`FILE_ALREADY_EXISTS`) to act as a safety guardrail forcing surgical line-level edits (`edit`) for existing files.
 
-We do not rename `create_lines` to `write_lines` because the word "write" suggests overwriting or rewriting existing content, whereas `create_lines` is explicitly designed as a one-time creation/initialization operation.
+We do not rename `create` to `write_lines` because the word "write" suggests overwriting or rewriting existing content, whereas `create` is explicitly designed as a one-time creation/initialization operation.
 
-### 2. `view_lines`
+### 2. `view`
 Retrieves a range of lines for any text file along with their persistent line IDs.
 *   **Capping**: Range length is capped at 800 lines max per call.
 *   **Capacity Limit**: Cumulative returned text is capped at 45,000 bytes.
 *   **Truncation**: Lines exceeding 2048 characters are truncated in the view and given a `#TRUNC` ID suffix.
 
 #### Input Schema
-{{view_lines_schema}}
+{{view_schema}}
 
 #### Usage Examples
 
 ##### Default Example (`only_ids = false`)
 ###### Input
-{{view_lines_input_default}}
+{{view_input_default}}
 
 ###### Output
-{{view_lines_output_default}}
+{{view_output_default}}
 
 ##### Example with IDs Only (`only_ids = true`)
 ###### Input
-{{view_lines_input_only_ids}}
+{{view_input_only_ids}}
 
 ###### Output
-{{view_lines_output_only_ids}}
+{{view_output_only_ids}}
 
-### 3. `edit_lines`
+### 3. `edit`
 Applies a transactional batch of operations to lines using their unique IDs.
 *   **Supported Operations**: `replace`, `replace_range`, `replace_substring`, `insert_before`, `insert_after`, `delete`, `move`.
 *   **Syntax Validation**: Performs AST parsing validation for supported programming, configuration, and shell script languages, and Comrak-based structural validation for Markdown (`.md`, `.markdown` extensions) to verify elements like unclosed code fences. Changes are automatically rolled back if syntax errors are introduced.
 *   **Safety**: Reject edits to `#TRUNC` lines with a `LINE_TOO_LONG_ERROR` recommending beautifiers (prettier, black, cargo fmt) to prevent data loss.
 
 #### Input Schema
-{{edit_lines_schema}}
+{{edit_schema}}
 
 #### Usage Examples
 
 ##### Compact Example
 ###### Input
-{{edit_lines_input_compact}}
+{{edit_input_compact}}
 
 ###### Output
-{{edit_lines_output_compact}}
+{{edit_output_compact}}
 
-### 4. `inspect_ast`
+### 4. `inspect`
 Queries a file's structure using Tree-sitter S-expression query patterns or templates (standard templates: `functions`, `classes`, `imports` across Python, Rust, Go, JS, TS, TSX, Java, C, and C++, with Bash supporting `functions`; specialized templates: Rust `traits` & `impls`, Go `structs` & `interfaces`, and C/C++ `macros`; Markdown templates: `headings`, `headers`, `codeblocks`, `code_blocks`, `links`, `tables`, `lists`), returning target line ranges and definitions.
 
 ### 5. `dump_ast`
@@ -203,12 +203,12 @@ Dumps the complete AST syntax tree of a file as S-expression text up to a certai
 ```mermaid
 graph TD
     A[Start Task] --> B{File exists?}
-    B -- Yes --> C[Call view_lines or inspect_ast]
-    B -- No --> D[Call create_lines]
+    B -- Yes --> C[Call view or inspect]
+    B -- No --> D[Call create]
     C --> E[Retrieve Stable Line IDs]
     D --> E
     E --> F[Plan modifications]
-    F --> G[Call edit_lines with target IDs]
+    F --> G[Call edit with target IDs]
     G --> H[Verification & Completion]
 ```
 

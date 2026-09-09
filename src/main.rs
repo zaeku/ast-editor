@@ -136,7 +136,7 @@ fn tool_names() -> Vec<String> {
         .collect()
 }
 
-/// The one edit command. Its options are `edit_lines`'s own parameters; when
+/// The one edit command. Its options are `edit`'s own parameters; when
 /// none of them says what to change, the edit script on stdin does.
 async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     use std::io::Read;
@@ -146,7 +146,7 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
         .map(|arg| if arg == "--strict" { "--strict-validation".to_string() } else { arg.clone() })
         .collect();
 
-    let mut arguments = ast_editor::cli::arguments("edit_lines", &args)?;
+    let mut arguments = ast_editor::cli::arguments("edit", &args)?;
     let given = arguments.as_object_mut().context("edit takes options, not a bare value")?;
     if !given.contains_key("filepath") {
         anyhow::bail!("edit needs a file: ast-editor edit <file> < script");
@@ -165,7 +165,7 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
         given.insert("edits".to_string(), serde_json::to_value(edits)?);
     }
 
-    call_with("edit_lines", arguments).await
+    call_with("edit", arguments).await
 }
 
 /// Run one tool and return what it printed, so the shell sees the tool's own

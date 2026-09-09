@@ -60,7 +60,7 @@ pub struct InspectMatch {
     pub start_column: usize,
     pub end_line: usize,
     pub end_column: usize,
-    /// The line ids `edit_lines` targets, so a match found by structure can be
+    /// The line ids `edit` targets, so a match found by structure can be
     /// edited without a second call to locate it by number.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_id: Option<String>,
@@ -83,7 +83,7 @@ pub struct OutlineEntry {
     pub end_id: Option<String>,
 }
 
-/// The id `edit_lines` would take for a line number, if a session exists.
+/// The id `edit` would take for a line number, if a session exists.
 fn line_id_at(
     repository: &impl SessionRepository,
     session_id: &Option<String>,
@@ -153,7 +153,7 @@ fn template_query(lang: &str, template: &str) -> Option<String> {
 }
 
 /// The file's top-level definitions, using whichever templates the language
-/// declares. Each entry carries the line ids `edit_lines` takes, so an outline
+/// declares. Each entry carries the line ids `edit` takes, so an outline
 /// is enough to act on.
 fn outline_of(
     language: &tree_sitter::Language,
@@ -360,9 +360,9 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     let mut jit_footnote = None;
     if !matches.is_empty() {
         let footnote = if args.include_code.unwrap_or(true) {
-            "Tip: You can apply edits to this file using the 'edit_lines' tool with the line IDs shown in the definition block."
+            "Tip: You can apply edits to this file using the 'edit' tool with the line IDs shown in the definition block."
         } else {
-            "Tip: You can view line IDs for this file using the 'view_lines' tool."
+            "Tip: You can view line IDs for this file using the 'view' tool."
         };
         jit_footnote = Some(footnote.to_string());
     }
@@ -525,9 +525,9 @@ pub fn run_markdown_inspect(
     let mut jit_footnote = None;
     if !matches.is_empty() {
         let footnote = if args.include_code.unwrap_or(true) {
-            "Tip: You can apply edits to this file using the 'edit_lines' tool with the line IDs shown in the definition block."
+            "Tip: You can apply edits to this file using the 'edit' tool with the line IDs shown in the definition block."
         } else {
-            "Tip: You can view line IDs for this file using the 'view_lines' tool."
+            "Tip: You can view line IDs for this file using the 'view' tool."
         };
         jit_footnote = Some(footnote.to_string());
     }

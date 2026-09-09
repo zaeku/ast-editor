@@ -17,4 +17,4 @@ This document details the AST queries, templates, and parser integration details
 *   **List All Tables and Keys**: `[(table (bare_key) @table) (pair (bare_key) @key)]`
 
 ## 5. Markdown
-*   **Predefined templates**: `"headings"`, `"headers"`, `"codeblocks"`, `"code_blocks"`, `"links"`, `"tables"`, or `"lists"` are supported via `inspect_ast`.
+*   **Predefined templates**: `"headings"`, `"headers"`, `"codeblocks"`, `"code_blocks"`, `"links"`, `"tables"`, or `"lists"` are supported via `inspect`.

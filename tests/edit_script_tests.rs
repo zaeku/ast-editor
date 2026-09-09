@@ -36,7 +36,7 @@ fn edit(test: &str, file: &std::path::Path, flags: &[&str], script: &str) -> std
 /// The ids of a file's lines, in order.
 fn ids(test: &str, file: &std::path::Path) -> Vec<String> {
     let out = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
-        .args(["view_lines", &format!(r#"{{"filepath":"{}","only_ids":true}}"#, file.display())])
+        .args(["view", &format!(r#"{{"filepath":"{}","only_ids":true}}"#, file.display())])
         .env("AST_EDITOR_CACHE_DIR", store_for(test))
         .output()
         .unwrap();
@@ -154,7 +154,7 @@ fn test_a_dry_run_yields_a_preview_the_json_form_applies() {
 
     // The two forms share one engine, so the id crosses between them.
     let apply = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
-        .args(["edit_lines", &format!(
+        .args(["edit", &format!(
             r#"{{"filepath":"{}","apply":"{}"}}"#,
             file.display(), preview["preview_id"].as_str().unwrap()
         )])

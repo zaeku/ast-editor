@@ -6,10 +6,10 @@ This document outlines key editing concepts, best practices, and transactional w
 
 ## 1. Shift-Invariant Targeting
 
-Unlike standard search-and-replace tools, the `edit_lines` tool targets specific lines using stable sequence/hash IDs (e.g., `"1#dfca"`).
+Unlike standard search-and-replace tools, the `edit` tool targets specific lines using stable sequence/hash IDs (e.g., `"1#dfca"`).
 *   **Immune to Line Shifting**: Inserting or deleting lines in one part of a file does not shift the Line IDs of other lines. Any line shifts will not invalidate your references or write changes to incorrect positions.
 *   **Safer than Content Matching**: If a file contains duplicate lines of code, targeting precise, unique Line IDs guarantees that the exact intended line is modified, eliminating duplicate matching errors.
-*   **Hash Reuse Optimization (Double-turn Avoidance)**: If the content of a line has not changed, its Line ID remains stable and invariant. You can reuse previous Line IDs directly in subsequent edits without calling `view_lines` again.
+*   **Hash Reuse Optimization (Double-turn Avoidance)**: If the content of a line has not changed, its Line ID remains stable and invariant. You can reuse previous Line IDs directly in subsequent edits without calling `view` again.
 
 ---
 
@@ -32,7 +32,7 @@ That happens silently for lines you are not editing. If a line **your edit targe
 ## 4. Editing Long Lines (`replace_substring`)
 
 Surgical updates on long lines (lines exceeding 2,048 characters) are supported via the `"replace_substring"` operation. This avoids token explosion while still permitting precise edits inside long lines (e.g., minified JS, long strings, large JSON arrays, or HTML files).
-*   **Workflow**: Use `view_lines` (which soft-wraps the lines for display), locate the target Line ID, and apply edits with the `"replace_substring"` operation, providing the search `pattern` and target `replacement`.
+*   **Workflow**: Use `view` (which soft-wraps the lines for display), locate the target Line ID, and apply edits with the `"replace_substring"` operation, providing the search `pattern` and target `replacement`.
 
 ---
 
@@ -64,8 +64,8 @@ The `"replace_range"` operation is designed to replace a continuous block of lin
 
 ## 6. Agent-Native Positioning Workflow (Token Savings)
 
-When creating large files via `create_lines`, passing `return_ids: false` saves significant token costs by bypassing line serialization and hashing.
+When creating large files via `create`, passing `return_ids: false` saves significant token costs by bypassing line serialization and hashing.
 Since the file has just been initialized:
 1. **Implicit Mapping**: The agent knows the 1-indexed line numbers correspond 1-to-1 to the indices of the input content split by `\n`.
 2. **Local ID Construction**: For a newly created file, the agent can locally construct the Line ID for line number $N$ using the hexadecimal format of $N$ and the first 4 characters of the SHA-1 hex hash of the line content (e.g., `<hex_N>#<sha1_prefix>`).
-3. **Querying as Needed**: If the agent wants to edit a specific range later, it can call `view_lines` with `only_ids: true` for just that narrow range. This retrieves only the necessary Line IDs and line numbers, keeping the payload content-free.
+3. **Querying as Needed**: If the agent wants to edit a specific range later, it can call `view` with `only_ids: true` for just that narrow range. This retrieves only the necessary Line IDs and line numbers, keeping the payload content-free.

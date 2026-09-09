@@ -264,7 +264,7 @@ fn resync_if_stale(
 /// The batch is applied to the session, the resulting content is validated the
 /// same way a real commit is, and the session is then restored to its previous
 /// state. No line IDs are minted: the caller obtains those from a real
-/// `edit_lines` call.
+/// `edit` call.
 pub async fn edit_lines_dry_run(
     repository: &impl SessionRepository,
     filepath: &str,

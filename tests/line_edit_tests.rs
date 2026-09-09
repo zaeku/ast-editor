@@ -37,7 +37,7 @@ impl Drop for TestFile {
     }
 }
 
-fn view_lines_old_compat(
+fn view_range(
     repository: &impl session_db::SessionRepository,
     filepath: &str,
     start_line: usize,
@@ -155,14 +155,14 @@ async fn test_view_lines_lazy_hashing() {
     let repository = SqliteSessionRepository;
     
     // Retrieve lines (this triggers lazy hashing for range)
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines = val["lines"].as_array().unwrap();
     assert_eq!(lines.len(), 3);
     let line0 = lines[0].as_array().unwrap();
     assert!(line0[0].as_str().unwrap().starts_with("1#"));
     assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
-    assert!(val["tip"].as_str().unwrap().contains("edit_lines"));
+    assert!(val["tip"].as_str().unwrap().contains("edit"));
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
     assert_eq!(val["showing_start"].as_u64().unwrap(), 1);
     assert_eq!(val["showing_end"].as_u64().unwrap(), 3);
@@ -178,7 +178,7 @@ async fn test_edit_operations_and_ast_validation() {
     let pm = create_test_parser_manager();
 
     // Fetch the correct target ID for line 2
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -202,7 +202,7 @@ async fn test_edit_operations_and_ast_validation() {
     fs::write(file.path_str(), "fn main() {\n    let a = 1;\n}\n").unwrap();
     // Re-initialize session to clear the dirty session
     let _init = session_db::init_edit_session(file.path_str(), false).unwrap();
-    let view_res_strict = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
+    let view_res_strict = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val_strict: serde_json::Value = serde_json::from_str(&view_res_strict).unwrap();
     let target_id_strict = val_strict["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -230,7 +230,7 @@ async fn test_edit_operations_and_ast_validation() {
     // The file was rewritten from outside between these edits, so the line was
     // changed and changed back without the tool seeing it. Its id is not the
     // one captured at the top; re-read it.
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -258,7 +258,7 @@ async fn test_transactional_deletes_and_inserts() {
     let pm = create_test_parser_manager();
 
     // Get Line IDs
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 4, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 4, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     
@@ -318,7 +318,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     let pm = create_test_parser_manager();
 
     // Get line ID
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 2, 2, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -377,7 +377,7 @@ async fn test_integration_advanced_operations() {
     let pm = create_test_parser_manager();
 
     // 1. Get IDs for lines
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 4, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 4, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let _id_main = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -402,7 +402,7 @@ async fn test_integration_advanced_operations() {
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
 
     // Get new IDs
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     let lines_arr = val["lines"].as_array().unwrap();
     let id_main_new = lines_arr[0].as_array().unwrap()[0].as_str().unwrap().to_string();
@@ -482,7 +482,7 @@ async fn test_integration_create_lines_flow() {
     }
     let filepath_str = temp_file_path.to_str().unwrap().to_string();
 
-    // 1. Create the new file via calling `create_lines` tool logic
+    // 1. Create the new file via calling `create` tool logic
     let initial_content = "fn main() {\n    let x = 42;\n}\n";
     let create_res = view::create_lines(&repository, &filepath_str, initial_content, Some(true)).unwrap();
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
@@ -502,13 +502,13 @@ async fn test_integration_create_lines_flow() {
     assert!(id1.contains('#'));
     assert!(id2.contains('#'));
 
-    // 3. Try calling `create_lines` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
+    // 3. Try calling `create` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
     let dup_res = view::create_lines(&repository, &filepath_str, "different content", None);
     assert!(dup_res.is_err());
     let dup_err = dup_res.unwrap_err().to_string();
     assert!(dup_err.contains("FILE_ALREADY_EXISTS"));
 
-    // 4. Modify the newly created file using `edit_lines` and verify the modified contents on disk
+    // 4. Modify the newly created file using `edit` and verify the modified contents on disk
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
         target_id: Some(id1.to_string()),
@@ -542,7 +542,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
     let content = format!("fn first() {{\n{}\n}}\n", long_line);
     let file = TestFile::new("truncation_protection.rs", &content);
 
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
@@ -588,7 +588,7 @@ async fn test_integration_view_lines_capacity_cap() {
     let content = lines.join("\n");
     let file = TestFile::new("capacity_cap.txt", &content);
 
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 50, None).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 50, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
     let returned_lines = val["lines"].as_array().unwrap();
@@ -630,7 +630,7 @@ async fn test_integration_view_lines_only_ids() {
     let repository = SqliteSessionRepository;
     let file = TestFile::new("only_ids.rs", "fn main() {\n    let a = 1;\n}\n");
 
-    let view_res = view_lines_old_compat(&repository, file.path_str(), 1, 3, Some(true)).unwrap();
+    let view_res = view_range(&repository, file.path_str(), 1, 3, Some(true)).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
     
     assert_eq!(val["columns"], serde_json::json!(["id", "n"]));
@@ -650,7 +650,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     let repository = SqliteSessionRepository;
     let pm = create_test_parser_manager();
 
-    let before_view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let before_view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&before_view).unwrap();
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
     let before_mtime = fs::metadata(file.path_str()).unwrap().modified().unwrap();
@@ -675,7 +675,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     // 3. Nothing on disk or in the session changed.
     assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
     assert_eq!(fs::metadata(file.path_str()).unwrap().modified().unwrap(), before_mtime);
-    assert_eq!(view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap(), before_view);
+    assert_eq!(view_range(&repository, file.path_str(), 1, 3, None).unwrap(), before_view);
 
     // 2. A batch that breaks syntax reports the failure, still without writing.
     let broken_edits = vec![edit::LineEdit {
@@ -689,7 +689,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     assert_eq!(preview["syntax_valid"], false);
     assert!(!preview["diagnostics"].as_array().unwrap().is_empty());
     assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
-    assert_eq!(view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap(), before_view);
+    assert_eq!(view_range(&repository, file.path_str(), 1, 3, None).unwrap(), before_view);
 
     // 4. Applying the previewed batch produces what the preview showed.
     let res = edit::edit_lines(&repository, file.path_str(), valid_edits, &pm).await.unwrap();
@@ -705,7 +705,7 @@ async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
     let repository = SqliteSessionRepository;
     let pm = create_test_parser_manager();
 
-    let view = view_lines_old_compat(&repository, file.path_str(), 3, 3, None).unwrap();
+    let view = view_range(&repository, file.path_str(), 3, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -751,7 +751,7 @@ async fn test_preview_id_applies_the_validated_batch() {
     let repository = SqliteSessionRepository;
     let pm = create_test_parser_manager();
 
-    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -787,7 +787,7 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
     let repository = SqliteSessionRepository;
     let pm = create_test_parser_manager();
 
-    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -820,7 +820,7 @@ async fn test_failed_dry_run_mints_no_preview_id() {
     let repository = SqliteSessionRepository;
     let pm = create_test_parser_manager();
 
-    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
 
@@ -846,7 +846,7 @@ async fn test_store_holds_no_file_text() {
     let pm = create_test_parser_manager();
 
     // Touch every path that populates the index.
-    let view = view_lines_old_compat(&repository, file.path_str(), 1, 3, None).unwrap();
+    let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
     edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
@@ -923,9 +923,9 @@ async fn test_duplicate_lines_reconcile_without_misalignment() {
     assert_eq!(&after[..5], &before[..]);
 }
 
-/// The id an agent would hold for a given line, straight from view_lines.
+/// The id an agent would hold for a given line, straight from view.
 fn live_id(repository: &SqliteSessionRepository, path: &str, line: usize) -> String {
-    let view = view_lines_old_compat(repository, path, line, line, None).unwrap();
+    let view = view_range(repository, path, line, line, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string()
 }

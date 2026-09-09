@@ -1,21 +1,21 @@
 {
   "dump_ast": {
     "description": "Dumps the complete AST syntax tree of a file as S-expression text.",
-    "tip": "Tip: For larger files, prefer using 'inspect_ast' with specific templates/queries to reduce token usage and focus on target blocks."
+    "tip": "Tip: For larger files, prefer using 'inspect' with specific templates/queries to reduce token usage and focus on target blocks."
   },
-  "inspect_ast": {
+  "inspect": {
     "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",
     "tip": "Tip: Use templates like 'functions' or 'classes' for quick navigation."
   },
-  "view_lines": {
+  "view": {
     "description": "Retrieve file lines along with persistent Line IDs. Set only_ids to true to retrieve only IDs and line numbers, excluding text contents.",
     "tip": "Tip: Specify start_line and end_line range to view only relevant chunks."
   },
-  "edit_lines": {
+  "edit": {
     "description": "Apply edits transactionally to a file. Returns only status and the list of modified Line IDs in a compact flat array.",
     "tip": "Tip: Always verify Line IDs before applying edits to prevent conflict."
   },
-  "create_lines": {
+  "create": {
     "description": "Create a new file and initialize its editing session. Returns only metadata and the generated Line IDs in a compact flat array (no file content).",
     "tip": ""
   }

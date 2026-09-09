@@ -76,7 +76,7 @@ async fn generate_readme() {
     let pm = create_test_parser_manager(&temp_dir);
 
     // 2. Act:
-    // Run create_lines return_ids=false
+    // Run create return_ids=false
     let file_default = temp_dir.join("create_default.rs");
     let content = "fn main() {\n    let x = 42;\n}\n";
     let out_create_default = view::create_lines(
@@ -86,7 +86,7 @@ async fn generate_readme() {
         Some(false),
     ).unwrap();
 
-    // Run create_lines return_ids=true
+    // Run create return_ids=true
     let file_ids = temp_dir.join("create_ids.txt");
     let out_create_ids = view::create_lines(
         &repo,
@@ -95,7 +95,7 @@ async fn generate_readme() {
         Some(true),
     ).unwrap();
 
-    // Run view_lines only_ids=None
+    // Run view only_ids=None
     let out_view_default = view::view_lines(
         &repo,
         file_ids.to_str().unwrap(),
@@ -106,7 +106,7 @@ async fn generate_readme() {
         None,
     ).unwrap();
 
-    // Run view_lines only_ids=true
+    // Run view only_ids=true
     let out_view_only_ids = view::view_lines(
         &repo,
         file_ids.to_str().unwrap(),
@@ -124,7 +124,7 @@ async fn generate_readme() {
     let id_to_insert_after = ids[1].as_str().unwrap().to_string();
     let id_to_delete = ids[2].as_str().unwrap().to_string();
 
-    // Run edit_lines multi-operation batch (update, insert_after, delete)
+    // Run edit multi-operation batch (update, insert_after, delete)
     let edits = vec![
         edit::LineEdit {
             op: EditOp::InsertAfter,
@@ -169,37 +169,37 @@ async fn generate_readme() {
     ).await.unwrap();
 
     // Construct pretty-printed JSON inputs
-    let create_lines_input_default_val = serde_json::json!({
+    let create_input_default_val = serde_json::json!({
         "filepath": "/path/to/project/create_default.rs",
         "content": content,
         "return_ids": false
     });
-    let fmt_create_lines_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_lines_input_default_val).unwrap());
+    let fmt_create_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_input_default_val).unwrap());
 
-    let create_lines_input_ids_val = serde_json::json!({
+    let create_input_ids_val = serde_json::json!({
         "filepath": "/path/to/project/create_ids.rs",
         "content": content,
         "return_ids": true
     });
-    let fmt_create_lines_input_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_lines_input_ids_val).unwrap());
+    let fmt_create_input_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_input_ids_val).unwrap());
 
-    let view_lines_input_default_val = serde_json::json!({
+    let view_input_default_val = serde_json::json!({
         "filepath": "/path/to/project/create_ids.rs",
         "start_line": 1,
         "end_line": 3,
         "only_ids": false
     });
-    let fmt_view_lines_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_lines_input_default_val).unwrap());
+    let fmt_view_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_input_default_val).unwrap());
 
-    let view_lines_input_only_ids_val = serde_json::json!({
+    let view_input_only_ids_val = serde_json::json!({
         "filepath": "/path/to/project/create_ids.rs",
         "start_line": 1,
         "end_line": 3,
         "only_ids": true
     });
-    let fmt_view_lines_input_only_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_lines_input_only_ids_val).unwrap());
+    let fmt_view_input_only_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_input_only_ids_val).unwrap());
 
-    let edit_lines_input_compact_val = serde_json::json!({
+    let edit_input_compact_val = serde_json::json!({
         "filepath": DOC_FILEPATH,
         "edits": [
             {
@@ -218,35 +218,35 @@ async fn generate_readme() {
             }
         ]
     });
-    let fmt_edit_lines_input_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_lines_input_compact_val).unwrap());
+    let fmt_edit_input_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_input_compact_val).unwrap());
 
-    let mut edit_lines_input_dry_run_val = edit_lines_input_compact_val.clone();
-    edit_lines_input_dry_run_val["dry_run"] = serde_json::Value::Bool(true);
-    let fmt_edit_lines_input_dry_run = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_lines_input_dry_run_val).unwrap());
+    let mut edit_input_dry_run_val = edit_input_compact_val.clone();
+    edit_input_dry_run_val["dry_run"] = serde_json::Value::Bool(true);
+    let fmt_edit_input_dry_run = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_input_dry_run_val).unwrap());
 
     // Extract schemas
     let dispatcher = ToolDispatcher::new();
     let tools = dispatcher.list_tools();
 
-    let create_lines_schema = tools.iter()
-        .find(|t| t["name"] == "create_lines")
+    let create_schema = tools.iter()
+        .find(|t| t["name"] == "create")
         .and_then(|t| t.get("inputSchema"))
-        .expect("create_lines schema not found");
+        .expect("create schema not found");
 
-    let view_lines_schema = tools.iter()
-        .find(|t| t["name"] == "view_lines")
+    let view_schema = tools.iter()
+        .find(|t| t["name"] == "view")
         .and_then(|t| t.get("inputSchema"))
-        .expect("view_lines schema not found");
+        .expect("view schema not found");
 
-    let edit_lines_schema = tools.iter()
-        .find(|t| t["name"] == "edit_lines")
+    let edit_schema = tools.iter()
+        .find(|t| t["name"] == "edit")
         .and_then(|t| t.get("inputSchema"))
-        .expect("edit_lines schema not found");
+        .expect("edit schema not found");
 
     // Format all to pretty-printed json inside markdown code blocks
-    let fmt_create_lines_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(create_lines_schema).unwrap());
-    let fmt_view_lines_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(view_lines_schema).unwrap());
-    let fmt_edit_lines_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(edit_lines_schema).unwrap());
+    let fmt_create_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(create_schema).unwrap());
+    let fmt_view_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(view_schema).unwrap());
+    let fmt_edit_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(edit_schema).unwrap());
 
     // Format tool outputs to ensure they look perfect
     let fmt_create_default = format!("```json\n{}\n```", out_create_default);
@@ -265,21 +265,21 @@ async fn generate_readme() {
 
     // 3. Render every template from one placeholder table
     let placeholders: Vec<(&str, &str)> = vec![
-        ("{{create_lines_schema}}", &fmt_create_lines_schema),
-        ("{{create_lines_input_default}}", &fmt_create_lines_input_default),
-        ("{{create_lines_output_default}}", &fmt_create_default),
-        ("{{create_lines_input_ids}}", &fmt_create_lines_input_ids),
-        ("{{create_lines_output_ids}}", &fmt_create_ids),
-        ("{{view_lines_schema}}", &fmt_view_lines_schema),
-        ("{{view_lines_input_default}}", &fmt_view_lines_input_default),
-        ("{{view_lines_output_default}}", &fmt_view_default),
-        ("{{view_lines_input_only_ids}}", &fmt_view_lines_input_only_ids),
-        ("{{view_lines_output_only_ids}}", &fmt_view_only_ids),
-        ("{{edit_lines_schema}}", &fmt_edit_lines_schema),
-        ("{{edit_lines_input_compact}}", &fmt_edit_lines_input_compact),
-        ("{{edit_lines_output_compact}}", &fmt_edit_compact),
-        ("{{edit_lines_input_dry_run}}", &fmt_edit_lines_input_dry_run),
-        ("{{edit_lines_output_dry_run}}", &fmt_edit_dry_run),
+        ("{{create_schema}}", &fmt_create_schema),
+        ("{{create_input_default}}", &fmt_create_input_default),
+        ("{{create_output_default}}", &fmt_create_default),
+        ("{{create_input_ids}}", &fmt_create_input_ids),
+        ("{{create_output_ids}}", &fmt_create_ids),
+        ("{{view_schema}}", &fmt_view_schema),
+        ("{{view_input_default}}", &fmt_view_input_default),
+        ("{{view_output_default}}", &fmt_view_default),
+        ("{{view_input_only_ids}}", &fmt_view_input_only_ids),
+        ("{{view_output_only_ids}}", &fmt_view_only_ids),
+        ("{{edit_schema}}", &fmt_edit_schema),
+        ("{{edit_input_compact}}", &fmt_edit_input_compact),
+        ("{{edit_output_compact}}", &fmt_edit_compact),
+        ("{{edit_input_dry_run}}", &fmt_edit_input_dry_run),
+        ("{{edit_output_dry_run}}", &fmt_edit_dry_run),
     ];
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

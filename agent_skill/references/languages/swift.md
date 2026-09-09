@@ -5,7 +5,7 @@ This document details the AST queries, templates, and compiler/linter integratio
 ---
 
 ## 1. Syntax Inspection Template
-Supports standard Traversal and custom queries under `inspect_ast`.
+Supports standard Traversal and custom queries under `inspect`.
 
 ## 2. Common S-Expression Queries
 *   **List All Classes/Structs/Enums/Protocols**: `[(class_declaration name: (type_identifier) @class) (protocol_declaration name: (type_identifier) @protocol)]`

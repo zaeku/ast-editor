@@ -150,7 +150,7 @@ mod tests {
 
     /// The script format's directives are not in any JSON schema, so nothing
     /// else would notice one going undocumented. That failure has happened
-    /// twice already — `dry_run` and view_lines' `query` both existed for a
+    /// twice already — `dry_run` and view's `query` both existed for a
     /// while without appearing in any document an agent reads — and the fix
     /// there was to render the reference from the schema. This surface has no
     /// schema to render from, so it gets a test instead.

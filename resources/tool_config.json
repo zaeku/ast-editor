@@ -1,6 +1,6 @@
 {
   "only_ids_wrap_trigger_length": 1000,
-  "view_lines_response_tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above.",
+  "view_response_tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",
   "warning_cumulative_limit": "Response truncated: cumulative response size limit (45,000 bytes) was reached.",
   "warning_line_cap": "Output truncated to 800 lines max.",
   "error_no_query_match": "No lines matched query: '{}'",

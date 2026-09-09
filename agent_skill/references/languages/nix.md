@@ -5,7 +5,7 @@ This document details the AST queries, templates, and compiler/linter integratio
 ---
 
 ## 1. Syntax Inspection Template
-Nix supports general-purpose syntax tree traversal via custom S-expression queries under `inspect_ast`.
+Nix supports general-purpose syntax tree traversal via custom S-expression queries under `inspect`.
 
 ## 2. Common S-Expression Queries
 *   **List Attribute Names**: `(binding attrpath: (attrpath (identifier) @attr))`

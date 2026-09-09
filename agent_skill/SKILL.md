@@ -16,14 +16,14 @@ Run the `ast-editor` command with a tool name, a path, and the tool's own
 parameters as options. Paths are relative to the working directory:
 
 ```bash
-ast-editor view_lines src/config.rs --start-line 40 --end-line 80
-ast-editor inspect_ast src/config.rs --template functions
+ast-editor view src/config.rs --start-line 40 --end-line 80
+ast-editor inspect src/config.rs --template functions
 ast-editor --help
 ```
 
 A tool is named by any unambiguous prefix, so on the command line the `_lines`
-and `_ast` suffixes can be left off: `view` is `view_lines`, `inspect` is
-`inspect_ast`.
+and `_ast` suffixes can be left off: `view` is `view`, `inspect` is
+`inspect`.
 
 The options are the schema: every parameter `ast-editor skill api` lists can be
 passed as `--kebab-case`, and a switch takes `--flag`, `--flag false` or
@@ -65,7 +65,7 @@ The arguments are exactly the tool schema, so anything `ast-editor skill api`
 describes works here unchanged. Output goes to stdout with no wrapper and pipes normally; failures
 go to stderr with a non-zero exit status.
 
-Tools: `view_lines`, `edit_lines`, `create_lines`, `inspect_ast`, `dump_ast`.
+Tools: `view`, `edit`, `create`, `inspect`, `dump_ast`.
 
 This document and its references are carried inside the binary, so they are
 readable wherever it is: `ast-editor skill` prints this page, `ast-editor skill
@@ -79,19 +79,19 @@ is the first thing to check when a file will not parse.
 ## 🔎 Finding What to Edit
 
 You never need a line number, and never need `grep` first. Two ways in, both
-returning the line IDs `edit_lines` takes:
+returning the line IDs `edit` takes:
 
-**By content** — `view_lines` takes a `query`, with optional `context_lines`:
+**By content** — `view` takes a `query`, with optional `context_lines`:
 
 ```bash
-ast-editor view_lines src/config.rs --query get_wasm_dir --context-lines 2
+ast-editor view src/config.rs --query get_wasm_dir --context-lines 2
 ```
 
-**By structure** — `inspect_ast` matches carry `start_id` and `end_id`, so a
+**By structure** — `inspect` matches carry `start_id` and `end_id`, so a
 whole definition can be replaced in the next call:
 
 ```bash
-ast-editor inspect_ast src/config.rs --template functions
+ast-editor inspect src/config.rs --template functions
 # → matches[].start_id / end_id
 ast-editor edit src/config.rs <<'EOF'
 replace_range <start_id> <end_id> ```
@@ -100,7 +100,7 @@ replace_range <start_id> <end_id> ```
 EOF
 ```
 
-Called with neither `query` nor `template`, `inspect_ast` searches for nothing
+Called with neither `query` nor `template`, `inspect` searches for nothing
 and says so: `"query": null`, an empty `matches`, and an `outline` of the
 file's top-level definitions with their IDs. An empty `matches` alongside a
 null `query` means nothing was asked for — not that the file is empty.

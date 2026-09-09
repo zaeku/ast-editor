@@ -203,7 +203,7 @@ pub fn view_lines(
     }
     parts.push(format!("  \"showing_end\": {}", actual_end));
     parts.push(format!("  \"showing_start\": {}", actual_start.unwrap_or(1)));
-    parts.push(format!("  \"tip\": {}", serde_json::to_string(&config.view_lines_response_tip)?));
+    parts.push(format!("  \"tip\": {}", serde_json::to_string(&config.view_response_tip)?));
     parts.push(format!("  \"total_bytes\": {}", total_bytes));
     parts.push(format!("  \"total_lines\": {}", total_lines));
 

@@ -4,7 +4,7 @@ This document defines the interface, parameters, and return formats for the `ast
 
 ---
 
-## 1. `create_lines`
+## 1. `create`
 Creates a brand-new file with the initial content and JIT-initializes its line editing session.
 
 ### Parameters (JSON Schema)
@@ -80,7 +80,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 
 ---
 
-## 2. `view_lines`
+## 2. `view`
 Retrieves a range of lines for any text file along with their persistent unique Line IDs.
 
 ### Parameters (JSON Schema)
@@ -145,7 +145,7 @@ Retrieves a range of lines for any text file along with their persistent unique 
   "ids": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
   "showing_end": 3,
   "showing_start": 1,
-  "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above.",
+  "tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",
   "total_bytes": 30,
   "total_lines": 3
 }
@@ -169,7 +169,7 @@ Retrieves a range of lines for any text file along with their persistent unique 
   "ids": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
   "showing_end": 3,
   "showing_start": 1,
-  "tip": "Edit these lines by calling 'edit_lines' with the line IDs (e.g. 1a#f8c9) shown above.",
+  "tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",
   "total_bytes": 30,
   "total_lines": 3
 }
@@ -177,7 +177,7 @@ Retrieves a range of lines for any text file along with their persistent unique 
 
 ---
 
-## 3. `edit_lines`
+## 3. `edit`
 Applies a transactional batch of operations to lines using their unique IDs.
 
 ### Parameters (JSON Schema)

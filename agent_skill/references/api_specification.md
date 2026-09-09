@@ -197,7 +197,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
       "items": {
         "properties": {
           "content": {
-            "description": "The new content to insert/update/replace. Omitted/ignored for delete, move.",
+            "description": "The new content to insert or replace with. Omitted/ignored for delete, move.",
             "type": "string"
           },
           "dest_target_id": {
@@ -225,7 +225,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
           "op": {
             "description": "The edit operation to perform.",
             "enum": [
-              "update",
+              "replace",
               "insert_after",
               "insert_before",
               "delete",
@@ -244,7 +244,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
             "type": "string"
           },
           "target_id": {
-            "description": "Optional target line ID (e.g. 1#a5c7). Required for update, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends).",
+            "description": "Optional target line ID (e.g. 1#a5c7). Required for replace, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends).",
             "type": "string"
           }
         },
@@ -286,7 +286,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
     },
     {
       "content": "    let x = 100;",
-      "op": "update",
+      "op": "replace",
       "target_id": "2#bcb4"
     },
     {
@@ -337,7 +337,7 @@ the diff and syntax result no longer describe the outcome, so preview again.
     },
     {
       "content": "    let x = 100;",
-      "op": "update",
+      "op": "replace",
       "target_id": "2#bcb4"
     },
     {

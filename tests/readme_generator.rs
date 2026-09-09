@@ -133,7 +133,7 @@ async fn generate_readme() {
             ..Default::default()
         },
         edit::LineEdit {
-            op: EditOp::Update,
+            op: EditOp::Replace,
             target_id: Some(id_to_update.clone()),
             content: Some("    let x = 100;".to_string()),
             ..Default::default()
@@ -208,7 +208,7 @@ async fn generate_readme() {
                 "content": "    let y = 200;"
             },
             {
-                "op": "update",
+                "op": "replace",
                 "target_id": id_to_update,
                 "content": "    let x = 100;"
             },

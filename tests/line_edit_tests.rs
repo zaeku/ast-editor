@@ -184,7 +184,7 @@ async fn test_edit_operations_and_ast_validation() {
 
     // Perform invalid edit (Syntax error)
     let invalid_edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id.clone()),
         content: Some("let a = ;".to_string()), // missing value
         ..Default::default()
@@ -207,7 +207,7 @@ async fn test_edit_operations_and_ast_validation() {
     let target_id_strict = val_strict["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     let invalid_edits_strict = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id_strict),
         content: Some("let a = ;".to_string()),
         ..Default::default()
@@ -235,7 +235,7 @@ async fn test_edit_operations_and_ast_validation() {
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     let valid_edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
@@ -328,7 +328,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
 
     // Try applying line edits, should succeed due to Smart Resync
     let edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = 3;".to_string()),
         ..Default::default()
@@ -510,7 +510,7 @@ async fn test_integration_create_lines_flow() {
 
     // 4. Modify the newly created file using `edit_lines` and verify the modified contents on disk
     let edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(id1.to_string()),
         content: Some("    let x = 100;".to_string()),
         ..Default::default()
@@ -656,7 +656,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     let before_mtime = fs::metadata(file.path_str()).unwrap().modified().unwrap();
 
     let valid_edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id.clone()),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
@@ -679,7 +679,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
 
     // 2. A batch that breaks syntax reports the failure, still without writing.
     let broken_edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = ;".to_string()),
         ..Default::default()
@@ -710,7 +710,7 @@ async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
     let target_id = val["lines"][0].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     let edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("### Skipped a level".to_string()),
         ..Default::default()
@@ -756,7 +756,7 @@ async fn test_preview_id_applies_the_validated_batch() {
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     let edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
@@ -792,7 +792,7 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     let edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
@@ -825,7 +825,7 @@ async fn test_failed_dry_run_mints_no_preview_id() {
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
 
     let edits = vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = ;".to_string()),
         ..Default::default()
@@ -850,7 +850,7 @@ async fn test_store_holds_no_file_text() {
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     let target_id = val["lines"][1].as_array().unwrap()[0].as_str().unwrap().to_string();
     edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some(format!("    {}", secret)),
         ..Default::default()
@@ -941,7 +941,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
     let target_id = live_id(&repository, file.path_str(), 2);
     fs::write(file.path_str(), "fn main() {\n    let a = 1;\n    let b = 99;\n}\n").unwrap();
     let res = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = 7;".to_string()),
         ..Default::default()
@@ -954,7 +954,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
     let target_id = live_id(&repository, file.path_str(), 2);
     fs::write(file.path_str(), "fn main() {\n    let a = 123;\n    let b = 99;\n}\n").unwrap();
     let err = edit::edit_lines(&repository, file.path_str(), vec![edit::LineEdit {
-        op: EditOp::Update,
+        op: EditOp::Replace,
         target_id: Some(target_id),
         content: Some("    let a = 8;".to_string()),
         ..Default::default()

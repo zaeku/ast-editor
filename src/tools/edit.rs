@@ -623,7 +623,7 @@ mod tests {
         // 1. Test update
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id.clone()),
                 content: Some("    let a = 42;".to_string()),
                 ..Default::default()
@@ -731,7 +731,7 @@ mod tests {
 
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some("1#9999".to_string()), // Invalid hash prefix
                 content: Some("fn main() { // updated }".to_string()),
                 ..Default::default()
@@ -767,7 +767,7 @@ mod tests {
         // Apply edit that introduces syntax error (e.g. mismatched braces / parsing error)
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id),
                 content: Some("    let a = {;".to_string()), // Syntax error
                 ..Default::default()
@@ -791,7 +791,7 @@ mod tests {
         let target_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
         let edits_strict = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id_strict),
                 content: Some("    let a = {;".to_string()),
                 ..Default::default()
@@ -971,7 +971,7 @@ mod tests {
         // Call update with target_id = None
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: None,
                 content: Some("pub fn bar() {}".to_string()),
                 ..Default::default()
@@ -981,7 +981,7 @@ mod tests {
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("Missing target_id for update op"));
+        assert!(err_msg.contains("Missing target_id for replace op"));
 
         Ok(())
     }
@@ -1213,7 +1213,7 @@ mod tests {
         // Make an edit that introduces a lint warning (unclosed fence, header hierarchy gap, and malformed link)
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id),
                 content: Some("### Heading Gap\n\n[text(url)\n\n```rust\nlet x = 1;\n".to_string()),
                 ..Default::default()
@@ -1260,7 +1260,7 @@ mod tests {
         // Make an edit that has invalid HTML syntax
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id),
                 content: Some("<p>Hello <span class=</p>".to_string()),
                 ..Default::default()
@@ -1349,7 +1349,7 @@ fn main() {
 
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(start_line_id),
                 content: Some("fn main() { println!(\"x\"); }".to_string()),
                 ..Default::default()
@@ -1419,7 +1419,7 @@ fn main() {
 
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(line_1_id.clone()),
                 content: Some("new line 1".to_string()),
                 ..Default::default()
@@ -1468,7 +1468,7 @@ fn main() {
         // Apply edit that introduces syntax error (e.g. replacing "fi" with "else")
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id),
                 content: Some("else".to_string()), // Syntax error since mismatched if/else without fi
                 ..Default::default()
@@ -1492,7 +1492,7 @@ fn main() {
         let target_id_strict = find_line_id(&lines_view_strict, "fi");
         let edits_strict = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id_strict),
                 content: Some("else".to_string()),
                 ..Default::default()
@@ -1556,7 +1556,7 @@ fn main() {
 
         let edits = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id),
                 content: Some("    let a = 42;".to_string()),
                 ..Default::default()
@@ -1577,7 +1577,7 @@ fn main() {
         let target_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
         let edits_strict = vec![
             LineEdit {
-                op: EditOp::Update,
+                op: EditOp::Replace,
                 target_id: Some(target_id_strict),
                 content: Some("    let a = 99;".to_string()),
                 ..Default::default()

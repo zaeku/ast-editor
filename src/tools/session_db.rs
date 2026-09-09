@@ -135,7 +135,7 @@ pub enum EditOp {
     InsertBefore,
     Append,
     Prepend,
-    Update,
+    Replace,
     Delete,
     ReplaceRange,
     ReplaceSubstring,
@@ -321,9 +321,9 @@ impl LineBuffer {
                     self.insert_at(at, contents, &mut modified);
                 }
 
-                EditOp::Update => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for update op")?;
-                    let content = edit.content.as_ref().context("Missing content for update op")?;
+                EditOp::Replace => {
+                    let target_id = edit.target_id.as_ref().context("Missing target_id for replace op")?;
+                    let content = edit.content.as_ref().context("Missing content for replace op")?;
                     let idx = self.position_of(target_id, "Target", "target_id")?;
                     self.lines[idx].content = strip_line_ending(content);
                     modified.push(self.id_at(idx));

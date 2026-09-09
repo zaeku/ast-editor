@@ -139,7 +139,7 @@ Retrieves a range of lines for any text file along with their persistent line ID
 
 ### 3. `edit_lines`
 Applies a transactional batch of operations to lines using their unique IDs.
-*   **Supported Operations**: `insert_before`, `insert_after`, `update`, `delete`, `move`, `replace_range`.
+*   **Supported Operations**: `replace`, `replace_range`, `replace_substring`, `insert_before`, `insert_after`, `delete`, `move`.
 *   **Syntax Validation**: Performs AST parsing validation for supported programming, configuration, and shell script languages, and Comrak-based structural validation for Markdown (`.md`, `.markdown` extensions) to verify elements like unclosed code fences. Changes are automatically rolled back if syntax errors are introduced.
 *   **Safety**: Reject edits to `#TRUNC` lines with a `LINE_TOO_LONG_ERROR` recommending beautifiers (prettier, black, cargo fmt) to prevent data loss.
 

@@ -264,7 +264,7 @@ Retrieves a range of lines for any text file along with their persistent line ID
 
 ### 3. `edit_lines`
 Applies a transactional batch of operations to lines using their unique IDs.
-*   **Supported Operations**: `insert_before`, `insert_after`, `update`, `delete`, `move`, `replace_range`.
+*   **Supported Operations**: `replace`, `replace_range`, `replace_substring`, `insert_before`, `insert_after`, `delete`, `move`.
 *   **Syntax Validation**: Performs AST parsing validation for supported programming, configuration, and shell script languages, and Comrak-based structural validation for Markdown (`.md`, `.markdown` extensions) to verify elements like unclosed code fences. Changes are automatically rolled back if syntax errors are introduced.
 *   **Safety**: Reject edits to `#TRUNC` lines with a `LINE_TOO_LONG_ERROR` recommending beautifiers (prettier, black, cargo fmt) to prevent data loss.
 
@@ -285,7 +285,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
       "items": {
         "properties": {
           "content": {
-            "description": "The new content to insert/update/replace. Omitted/ignored for delete, move.",
+            "description": "The new content to insert or replace with. Omitted/ignored for delete, move.",
             "type": "string"
           },
           "dest_target_id": {
@@ -313,7 +313,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
           "op": {
             "description": "The edit operation to perform.",
             "enum": [
-              "update",
+              "replace",
               "insert_after",
               "insert_before",
               "delete",
@@ -332,7 +332,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
             "type": "string"
           },
           "target_id": {
-            "description": "Optional target line ID (e.g. 1#a5c7). Required for update, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends).",
+            "description": "Optional target line ID (e.g. 1#a5c7). Required for replace, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends).",
             "type": "string"
           }
         },
@@ -374,7 +374,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
     },
     {
       "content": "    let x = 100;",
-      "op": "update",
+      "op": "replace",
       "target_id": "2#bcb4"
     },
     {

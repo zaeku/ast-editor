@@ -37,7 +37,7 @@ Surgical updates on long lines (lines exceeding 2,048 characters) are supported 
 
 ## 5. `"replace_range"` Guidelines & Examples
 
-The `"replace_range"` operation is designed to replace a continuous block of lines in a single atomic transaction. It is highly recommended over sending multiple single-line `"update"` or `"delete"` operations in a loop.
+The `"replace_range"` operation is designed to replace a continuous block of lines in a single atomic transaction. It is highly recommended over sending multiple single-line `"replace"` or `"delete"` operations in a loop.
 
 ### Advantages:
 1. **Safety & Atomicity**: The entire range replacement is validated as a single block. If any syntax error is introduced, the entire replacement is rolled back.

@@ -152,12 +152,12 @@ impl ToolDispatcher {
                                 "properties": {
                                     "op": {
                                         "type": "string",
-                                        "enum": ["update", "insert_after", "insert_before", "delete", "replace_range", "move", "replace_substring"],
+                                        "enum": ["replace", "insert_after", "insert_before", "delete", "replace_range", "move", "replace_substring"],
                                         "description": "The edit operation to perform."
                                     },
                                     "target_id": {
                                         "type": "string",
-                                        "description": "Optional target line ID (e.g. 1#a5c7). Required for update, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends)."
+                                        "description": "Optional target line ID (e.g. 1#a5c7). Required for replace, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends)."
                                     },
                                     "end_target_id": {
                                         "type": "string",
@@ -174,7 +174,7 @@ impl ToolDispatcher {
                                     },
                                     "content": {
                                         "type": "string",
-                                        "description": "The new content to insert/update/replace. Omitted/ignored for delete, move."
+                                        "description": "The new content to insert or replace with. Omitted/ignored for delete, move."
                                     },
                                     "pattern": {
                                         "type": "string",
@@ -306,7 +306,18 @@ impl ToolDispatcher {
                     edit::apply_preview(&repository, filepath, preview_id, strict_validation, parser_manager).await?
                 } else {
                     let edits_val = arguments.get("edits").context("Missing edits array")?;
-                    let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
+                    let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())
+                        .map_err(|err| {
+                            // `update` was this operation's name until it was
+                            // renamed for symmetry with replace_range and
+                            // replace_substring. Say so once rather than
+                            // accepting both names forever.
+                            if err.to_string().contains("update") {
+                                anyhow::anyhow!("{}. The 'update' operation is now called 'replace'.", err)
+                            } else {
+                                anyhow::Error::from(err)
+                            }
+                        })?;
                     if dry_run {
                         edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager).await?
                     } else {

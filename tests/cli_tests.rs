@@ -57,7 +57,7 @@ fn test_an_edit_reaches_the_file() {
     let target = meta["ids"][1][0].as_str().unwrap().to_string();
 
     let edit = ast_editor("edited", &["edit_lines", &format!(
-        r#"{{"filepath":"{}","edits":[{{"op":"update","target_id":"{}","content":"    let a = 2;"}}]}}"#,
+        r#"{{"filepath":"{}","edits":[{{"op":"replace","target_id":"{}","content":"    let a = 2;"}}]}}"#,
         path, target
     )]);
     assert!(edit.status.success(), "{}", String::from_utf8_lossy(&edit.stderr));
@@ -125,4 +125,18 @@ fn test_version_reports_the_grammar_set_it_is_paired_with() {
     assert!(text.starts_with("ast-editor "), "{}", text);
     assert!(text.contains("grammars "), "{}", text);
     assert!(text.contains("rust"), "the grammar list is missing: {}", text);
+}
+
+#[test]
+fn test_the_old_operation_name_says_what_replaced_it() {
+    let file = scratch("renamed.rs", "fn main() {\n    let a = 1;\n}\n");
+    let out = ast_editor("renamed", &["edit_lines", &format!(
+        r#"{{"filepath":"{}","edits":[{{"op":"update","target_id":"2#0759","content":"x"}}]}}"#,
+        file.display()
+    )]);
+    assert!(!out.status.success());
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("now called 'replace'"), "{}", text);
+    // The rename is not a silent alias: the edit did not happen.
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "fn main() {\n    let a = 1;\n}\n");
 }

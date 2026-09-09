@@ -17,7 +17,7 @@ object:
 
 ```bash
 ast-editor view_lines '{"filepath":"/abs/path/file.rs","start_line":40,"end_line":80}'
-ast-editor edit_lines '{"filepath":"/abs/path/file.rs","edits":[{"op":"update","target_id":"2#0759","content":"    let a = 2;"}]}'
+ast-editor edit_lines '{"filepath":"/abs/path/file.rs","edits":[{"op":"replace","target_id":"2#0759","content":"    let a = 2;"}]}'
 ast-editor --help
 ```
 

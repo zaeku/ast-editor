@@ -9,8 +9,9 @@ Designs that were reasoned out of existence are in
 [discarded](discarded.md) instead, so that reading this list means reading only
 what might still become work.
 
-Active specs: [dry-run preview](specs/dry-run-preview-spec.md), then
-[persistent line IDs](specs/persistent-line-ids-spec.md).
+Active spec: [the edit script format](specs/edit-script-spec.md).
+Delivered: [dry-run preview](specs/dry-run-preview-spec.md),
+[index-backed line identity](specs/persistent-line-ids-spec.md).
 
 ## From the persistent line IDs design
 

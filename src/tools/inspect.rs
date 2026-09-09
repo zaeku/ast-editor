@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 use anyhow::{Result, Context, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tree_sitter::{Query, QueryCursor, StreamingIterator};
 use std::hash::{Hash, Hasher};
 
@@ -30,12 +31,6 @@ pub struct InspectResult {
     pub query: Option<String>,
     pub match_count: usize,
     pub matches: Vec<InspectMatch>,
-    /// Present only when no query was given: the file's top-level definitions,
-    /// so the call still says something about the file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub outline: Option<Vec<OutlineEntry>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -70,7 +65,7 @@ pub struct InspectMatch {
     pub definition: Option<InspectDefinition>,
 }
 
-/// One top-level definition, listed when no query was given.
+/// One definition a file declares, as `outline` lists it.
 #[derive(Debug, Serialize)]
 pub struct OutlineEntry {
     pub kind: String,
@@ -153,8 +148,8 @@ fn template_query(lang: &str, template: &str) -> Option<String> {
 }
 
 /// The file's top-level definitions, using whichever templates the language
-/// declares. Each entry carries the line ids `edit` takes, so an outline
-/// is enough to act on.
+/// declares. Each entry carries the line ids `edit` takes, so an outline is
+/// enough to act on.
 fn outline_of(
     language: &tree_sitter::Language,
     root: tree_sitter::Node,
@@ -193,20 +188,9 @@ fn outline_of(
     entries
 }
 
-pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
-    let file_path = Path::new(&args.filepath);
-    if !file_path.exists() {
-        bail!("File not found: {:?}", file_path);
-    }
-
-    let code = fs::read_to_string(file_path)
-        .with_context(|| format!("Failed to read file: {:?}", file_path))?;
-    
-    let ext = file_path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    let lang_name = match ext {
+/// The grammar an extension is read with.
+pub(crate) fn language_name(ext: &str) -> Result<&'static str> {
+    Ok(match ext {
         "py" => "python",
         "rs" => "rust",
         "js" | "jsx" => "javascript",
@@ -225,7 +209,107 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         "sh" | "bash" | "zsh" | "ksh" => "bash",
         "nix" => "nix",
         _ => bail!("Unsupported extension: {}", ext),
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct OutlineReport {
+    status: &'static str,
+    filepath: String,
+    language: String,
+    has_syntax_errors: bool,
+    total_lines: usize,
+    outline: Vec<OutlineEntry>,
+}
+
+/// The file's shape, which is what `outline` answers with: the definitions it
+/// declares, each carrying the line ids `edit` takes.
+pub(crate) async fn outline_report(filepath: &str, parser_manager: &Arc<ParserManager>) -> Result<String> {
+    let file_path = Path::new(filepath);
+    if !file_path.exists() {
+        bail!("File not found: {:?}", file_path);
+    }
+    let code = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read file: {:?}", file_path))?;
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let lang_name = language_name(ext)?;
+
+    let repository = SqliteSessionRepository;
+    let session_id_opt = repository.init_session(filepath, false).ok().map(|meta| meta.session_id);
+
+    // Markdown is read by comrak, not by a grammar, so its headings are the
+    // outline. The markdown path already finds them; they come back as
+    // matches, which is a search's shape, so they are read into this one.
+    if lang_name == "markdown" {
+        let args = InspectArgs {
+            filepath: filepath.to_string(),
+            query: None,
+            template: Some("headings".to_string()),
+            include_code: Some(false),
+            code_format: None,
+            output_file: None,
+        };
+        let found: Value = serde_json::from_str(
+            &run_markdown_inspect(&code, &args, &repository, &session_id_opt)?
+        )?;
+        let headings = found["matches"].as_array().cloned().unwrap_or_default().iter()
+            .map(|m| OutlineEntry {
+                kind: "heading".to_string(),
+                signature: m["text"].as_str().unwrap_or("").to_string(),
+                start_line: m["start_line"].as_u64().unwrap_or(0) as usize,
+                end_line: m["end_line"].as_u64().unwrap_or(0) as usize,
+                start_id: m["start_id"].as_str().map(str::to_string),
+                end_id: m["end_id"].as_str().map(str::to_string),
+            })
+            .collect();
+        let report = OutlineReport {
+            status: "success",
+            filepath: filepath.to_string(),
+            language: lang_name.to_string(),
+            has_syntax_errors: false,
+            total_lines: code.lines().count(),
+            outline: headings,
+        };
+        return Ok(serde_json::to_string_pretty(&report)?);
+    }
+
+    let (tree, language) = parser_manager.parse_code(ext, &code).await
+        .context("Failed to parse code via ParserManager delegation")?;
+    let root_node = tree.root_node();
+
+    let report = OutlineReport {
+        status: "success",
+        filepath: filepath.to_string(),
+        language: lang_name.to_string(),
+        has_syntax_errors: root_node.has_error(),
+        total_lines: code.lines().count(),
+        outline: outline_of(&language, root_node, &code, &repository, &session_id_opt, lang_name),
     };
+    Ok(serde_json::to_string_pretty(&report)?)
+}
+
+pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
+    let file_path = Path::new(&args.filepath);
+    if !file_path.exists() {
+        bail!("File not found: {:?}", file_path);
+    }
+
+    let code = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read file: {:?}", file_path))?;
+    
+    let ext = file_path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let lang_name = language_name(ext)?;
+
+    if args.query.is_none() && args.template.is_none() {
+        bail!(
+            "inspect searches, so it needs --query or --template. \
+             For the file's definitions, run: ast-editor outline {}",
+            args.filepath
+        );
+    }
 
     // JIT edit session pre-caching
     let repository = SqliteSessionRepository;
@@ -267,7 +351,6 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         (None, Some(temp)) => template_query(lang_name, temp),
         (None, None) => None,
     };
-    let searched = args.query.is_some() || args.template.is_some();
 
     if let (Some(ref template), None) = (&args.template, &query_str) {
         status = "warning".to_string();
@@ -403,19 +486,6 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         }
     }
 
-    // Nothing was asked for. Say so, and say what is in the file, so the caller
-    // is not left reading an empty result as an empty file.
-    let (outline, message) = if searched {
-        (None, None)
-    } else {
-        let entries = outline_of(&language, root_node, &code, &repository, &session_id_opt, lang_name);
-        let note = "No query or template was given, so nothing was searched for; \
-             listing the file's top-level definitions instead. \
-             Pass \"template\": \"functions\" (or classes, imports, …) or a \
-             Tree-sitter s-expression in \"query\" to search.".to_string();
-        (Some(entries), Some(note))
-    };
-
     let result = InspectResult {
         status: status.clone(),
         filepath: args.filepath,
@@ -424,8 +494,6 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         query: query_str.clone(),
         match_count: matches.len(),
         matches,
-        outline,
-        message,
         hint: final_hint.clone(),
     };
 
@@ -584,8 +652,6 @@ pub fn run_markdown_inspect(
     let result = InspectResult {
         status: status.clone(),
         query: None,
-        outline: None,
-        message: None,
         filepath: args.filepath.clone(),
         language: "markdown".to_string(),
         has_syntax_errors: false,

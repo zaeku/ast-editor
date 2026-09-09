@@ -9,8 +9,9 @@ use crate::parser::ParserManager;
 
 
 #[derive(Debug, Deserialize)]
-pub struct DumpArgs {
+pub struct OutlineArgs {
     pub filepath: String,
+    pub sexp: Option<bool>,
 }
 
 fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, max_depth: usize, out: &mut String) {
@@ -58,8 +59,17 @@ fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, m
     }
 }
 
-pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
-    let file_path = Path::new(&args.filepath);
+pub async fn run_outline(args: OutlineArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
+    if !args.sexp.unwrap_or(false) {
+        return crate::tools::inspect::outline_report(&args.filepath, parser_manager).await;
+    }
+    dump_tree(&args.filepath, parser_manager).await
+}
+
+/// The whole parse tree as s-expression text, for writing a query against a
+/// grammar whose node names are not yet known.
+async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Result<String> {
+    let file_path = Path::new(filepath);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
     }
@@ -121,7 +131,7 @@ pub async fn run_dump(args: DumpArgs, parser_manager: &Arc<ParserManager>) -> Re
         line_range_end
     );
     
-    let tip = crate::tools::metadata::get_tool_tip("dump_ast");
+    let tip = crate::tools::metadata::get_tool_tip("outline");
     let final_text = if !tip.is_empty() {
         format!("{}{}\n{}", header, formatted_tree, tip)
     } else {
@@ -202,7 +212,7 @@ mod tests {
     use crate::parser::ParserManager;
 
     #[tokio::test]
-    async fn test_markdown_ast_dump() {
+    async fn test_the_sexp_form_dumps_the_markdown_tree() {
         let temp_dir = std::env::temp_dir().join("ast-editor-markdown-tests");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
@@ -212,11 +222,12 @@ mod tests {
         fs::write(&file_path, md_content).unwrap();
 
         let pm = Arc::new(ParserManager::new().unwrap());
-        let args = DumpArgs {
+        let args = OutlineArgs {
             filepath: file_path.to_string_lossy().to_string(),
+            sexp: Some(true),
         };
 
-        let text = run_dump(args, &pm).await.unwrap();
+        let text = run_outline(args, &pm).await.unwrap();
 
         assert!(text.contains("[tree-sitter-dump-tree]"));
         assert!(text.contains("Document [1:1 - 7:3]"));

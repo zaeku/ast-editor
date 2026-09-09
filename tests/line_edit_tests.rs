@@ -1125,19 +1125,17 @@ async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value
 }
 
 #[tokio::test]
-async fn test_inspect_without_a_query_says_so_and_still_describes_the_file() {
+async fn test_the_outline_lists_the_definitions_with_ids_to_act_on() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("outline.rs", "fn alpha() {\n    let a = 1;\n}\n\nfn beta() {\n}\n");
-    let pm = create_test_parser_manager();
+    let pm = std::sync::Arc::new(create_test_parser_manager());
 
-    let res = inspect_report(file.path_str(), None).await;
-    let _ = &pm;
+    let text = ast_editor::tools::outline::run_outline(
+        serde_json::from_value(serde_json::json!({ "filepath": file.path_str() })).unwrap(),
+        &pm,
+    ).await.unwrap();
+    let res: serde_json::Value = serde_json::from_str(&text).unwrap();
 
-    // Asking nothing must not look like finding nothing.
-    assert!(res["query"].is_null(), "{}", res);
-    assert!(res["message"].as_str().unwrap().contains("nothing was searched for"), "{}", res);
-
-    // And the call still says what is in the file, with ids to act on.
     let outline = res["outline"].as_array().unwrap();
     let names: Vec<&str> = outline.iter().map(|e| e["signature"].as_str().unwrap()).collect();
     assert_eq!(names, vec!["fn alpha() {", "fn beta() {"], "{:?}", names);
@@ -1145,6 +1143,31 @@ async fn test_inspect_without_a_query_says_so_and_still_describes_the_file() {
         assert!(entry["start_id"].as_str().unwrap().contains('#'), "{}", entry);
         assert!(entry["end_id"].as_str().unwrap().contains('#'), "{}", entry);
     }
+
+    // The same file, dumped: one form is the survey, the other the grammar.
+    let sexp = ast_editor::tools::outline::run_outline(
+        serde_json::from_value(serde_json::json!({ "filepath": file.path_str(), "sexp": true })).unwrap(),
+        &pm,
+    ).await.unwrap();
+    assert!(sexp.contains("function_item"), "{}", sexp);
+}
+
+#[tokio::test]
+async fn test_inspect_refuses_to_search_for_nothing_and_names_the_outline() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("nothing.rs", "fn alpha() {\n}\n");
+    let err = ast_editor::tools::inspect::run_inspect(
+        ast_editor::tools::inspect::InspectArgs {
+            filepath: file.path_str().to_string(),
+            query: None,
+            template: None,
+            include_code: Some(false),
+            code_format: None,
+            output_file: None,
+        },
+        &std::sync::Arc::new(create_test_parser_manager()),
+    ).await.unwrap_err().to_string();
+    assert!(err.contains("ast-editor outline"), "{}", err);
 }
 
 #[tokio::test]

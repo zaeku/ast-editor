@@ -1,7 +1,7 @@
 {
-  "dump_ast": {
-    "description": "Dumps the complete AST syntax tree of a file as S-expression text.",
-    "tip": "Tip: For larger files, prefer using 'inspect' with specific templates/queries to reduce token usage and focus on target blocks."
+  "outline": {
+    "description": "Lists the definitions a file declares, each with its line range and the line IDs that edit it. The first look at an unfamiliar file.",
+    "tip": "Tip: Pass sexp to get the whole parse tree instead, which is what a custom 'inspect' query is written against."
   },
   "inspect": {
     "description": "Inspects code structure and finds target lines in source files using Tree-sitter.",

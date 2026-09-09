@@ -1,5 +1,5 @@
 pub mod inspect;
-pub mod dump;
+pub mod outline;
 pub mod session_db;
 pub mod view;
 pub mod edit;
@@ -67,16 +67,22 @@ impl ToolDispatcher {
                 }
             }),
             serde_json::json!({
-                "name": "dump_ast",
-                "description": metadata::get_tool_description("dump_ast"),
+                "name": "outline",
+                "description": metadata::get_tool_description("outline"),
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Absolute path to the file to inspect"
+                            "description": "Absolute path to the file to read"
+                        },
+                        "sexp": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, returns the whole parse tree as s-expression text instead of the outline. For writing a query against a grammar whose node names are not yet known."
                         }
-                    }
+                    },
+                    "required": ["filepath"]
                 }
             }),
             serde_json::json!({
@@ -222,9 +228,9 @@ impl ToolDispatcher {
                 let args = serde_json::from_value(arguments)?;
                 inspect::run_inspect(args, parser_manager).await
             }
-            "dump_ast" => {
+            "outline" => {
                 let args = serde_json::from_value(arguments)?;
-                dump::run_dump(args, parser_manager).await
+                outline::run_outline(args, parser_manager).await
             }
             "view" => {
                 let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;

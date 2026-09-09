@@ -64,8 +64,8 @@ mod tests {
         let edit_desc = get_tool_description("edit");
         assert!(edit_desc.contains("Apply edits"));
 
-        let dump_tip = get_tool_tip("dump_ast");
-        assert!(dump_tip.contains("Tip:"));
+        let outline_tip = get_tool_tip("outline");
+        assert!(outline_tip.contains("Tip:"));
     }
 
 

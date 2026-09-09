@@ -195,11 +195,9 @@ mod tests {
 
     #[test]
     fn test_a_prefix_names_the_tool_it_can_only_mean() {
-        assert_eq!(resolve("view").unwrap(), "view");
-        assert_eq!(resolve("inspect").unwrap(), "inspect");
-        assert_eq!(resolve("create").unwrap(), "create");
-        // The written-out name keeps working, and an unknown one still says so.
-        assert_eq!(resolve("dump_ast").unwrap(), "dump_ast");
+        assert_eq!(resolve("ins").unwrap(), "inspect");
+        assert_eq!(resolve("cr").unwrap(), "create");
+        assert_eq!(resolve("outline").unwrap(), "outline");
         assert!(resolve("nope").is_err());
         // A prefix two tools share names neither of them.
         assert!(resolve("").is_err());

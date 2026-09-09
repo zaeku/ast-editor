@@ -65,7 +65,8 @@ The arguments are exactly the tool schema, so anything `ast-editor skill api`
 describes works here unchanged. Output goes to stdout with no wrapper and pipes normally; failures
 go to stderr with a non-zero exit status.
 
-Tools: `view`, `edit`, `create`, `inspect`, `dump_ast`.
+Tools: `outline`, `inspect`, `view`, `edit`, `create` — file, block, line,
+change, new file.
 
 This document and its references are carried inside the binary, so they are
 readable wherever it is: `ast-editor skill` prints this page, `ast-editor skill
@@ -78,8 +79,19 @@ is the first thing to check when a file will not parse.
 
 ## 🔎 Finding What to Edit
 
-You never need a line number, and never need `grep` first. Two ways in, both
-returning the line IDs `edit` takes:
+You never need a line number, and never need `grep` first. Three ways in, all
+returning the line IDs `edit` takes.
+
+**By file** — `outline` lists what the file declares, which is the first look
+at one you have not read:
+
+```bash
+ast-editor outline src/config.rs
+# → outline[].signature with start_id / end_id and line ranges
+```
+
+Pass `--sexp` instead to get the whole parse tree, which is what a custom
+`inspect` query is written against.
 
 **By content** — `view` takes a `query`, with optional `context_lines`:
 
@@ -100,10 +112,9 @@ replace_range <start_id> <end_id> ```
 EOF
 ```
 
-Called with neither `query` nor `template`, `inspect` searches for nothing
-and says so: `"query": null`, an empty `matches`, and an `outline` of the
-file's top-level definitions with their IDs. An empty `matches` alongside a
-null `query` means nothing was asked for — not that the file is empty.
+`inspect` searches, so it needs a `query` or a `template`; called with
+neither it says to run `outline` instead. An empty `matches` therefore always
+means the search found nothing, never that nothing was asked for.
 
 ---
 

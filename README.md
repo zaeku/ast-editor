@@ -413,8 +413,8 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ### 4. `inspect`
 Queries a file's structure using Tree-sitter S-expression query patterns or templates (standard templates: `functions`, `classes`, `imports` across Python, Rust, Go, JS, TS, TSX, Java, C, and C++, with Bash supporting `functions`; specialized templates: Rust `traits` & `impls`, Go `structs` & `interfaces`, and C/C++ `macros`; Markdown templates: `headings`, `headers`, `codeblocks`, `code_blocks`, `links`, `tables`, `lists`), returning target line ranges and definitions.
 
-### 5. `dump_ast`
-Dumps the complete AST syntax tree of a file as S-expression text up to a certain depth.
+### 5. `outline`
+Lists the definitions a file declares — signature, line range, and the line IDs that edit them — which is the first look at an unfamiliar file. With `sexp` it returns the complete AST as S-expression text instead, up to a fixed depth, which is what a custom `inspect` query is written against.
 
 ---
 

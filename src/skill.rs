@@ -199,28 +199,22 @@ mod tests {
         assert!(document(Some("nope")).is_err());
     }
 
-    /// SKILL.md links to its references by relative path. Those paths only
-    /// resolve where the files are installed, so each must still be a topic
-    /// the binary can print.
+    /// The hub is printed to a terminal as often as it is read as a file, and
+    /// a relative path resolves in only one of those. It names commands, and
+    /// every topic has to be among them or it is unreachable.
     #[test]
-    fn test_every_reference_skill_md_links_to_is_a_topic() {
-        let names = topics();
-        for line in SKILL.lines() {
-            for start in line.match_indices("](references/").map(|(i, _)| i) {
-                let rest = &line[start + "](references/".len()..];
-                let path = &rest[..rest.find(')').unwrap_or(rest.len())];
-                let stem = path.rsplit('/').next().unwrap().trim_end_matches(".md");
-                let topic = match stem {
-                    "usage_guides" => "usage",
-                    "api_specification" => "api",
-                    other => other,
-                };
-                assert!(
-                    names.contains(&topic),
-                    "SKILL.md links to references/{} but '{}' is not a topic",
-                    path, topic
-                );
-            }
+    fn test_the_hub_reaches_every_topic_by_command() {
+        assert!(
+            !SKILL.contains("](references/"),
+            "SKILL.md links to a relative path, which does not resolve when the document is printed"
+        );
+        for topic in topics() {
+            let invocation = format!("ast-editor skill {}", topic);
+            assert!(
+                SKILL.contains(&invocation),
+                "no way to reach '{}' from the hub: it never says `{}`",
+                topic, invocation
+            );
         }
     }
 }

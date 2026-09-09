@@ -53,25 +53,16 @@ install-bin: build
     @echo 'grammars  {{share_dir}}/wasm'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
-# Written by the binary rather than copied beside it. The documents are
-# embedded, so what lands here is what the installed binary actually carries,
-# and the two cannot describe different versions.
+# Only the hub is installed. It reaches its references by naming
+# `ast-editor skill <topic>` rather than a path, so copies of them here would
+# be files nothing points at — and a second place for them to go stale.
 
-# Install just the skill document and its references.
+# Install just the skill document.
 install-skill: build
-    #!/usr/bin/env bash
-    set -euo pipefail
-    editor='target/release/ast-editor'
-    mkdir -p '{{skill_dir}}/references/languages'
+    mkdir -p '{{skill_dir}}'
     rm -rf '{{skill_dir}}/references'
-    mkdir -p '{{skill_dir}}/references/languages'
-    "$editor" skill                     > '{{skill_dir}}/SKILL.md'
-    "$editor" skill api                 > '{{skill_dir}}/references/api_specification.md'
-    "$editor" skill usage               > '{{skill_dir}}/references/usage_guides.md'
-    for lang in javascript markup nix python rust shell swift; do
-        "$editor" skill "$lang" > "{{skill_dir}}/references/languages/$lang.md"
-    done
-    echo "installed {{skill_dir}}"
+    ./target/release/ast-editor skill > '{{skill_dir}}/SKILL.md'
+    @echo 'installed {{skill_dir}}/SKILL.md'
 
 # Remove what `install` placed.
 uninstall:

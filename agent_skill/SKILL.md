@@ -49,9 +49,8 @@ Within one batch, do not target a line an earlier directive changed: the id
 carries that line's content hash, so it no longer matches and the batch is
 refused.
 
-The arguments are exactly the tool schema, so anything
-[api_specification.md](references/api_specification.md) describes works here
-unchanged. Output goes to stdout with no wrapper and pipes normally; failures
+The arguments are exactly the tool schema, so anything `ast-editor skill api`
+describes works here unchanged. Output goes to stdout with no wrapper and pipes normally; failures
 go to stderr with a non-zero exit status.
 
 Tools: `view_lines`, `edit_lines`, `create_lines`, `inspect_ast`, `dump_ast`.
@@ -126,17 +125,23 @@ null `query` means nothing was asked for — not that the file is empty.
 
 ## 🧭 Reference Index
 
-Load only the document your immediate task needs; none of these belong in
-context by default.
+Each is a command, because this document is read wherever the binary is — in a
+terminal, in an installed skill tree, or on a machine where nothing was
+installed beside it. A relative path would resolve in only one of those.
 
-- **JSON schemas, parameters, payloads** — [api_specification.md](references/api_specification.md)
-- **Editing workflows** — [usage_guides.md](references/usage_guides.md)
-  (concurrent-edit resync, `replace_range`, long lines)
-- **S-expression queries per language** —
-  [rust](references/languages/rust.md),
-  [python](references/languages/python.md),
-  [javascript & typescript](references/languages/javascript.md),
-  [nix](references/languages/nix.md),
-  [swift](references/languages/swift.md),
-  [shell](references/languages/shell.md),
-  [markup & configuration](references/languages/markup.md)
+Load only what the immediate task needs; none of it belongs in context by
+default.
+
+```bash
+ast-editor skill api      # every tool and parameter, from the live schemas
+ast-editor skill usage    # editing workflows: resync, replace_range, long lines
+```
+
+S-expression queries per language:
+
+```bash
+ast-editor skill rust        ast-editor skill nix
+ast-editor skill python      ast-editor skill swift
+ast-editor skill javascript  ast-editor skill shell
+ast-editor skill markup      # markup and configuration formats
+```

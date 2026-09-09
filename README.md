@@ -31,11 +31,13 @@ Under `~/.agents` by default:
 |---|---|
 | `bin/ast-editor` | the binary |
 | `share/ast-editor/wasm/` | tree-sitter grammars |
-| `skills/ast-editor/` | `SKILL.md` and its references |
+| `skills/ast-editor/SKILL.md` | the skill document |
 
-The skill documents are embedded in the binary and written out by
-`install-skill`, so what is installed is what that binary carries;
-`ast-editor skill [topic]` prints any of them without installing anything.
+The skill documents are embedded in the binary, so what `install-skill` writes
+is what that binary carries. Only the hub is installed: it reaches its
+references by naming `ast-editor skill <topic>` rather than a path, which works
+in a terminal and in an installed tree alike. `ast-editor --help` lists the
+topics.
 
 `AST_EDITOR_PREFIX` chooses a different prefix, and `install-bin` /
 `install-skill` install one half. The binary finds its grammars relative to

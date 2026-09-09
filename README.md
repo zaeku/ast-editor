@@ -33,6 +33,10 @@ Under `~/.agents` by default:
 | `share/ast-editor/wasm/` | tree-sitter grammars |
 | `skills/ast-editor/` | `SKILL.md` and its references |
 
+The skill documents are embedded in the binary and written out by
+`install-skill`, so what is installed is what that binary carries;
+`ast-editor skill [topic]` prints any of them without installing anything.
+
 `AST_EDITOR_PREFIX` chooses a different prefix, and `install-bin` /
 `install-skill` install one half. The binary finds its grammars relative to
 itself, so nothing needs to be exported; `AST_EDITOR_WASM_DIR` overrides that

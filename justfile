@@ -53,17 +53,25 @@ install-bin: build
     @echo 'grammars  {{share_dir}}/wasm'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
-# Copied rather than fetched by a skills installer: this is a local skill, not
-# a published one. Regenerates the API reference first so it cannot ship stale.
+# Written by the binary rather than copied beside it. The documents are
+# embedded, so what lands here is what the installed binary actually carries,
+# and the two cannot describe different versions.
 
 # Install just the skill document and its references.
-install-skill: doc
-    mkdir -p '{{skill_dir}}'
+install-skill: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    editor='target/release/ast-editor'
+    mkdir -p '{{skill_dir}}/references/languages'
     rm -rf '{{skill_dir}}/references'
-    cp agent_skill/SKILL.md '{{skill_dir}}/SKILL.md'
-    cp -R agent_skill/references '{{skill_dir}}/references'
-    find '{{skill_dir}}' -name '.DS_Store' -delete
-    @echo 'installed {{skill_dir}}'
+    mkdir -p '{{skill_dir}}/references/languages'
+    "$editor" skill                     > '{{skill_dir}}/SKILL.md'
+    "$editor" skill api                 > '{{skill_dir}}/references/api_specification.md'
+    "$editor" skill usage               > '{{skill_dir}}/references/usage_guides.md'
+    for lang in javascript markup nix python rust shell swift; do
+        "$editor" skill "$lang" > "{{skill_dir}}/references/languages/$lang.md"
+    done
+    echo "installed {{skill_dir}}"
 
 # Remove what `install` placed.
 uninstall:

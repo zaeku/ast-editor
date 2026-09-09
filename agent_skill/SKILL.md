@@ -55,6 +55,11 @@ unchanged. Output goes to stdout with no wrapper and pipes normally; failures
 go to stderr with a non-zero exit status.
 
 Tools: `view_lines`, `edit_lines`, `create_lines`, `inspect_ast`, `dump_ast`.
+
+This document and its references are carried inside the binary, so they are
+readable wherever it is: `ast-editor skill` prints this page, `ast-editor skill
+api` the full parameter reference rendered from the live schemas, and
+`ast-editor skill <topic>` any of the rest — `--help` lists them.
 `ast-editor --version` reports the grammar set the binary is paired with, which
 is the first thing to check when a file will not parse.
 

@@ -11,6 +11,7 @@ const USAGE: &str = "\
 ast-editor — line-precise editing over tree-sitter
 
     ast-editor edit <file> < script  apply an edit script read from stdin
+    ast-editor skill [topic]         the skill document, or one of its references
     ast-editor <tool> '<json args>'  call one tool and print its output
     ast-editor mcp                   serve MCP over JSON-RPC on stdin
     ast-editor --version             version, and the grammars it can reach
@@ -58,13 +59,26 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Some("skill") => {
+            match ast_editor::skill::document(args.get(1).map(String::as_str)) {
+                Ok(text) => {
+                    print!("{}", text);
+                    Ok(())
+                }
+                Err(err) => {
+                    eprintln!("{:#}", err);
+                    std::process::exit(2);
+                }
+            }
+        }
         Some("--version") | Some("-V") | Some("version") => {
             print!("{}", version_report());
             Ok(())
         }
         Some("--help") | Some("-h") | Some("help") => {
             print!("{}", USAGE);
-            println!("\nTools: {}", tool_names().join(", "));
+            println!("\nTools:  {}", tool_names().join(", "));
+            println!("Topics: {}", ast_editor::skill::topics().join(", "));
             Ok(())
         }
         None => {

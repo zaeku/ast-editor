@@ -12,13 +12,19 @@ queries and syntax validation for 21 programming and configuration languages.
 
 ## 🚀 Invocation
 
-Run the `ast-editor` command with a tool name and its arguments as one JSON
-object:
+Run the `ast-editor` command with a tool name, a path, and the tool's own
+parameters as options. Paths are relative to the working directory:
 
 ```bash
-ast-editor view_lines '{"filepath":"/abs/path/file.rs","start_line":40,"end_line":80}'
+ast-editor view_lines src/config.rs --start-line 40 --end-line 80
+ast-editor inspect_ast src/config.rs --template functions
 ast-editor --help
 ```
+
+The options are the schema: every parameter `ast-editor skill api` lists can be
+passed as `--kebab-case`, and a switch takes `--flag`, `--flag false` or
+`--no-flag`. A shape no option can carry, such as an array of edits, goes in as
+`--json '{...}'`, and a whole argument object still works as one JSON string.
 
 **Editing uses a script on stdin, not JSON.** One directive per line, each
 block fenced with three or more backticks, so code goes in exactly as written —
@@ -76,17 +82,20 @@ returning the line IDs `edit_lines` takes:
 **By content** — `view_lines` takes a `query`, with optional `context_lines`:
 
 ```bash
-ast-editor view_lines '{"filepath":"/abs/path/f.rs","query":"get_wasm_dir","context_lines":2}'
+ast-editor view_lines src/config.rs --query get_wasm_dir --context-lines 2
 ```
 
 **By structure** — `inspect_ast` matches carry `start_id` and `end_id`, so a
 whole definition can be replaced in the next call:
 
 ```bash
-ast-editor inspect_ast '{"filepath":"/abs/path/f.rs","template":"functions"}'
+ast-editor inspect_ast src/config.rs --template functions
 # → matches[].start_id / end_id
-ast-editor edit_lines '{"filepath":"/abs/path/f.rs","edits":[
-  {"op":"replace_range","target_id":"<start_id>","end_target_id":"<end_id>","content":"…"}]}'
+ast-editor edit src/config.rs <<'EOF'
+replace_range <start_id> <end_id> ```
+    …
+```
+EOF
 ```
 
 Called with neither `query` nor `template`, `inspect_ast` searches for nothing
@@ -113,8 +122,8 @@ null `query` means nothing was asked for — not that the file is empty.
    the same `filepath` to commit that exact batch without resending `edits`:
 
    ```bash
-   ID=$(ast-editor edit_lines '{"filepath":"/abs/path/f.rs","edits":[…],"dry_run":true}' | jq -r .preview_id)
-   ast-editor edit_lines "{\"filepath\":\"/abs/path/f.rs\",\"apply\":\"$ID\"}"
+   ID=$(ast-editor edit src/config.rs --dry-run < edits.txt | jq -r .preview_id)
+   ast-editor edit_lines src/config.rs --apply "$ID"
    ```
 
 5. **Graceful Degradation** — Markdown, text, and configuration files are

@@ -12,7 +12,7 @@ ast-editor — line-precise editing over tree-sitter
 
     ast-editor edit <file> < script  apply an edit script read from stdin
     ast-editor skill [topic]         the skill document, or one of its references
-    ast-editor <tool> '<json args>'  call one tool and print its output
+    ast-editor <tool> <file> [opts]  call one tool and print its output
     ast-editor mcp                   serve MCP over JSON-RPC on stdin
     ast-editor --version             version, and the grammars it can reach
     ast-editor --help                this text
@@ -27,11 +27,16 @@ block fenced with three or more backticks:
     delete 6b#99aa
     EOF
 
-Tool arguments are the same JSON object the MCP call takes, so anything the
-tool schemas describe works here unchanged:
+Options are the tool's own parameters, so whatever `ast-editor skill api`
+lists can be passed as one. Paths are relative to the working directory:
 
-    ast-editor view_lines '{\"filepath\":\"/path/to/file.rs\"}'
-    ast-editor edit_lines '{\"filepath\":\"/path/to/file.rs\",\"apply\":\"p1f\"}'
+    ast-editor view_lines src/main.rs --start-line 40 --end-line 80
+    ast-editor inspect_ast src/main.rs --template functions
+    ast-editor edit_lines src/main.rs --apply p1f
+
+A shape no option can carry, such as an array of edits, goes in as JSON:
+
+    ast-editor edit_lines src/main.rs --json '{\"edits\":[...]}'
 ";
 
 #[tokio::main]
@@ -88,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(tool) => {
             init_tracing(tracing::Level::WARN);
-            match call_once(tool, args.get(1).map(String::as_str)).await {
+            match call_once(tool, &args[1..]).await {
                 Ok(output) => {
                     println!("{}", output);
                     Ok(())
@@ -157,7 +162,9 @@ async fn run_edit_script(args: &[String]) -> anyhow::Result<String> {
             extra => anyhow::bail!("edit takes one file; also given '{}'.", extra),
         }
     }
-    let filepath = filepath.context("edit needs a file: ast-editor edit <file> < script")?;
+    let filepath = ast_editor::cli::absolute(
+        &filepath.context("edit needs a file: ast-editor edit <file> < script")?
+    )?;
 
     let mut script = String::new();
     std::io::stdin().read_to_string(&mut script).context("Failed to read the edit script from stdin")?;
@@ -178,17 +185,8 @@ async fn run_edit_script(args: &[String]) -> anyhow::Result<String> {
 
 /// Run one tool and return what it printed, so the shell sees the tool's own
 /// output rather than the JSON-RPC envelope around it.
-async fn call_once(tool: &str, args: Option<&str>) -> anyhow::Result<String> {
-    let names = tool_names();
-    if !names.iter().any(|name| name == tool) {
-        anyhow::bail!("Unknown tool '{}'. Available: {}", tool, names.join(", "));
-    }
-
-    let arguments: serde_json::Value = match args {
-        Some(raw) => serde_json::from_str(raw)
-            .map_err(|err| anyhow::anyhow!("Arguments are not valid JSON: {}\n  given: {}", err, raw))?,
-        None => serde_json::json!({}),
-    };
+async fn call_once(tool: &str, args: &[String]) -> anyhow::Result<String> {
+    let arguments = ast_editor::cli::arguments(tool, args)?;
 
     let parser_manager = Arc::new(ParserManager::new()?);
     let result = ToolDispatcher::new().call_tool(tool, arguments, &parser_manager).await?;

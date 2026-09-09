@@ -140,3 +140,59 @@ fn test_the_old_operation_name_says_what_replaced_it() {
     // The rename is not a silent alias: the edit did not happen.
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "fn main() {\n    let a = 1;\n}\n");
 }
+
+#[test]
+fn test_a_tool_takes_a_path_and_options_instead_of_json() {
+    let file = scratch("flags.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
+    let out = ast_editor("flags", &[
+        "view_lines", file.to_str().unwrap(), "--start-line", "2", "--end-line", "2",
+    ]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("let a = 1;"), "{}", text);
+    assert!(!text.contains("let b = 2;"), "the range was ignored: {}", text);
+}
+
+#[test]
+fn test_a_relative_path_is_taken_from_the_working_directory() {
+    let file = scratch("relative.rs", "fn main() {}\n");
+    let dir = file.parent().unwrap();
+
+    // The session is keyed by the path, so a relative one has to be resolved
+    // before it reaches the store or the same file becomes two sessions.
+    let out = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["view_lines", "relative.rs", "--only-ids"])
+        .current_dir(dir)
+        .env("AST_EDITOR_CACHE_DIR", store_for("relative"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let meta: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert_eq!(meta["total_lines"], 1);
+}
+
+#[test]
+fn test_an_unknown_option_lists_the_ones_the_tool_has() {
+    let file = scratch("unknownopt.rs", "fn main() {}\n");
+    let out = ast_editor("unknownopt", &["view_lines", file.to_str().unwrap(), "--start-lines", "2"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("--start-lines"), "{}", err);
+    assert!(err.contains("--start-line"), "the real options are not offered: {}", err);
+}
+
+#[test]
+fn test_the_json_form_a_program_would_send_still_works() {
+    let file = scratch("stilljson.rs", "fn main() {\n    let a = 1;\n}\n");
+    let path = file.display().to_string();
+
+    let bare = ast_editor("stilljson", &["view_lines", &format!(r#"{{"filepath":"{}","only_ids":true}}"#, path)]);
+    assert!(bare.status.success(), "{}", String::from_utf8_lossy(&bare.stderr));
+
+    let flagged = ast_editor("stilljson", &[
+        "view_lines", file.to_str().unwrap(), "--json", r#"{"only_ids":true}"#,
+    ]);
+    assert!(flagged.status.success(), "{}", String::from_utf8_lossy(&flagged.stderr));
+    let meta: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&flagged.stdout)).unwrap();
+    assert!(meta["ids"].is_array(), "{}", String::from_utf8_lossy(&flagged.stdout));
+}

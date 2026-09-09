@@ -55,11 +55,18 @@ The tools are the same either way; only the envelope differs.
 MCP call takes:
 
 ```bash
-ast-editor view_lines '{"filepath":"/path/to/file.rs","query":"fn main"}'
-ast-editor edit_lines '{"filepath":"/path/to/file.rs","apply":"p1f"}'
+ast-editor view_lines src/main.rs --query "fn main"
+ast-editor inspect_ast src/main.rs --template functions
+ast-editor edit_lines src/main.rs --apply p1f
 ast-editor --version
 ast-editor --help
 ```
+
+Options are the tool's own parameters, derived from its schema, so anything
+`ast-editor skill api` lists can be passed as `--kebab-case`. Paths are
+relative to the working directory. A shape no option can carry goes in as
+`--json '{...}'`, and the whole-object JSON form a program would send still
+works unchanged.
 
 Editing has a second form that takes a script on stdin, so code needs no
 escaping at all — see [the format](docs/specs/edit-script-spec.md):

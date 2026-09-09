@@ -21,10 +21,11 @@ To track Line IDs across editing operations, a SQLite database is maintained in 
 
 ---
 
-## 3. Concurrency Smart Resync
+## 3. When a File Changes Underneath
 
-When a session is JIT-initialized, the file's modification time (`mtime`) is cached. During `edit_lines`, if the current filesystem `mtime` is different from the cached `mtime`, indicating that the file was modified externally, the database records are **automatically resynced** rather than failing.
-*   **Sequence Index Mapping**: Unmodified lines keep their existing sequence IDs, while any new/changed lines are assigned new sequence IDs.
+When a file has changed outside the tool, its line index is reconciled against what is now on disk rather than rebuilt. A patience diff over the stored line hashes decides what survived: unchanged lines keep their IDs, a line that only moved keeps its ID, and a line that was merely respaced by a formatter keeps its ID too. Only genuinely new lines draw a new one, and a retired ID is never handed out again.
+
+That happens silently for lines you are not editing. If a line **your edit targets** did not survive — its content changed or it was deleted — the edit is refused with a `CONCURRENCY_ERROR` naming it, rather than being applied to whatever is at that position now. Re-read the file to get current IDs and try again.
 
 ---
 

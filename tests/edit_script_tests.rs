@@ -1,5 +1,5 @@
 //! The edit script format, driven through the binary as a shell would drive it.
-//! Verification plan of docs/specs/edit-script-spec.md.
+//! Verification plan of docs/archive/edit-script-spec.md.
 
 use std::io::Write;
 use std::process::{Command, Stdio};

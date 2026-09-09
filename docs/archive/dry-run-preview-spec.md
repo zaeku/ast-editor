@@ -1,5 +1,8 @@
 # Spec: Dry-Run Preview Diff (`ast-editor`)
 
+> Delivered. Kept as the record of what was decided and why; the behaviour it
+> describes is what `edit_lines` does now.
+
 Lets an agent verify that an edit batch parses cleanly before any of it touches
 disk, reusing the apply→parse→rollback machinery `edit_lines` already has.
 

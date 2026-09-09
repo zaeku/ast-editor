@@ -1,5 +1,9 @@
 # Spec: The `edit` Script Format (`ast-editor`)
 
+> Delivered. Kept as the record of what was decided and why. Section 3 is still
+> the grammar the parser implements, and section 5 is the test suite in
+> `tests/edit_script_tests.rs`.
+
 A line-oriented format for `edit_lines`, read from stdin, so that an edit batch
 can be written in a shell heredoc with no escaping.
 

@@ -2,16 +2,18 @@
 
 Work that could plausibly happen. Each entry names the condition that would
 make it worth scheduling — an entry without one is an ambition, not a plan.
-Nothing here is a commitment; an item earns a spec in `docs/specs/` when its
+Nothing here is a commitment; an item earns a spec of its own when its
 condition is met.
 
 Designs that were reasoned out of existence are in
 [discarded](discarded.md) instead, so that reading this list means reading only
 what might still become work.
 
-Active spec: [the edit script format](specs/edit-script-spec.md).
-Delivered: [dry-run preview](specs/dry-run-preview-spec.md),
-[index-backed line identity](specs/persistent-line-ids-spec.md).
+Nothing is scheduled: no entry below has met its condition. Delivered work is
+in [archive](archive/), where
+[index-backed line identity](archive/persistent-line-ids-spec.md) is the one
+worth reading for how the store works today — its sections 6 to 8 describe the
+schema, the cache lifecycle, and the invariants.
 
 ## From the persistent line IDs design
 

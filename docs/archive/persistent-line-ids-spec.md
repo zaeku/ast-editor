@@ -1,5 +1,9 @@
 # Spec: Index-Backed Line Identity (`ast-editor`)
 
+> Delivered, all three phases. The phase framing is how it was built, not how it
+> works: sections 6 to 8 — the schema, the cache lifecycle, and the invariants —
+> describe the store as it stands, and are the part worth reading.
+
 Turns the session store from a copy of the file into an index over it, then
 makes the identity in that index survive external edits and restarts.
 

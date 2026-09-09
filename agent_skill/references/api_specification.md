@@ -1,6 +1,6 @@
 # API Specification - `ast-editor`
 
-This document defines the interface, parameters, and return formats for the `ast-editor` MCP tool suite.
+This document defines the interface, parameters, and return formats for the `ast-editor` tool suite.
 
 ---
 

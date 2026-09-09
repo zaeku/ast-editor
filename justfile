@@ -71,26 +71,3 @@ uninstall:
     rm -f '{{bin_dir}}/ast-editor'
     rm -rf '{{share_dir}}' '{{skill_dir}}'
     @echo 'removed {{bin_dir}}/ast-editor, {{share_dir}} and {{skill_dir}}'
-
-# Separate from `install` on purpose: a client that mounts this over MCP keeps
-# every tool schema in its context for the whole conversation, which is the cost
-# the command form exists to avoid. Ask for it only if a client needs it.
-
-# Register the installed binary as an MCP server in a client config.
-install-mcp config='':
-    #!/usr/bin/env bash
-    set -euo pipefail
-    config='{{config}}'
-    if [[ -z "$config" ]]; then
-        echo 'Pass the client config to edit, e.g.' >&2
-        echo '  just install-mcp ~/.claude.json' >&2
-        exit 2
-    fi
-    python3 - "$config" "{{bin_dir}}/ast-editor" <<'PY'
-    import json, sys, pathlib
-    config, command = pathlib.Path(sys.argv[1]).expanduser(), sys.argv[2]
-    data = json.loads(config.read_text()) if config.exists() else {}
-    data.setdefault('mcpServers', {})['ast-editor'] = {'command': command, 'args': ['mcp']}
-    config.write_text(json.dumps(data, indent=2) + '\n')
-    print(f'registered ast-editor in {config}')
-    PY

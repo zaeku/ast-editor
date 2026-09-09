@@ -77,42 +77,12 @@ fn test_a_failure_goes_to_stderr_with_a_nonzero_status() {
 }
 
 #[test]
-fn test_mcp_mode_still_answers_json_rpc() {
-    use std::io::Write;
-    use std::process::Stdio;
-
-    let file = scratch("served.rs", "fn main() {}\n");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
-        .arg("mcp")
-        .env("AST_EDITOR_CACHE_DIR", store_for("mcp"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-
-    let request = format!(
-        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"view_lines","arguments":{{"filepath":"{}"}}}}}}"#,
-        file.display()
-    );
-    child.stdin.as_mut().unwrap().write_all(format!("{}\n", request).as_bytes()).unwrap();
-    child.stdin.take();
-
-    let out = child.wait_with_output().unwrap();
-    let response: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
-    assert_eq!(response["jsonrpc"], "2.0");
-    assert!(response["result"]["content"][0]["text"].as_str().unwrap().contains("fn main() {}"));
-}
-
-#[test]
-fn test_a_bare_invocation_asks_rather_than_serving() {
-    // Serving MCP used to be what this did. A client configured without the
-    // subcommand would otherwise sit waiting on stdin, so it has to fail.
+fn test_a_bare_invocation_asks_rather_than_waiting() {
     let out = ast_editor("bare", &[]);
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stdout.is_empty(), "usage went to stdout");
     let text = String::from_utf8_lossy(&out.stderr);
-    assert!(text.contains("ast-editor mcp"), "{}", text);
+    assert!(text.contains("ast-editor edit"), "{}", text);
 }
 
 #[test]

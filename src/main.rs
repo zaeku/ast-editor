@@ -1,11 +1,8 @@
 use ast_editor::parser::ParserManager;
-use ast_editor::mcp::{McpServer, JsonRpcRequest};
 use ast_editor::tools::ToolDispatcher;
 use std::sync::Arc;
 use anyhow::Context;
-use tracing::{info, error, debug};
 use tracing_subscriber::EnvFilter;
-use tokio::io::{stdin, stdout, AsyncBufReadExt, BufReader, AsyncWriteExt};
 
 const USAGE: &str = "\
 ast-editor — line-precise editing over tree-sitter
@@ -13,7 +10,6 @@ ast-editor — line-precise editing over tree-sitter
     ast-editor edit <file> < script  apply an edit script read from stdin
     ast-editor skill [topic]         the skill document, or one of its references
     ast-editor <tool> <file> [opts]  call one tool and print its output
-    ast-editor mcp                   serve MCP over JSON-RPC on stdin
     ast-editor --version             version, and the grammars it can reach
     ast-editor --help                this text
 
@@ -38,7 +34,7 @@ working directory:
 
 A shape no option can carry, such as an array of edits, goes in as JSON:
 
-    ast-editor edit_lines src/main.rs --json '{\"edits\":[...]}'
+    ast-editor edit src/main.rs --json '{\"edits\":[...]}'
 ";
 
 #[tokio::main]
@@ -46,13 +42,6 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.first().map(String::as_str) {
-        // Serving MCP has to be asked for. It used to be what a bare
-        // invocation did, which meant the command form was the exception in a
-        // tool whose documented interface is the command form.
-        Some("mcp") => {
-            init_tracing(tracing::Level::INFO);
-            serve_mcp().await
-        }
         Some("edit") => {
             init_tracing(tracing::Level::WARN);
             match run_edit(&args[1..]).await {
@@ -201,55 +190,4 @@ async fn call_with(tool: &str, arguments: serde_json::Value) -> anyhow::Result<S
         return Ok(serde_json::to_string_pretty(&result)?);
     }
     Ok(texts.join("\n"))
-}
-
-async fn serve_mcp() -> anyhow::Result<()> {
-    info!("Bootstrapping ast-editor...");
-    let parser_manager = ParserManager::new()?;
-    let mcp_server = McpServer::new(parser_manager);
-    info!("McpServer & Headless Wasmtime initialized successfully.");
-
-    let stdin = stdin();
-    let mut reader = BufReader::new(stdin).lines();
-    let mut stdout = stdout();
-
-    info!("Ready for JSON-RPC messages via Stdin.");
-    while let Some(line) = reader.next_line().await? {
-        let line_trimmed = line.trim();
-        if line_trimmed.is_empty() {
-            continue;
-        }
-
-        debug!("Received raw message: {}", line_trimmed);
-
-        let request: JsonRpcRequest = match serde_json::from_str(line_trimmed) {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Failed to parse JSON-RPC request: {:?}", e);
-                let err_response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32700,
-                        "message": format!("Parse error: {}", e)
-                    },
-                    "id": null
-                });
-                let resp_str = serde_json::to_string(&err_response)? + "\n";
-                stdout.write_all(resp_str.as_bytes()).await?;
-                stdout.flush().await?;
-                continue;
-            }
-        };
-
-        let response = mcp_server.handle_request(request).await;
-
-        if response.id.is_some() || response.error.is_some() || response.result.is_some() {
-            let resp_str = serde_json::to_string(&response)? + "\n";
-            stdout.write_all(resp_str.as_bytes()).await?;
-            stdout.flush().await?;
-        }
-    }
-
-    info!("ast-editor Stdio stream closed.");
-    Ok(())
 }

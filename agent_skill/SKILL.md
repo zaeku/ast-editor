@@ -74,10 +74,6 @@ api` the full parameter reference rendered from the live schemas, and
 `ast-editor --version` reports the grammar set the binary is paired with, which
 is the first thing to check when a file will not parse.
 
-The same binary serves MCP over JSON-RPC on stdin when asked — `ast-editor mcp`
-— for clients that expect that. Prefer the command form: it keeps no tool
-schemas resident in context.
-
 ---
 
 ## 🔎 Finding What to Edit

@@ -47,13 +47,10 @@ skill document calls the command by name.
 
 ---
 
-## 🚀 Two Ways to Call It
+## 🚀 How to Call It
 
-The tools are the same either way; only the envelope differs.
-
-**Command line** — one tool, one call, arguments as the same JSON object the
-MCP call takes. A tool is named by any unambiguous prefix, so the `_lines` and
-`_ast` suffixes can be left off (`view` is `view_lines`):
+One tool, one call. A tool is named by any unambiguous prefix, so the `_lines`
+and `_ast` suffixes can be left off (`view` is `view_lines`):
 
 ```bash
 ast-editor view_lines src/main.rs --query "fn main"
@@ -85,23 +82,14 @@ EOF
 `end_id`, so finding a line by content or by structure already yields the IDs
 that edit it — no line numbers, and no `grep` pass first.
 
-**MCP server** — for clients that expect one. It has to be asked for, because
-a client mounting this over MCP keeps every tool schema in its context for the
-whole conversation:
+A tool prints what it has to say on stdout, so it pipes:
 
 ```bash
-ast-editor mcp                    # serve JSON-RPC over stdin
-just install-mcp ~/.claude.json   # register it in a client config
+ast-editor edit src/main.rs --dry-run < edits.txt | jq -r .preview_id
 ```
 
-The tool's own output goes to stdout with no JSON-RPC wrapper, so it pipes:
-
-```bash
-ast-editor edit_lines '{"filepath":"...","edits":[...],"dry_run":true}' | jq -r .preview_id
-```
-
-Failures print to stderr and exit non-zero. Because the arguments *are* the
-tool schema, there is no second interface to keep in step with it.
+Failures print to stderr and exit non-zero. Because the options *are* the tool
+schema, there is no second interface to keep in step with it.
 
 ---
 

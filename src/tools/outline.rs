@@ -95,13 +95,13 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
         let root = comrak::parse_document(&arena, &code, &options);
         let line_range_end = code.lines().count();
         let mut formatted = String::new();
-        format_comrak_node(root, &code, 0, max_depth, &mut formatted);
+        format_comrak_node(root, 0, max_depth, &mut formatted);
         
         let root_kind = {
             let data = root.data.borrow();
             let debug_str = format!("{:?}", data.value);
             debug_str
-                .split(|c| c == '(' || c == '{' || c == ' ')
+                .split(['(', '{', ' '])
                 .next()
                 .unwrap_or("Document")
                 .to_string()
@@ -143,7 +143,6 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
 
 fn format_comrak_node<'a>(
     node: &'a comrak::nodes::AstNode<'a>,
-    code: &str,
     depth: usize,
     max_depth: usize,
     out: &mut String,
@@ -154,7 +153,7 @@ fn format_comrak_node<'a>(
     // Extract variant name from Debug representation of NodeValue
     let debug_str = format!("{:?}", data.value);
     let kind = debug_str
-        .split(|c| c == '(' || c == '{' || c == ' ')
+        .split(['(', '{', ' '])
         .next()
         .unwrap_or("Unknown");
         
@@ -196,7 +195,7 @@ fn format_comrak_node<'a>(
     if depth < max_depth {
         let mut child = node.first_child();
         while let Some(c) = child {
-            format_comrak_node(c, code, depth + 1, max_depth, out);
+            format_comrak_node(c, depth + 1, max_depth, out);
             child = c.next_sibling();
         }
     } else if node.first_child().is_some() {

@@ -366,9 +366,7 @@ pub async fn edit_lines_with_validation(
         SyntaxValidationResult::SyntaxErrors { errors, contexts, _raw_ast: _ } => {
             if strict_validation {
                 // Construct a detailed error message
-                let mut err_msg = format!(
-                    "Validation error: Syntactical errors detected in code after edits. Compilation/AST verification aborted.\n"
-                );
+                let mut err_msg = "Validation error: Syntactical errors detected in code after edits. Compilation/AST verification aborted.\n".to_string();
                 for (msg, ctx) in errors.iter().zip(contexts.iter()) {
                     err_msg.push_str(&format!("  - {}\n", msg));
                     err_msg.push_str("    Context:\n");
@@ -435,10 +433,13 @@ pub async fn edit_lines_with_validation(
                     }
                 }
 
+                let message = serde_json::to_string(
+                    &format!("saved (validation failed because: {})", reason)
+                )?;
                 let output = format!(
-                    "{{\n  \"status\": \"saved\",\n  \"modified_ids\": {},\n  \"message\": \"saved (validation failed because: {})\"\n}}",
+                    "{{\n  \"status\": \"saved\",\n  \"modified_ids\": {},\n  \"message\": {}\n}}",
                     indented_ids,
-                    reason
+                    message
                 );
                 return Ok(output);
             }

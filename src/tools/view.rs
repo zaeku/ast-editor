@@ -56,9 +56,9 @@ pub fn view_lines(
 
         if matches.is_empty() {
             let config = crate::tools::metadata::get_config();
-            let msg = config.error_no_query_match.replace("{}", &q.replace("\"", "\\\""));
+            let msg = serde_json::to_string(&config.error_no_query_match.replace("{}", q))?;
             let metadata_json = format!(
-                "{{\n  \"enclosing_contexts\": [],\n  \"ids\": [],\n  \"showing_start\": 1,\n  \"showing_end\": 0,\n  \"total_lines\": {},\n  \"total_bytes\": {},\n  \"message\": \"{}\"\n}}",
+                "{{\n  \"enclosing_contexts\": [],\n  \"ids\": [],\n  \"showing_start\": 1,\n  \"showing_end\": 0,\n  \"total_lines\": {},\n  \"total_bytes\": {},\n  \"message\": {}\n}}",
                 total_lines,
                 std::path::Path::new(filepath).metadata()?.len(),
                 msg

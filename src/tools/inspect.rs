@@ -719,7 +719,7 @@ fn collect_markdown_matches<'a>(
     // Extract variant name from Debug representation of NodeValue
     let debug_str = format!("{:?}", data.value);
     let kind = debug_str
-        .split(|c| c == '(' || c == '{' || c == ' ')
+        .split(['(', '{', ' '])
         .next()
         .unwrap_or("Unknown");
 
@@ -746,10 +746,8 @@ fn collect_markdown_matches<'a>(
                     is_match = true;
                 }
             }
-            "lists" => {
-                if kind == "List" {
-                    is_match = true;
-                }
+            "lists" if kind == "List" => {
+                is_match = true;
             }
             _ => {}
         }

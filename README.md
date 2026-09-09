@@ -52,12 +52,13 @@ skill document calls the command by name.
 The tools are the same either way; only the envelope differs.
 
 **Command line** — one tool, one call, arguments as the same JSON object the
-MCP call takes:
+MCP call takes. A tool is named by any unambiguous prefix, so the `_lines` and
+`_ast` suffixes can be left off (`view` is `view_lines`):
 
 ```bash
 ast-editor view_lines src/main.rs --query "fn main"
 ast-editor inspect_ast src/main.rs --template functions
-ast-editor edit_lines src/main.rs --apply p1f
+ast-editor edit src/main.rs --apply p1f
 ast-editor --version
 ast-editor --help
 ```

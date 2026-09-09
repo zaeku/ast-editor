@@ -21,14 +21,20 @@ ast-editor inspect_ast src/config.rs --template functions
 ast-editor --help
 ```
 
+A tool is named by any unambiguous prefix, so on the command line the `_lines`
+and `_ast` suffixes can be left off: `view` is `view_lines`, `inspect` is
+`inspect_ast`.
+
 The options are the schema: every parameter `ast-editor skill api` lists can be
 passed as `--kebab-case`, and a switch takes `--flag`, `--flag false` or
 `--no-flag`. A shape no option can carry, such as an array of edits, goes in as
 `--json '{...}'`, and a whole argument object still works as one JSON string.
 
-**Editing uses a script on stdin, not JSON.** One directive per line, each
-block fenced with three or more backticks, so code goes in exactly as written —
-no quoting, no `\n`, no escaping of any kind:
+**Editing uses a script on stdin, not JSON** — unless an option already says
+what to change (`--apply <preview_id>`, or `--json '{"edits":[...]}'`), in
+which case stdin is not read. One directive per line, each block fenced with
+three or more backticks, so code goes in exactly as written — no quoting, no
+`\n`, no escaping of any kind:
 
 ```bash
 ast-editor edit /abs/path/file.rs <<'EOF'
@@ -123,7 +129,7 @@ null `query` means nothing was asked for — not that the file is empty.
 
    ```bash
    ID=$(ast-editor edit src/config.rs --dry-run < edits.txt | jq -r .preview_id)
-   ast-editor edit_lines src/config.rs --apply "$ID"
+   ast-editor edit src/config.rs --apply "$ID"
    ```
 
 5. **Graceful Degradation** — Markdown, text, and configuration files are

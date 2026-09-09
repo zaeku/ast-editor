@@ -28,11 +28,13 @@ block fenced with three or more backticks:
     EOF
 
 Options are the tool's own parameters, so whatever `ast-editor skill api`
-lists can be passed as one. Paths are relative to the working directory:
+lists can be passed as one. A tool is named by any unambiguous prefix, so the
+`_lines` and `_ast` suffixes can be left off. Paths are relative to the
+working directory:
 
-    ast-editor view_lines src/main.rs --start-line 40 --end-line 80
-    ast-editor inspect_ast src/main.rs --template functions
-    ast-editor edit_lines src/main.rs --apply p1f
+    ast-editor view src/main.rs --start-line 40 --end-line 80
+    ast-editor inspect src/main.rs --template functions
+    ast-editor edit src/main.rs --apply p1f
 
 A shape no option can carry, such as an array of edits, goes in as JSON:
 
@@ -53,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some("edit") => {
             init_tracing(tracing::Level::WARN);
-            match run_edit_script(&args[1..]).await {
+            match run_edit(&args[1..]).await {
                 Ok(output) => {
                     println!("{}", output);
                     Ok(())
@@ -145,49 +147,48 @@ fn tool_names() -> Vec<String> {
         .collect()
 }
 
-/// Apply an edit script read from stdin. The script says what to change; every
-/// flag before it is the same option the JSON form takes.
-async fn run_edit_script(args: &[String]) -> anyhow::Result<String> {
+/// The one edit command. Its options are `edit_lines`'s own parameters; when
+/// none of them says what to change, the edit script on stdin does.
+async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     use std::io::Read;
 
-    let mut filepath = None;
-    let mut dry_run = false;
-    let mut strict = false;
-    for arg in args {
-        match arg.as_str() {
-            "--dry-run" => dry_run = true,
-            "--strict" => strict = true,
-            flag if flag.starts_with('-') => anyhow::bail!("Unknown option '{}' for edit.", flag),
-            path if filepath.is_none() => filepath = Some(path.to_string()),
-            extra => anyhow::bail!("edit takes one file; also given '{}'.", extra),
+    // `--strict` is how the script form has always spelled strict_validation.
+    let args: Vec<String> = args.iter()
+        .map(|arg| if arg == "--strict" { "--strict-validation".to_string() } else { arg.clone() })
+        .collect();
+
+    let mut arguments = ast_editor::cli::arguments("edit_lines", &args)?;
+    let given = arguments.as_object_mut().context("edit takes options, not a bare value")?;
+    if !given.contains_key("filepath") {
+        anyhow::bail!("edit needs a file: ast-editor edit <file> < script");
+    }
+
+    // Reading stdin is what makes this command the script form, so it happens
+    // only when nothing on the command line already carries the edits.
+    if !given.contains_key("edits") && !given.contains_key("apply") {
+        let mut script = String::new();
+        std::io::stdin().read_to_string(&mut script)
+            .context("Failed to read the edit script from stdin")?;
+        if script.trim().is_empty() {
+            anyhow::bail!("The edit script is empty. It is read from stdin, so pass it as a heredoc.");
         }
-    }
-    let filepath = ast_editor::cli::absolute(
-        &filepath.context("edit needs a file: ast-editor edit <file> < script")?
-    )?;
-
-    let mut script = String::new();
-    std::io::stdin().read_to_string(&mut script).context("Failed to read the edit script from stdin")?;
-    if script.trim().is_empty() {
-        anyhow::bail!("The edit script is empty. It is read from stdin, so pass it as a heredoc.");
+        let edits = ast_editor::tools::script::parse(&script)?;
+        given.insert("edits".to_string(), serde_json::to_value(edits)?);
     }
 
-    let edits = ast_editor::tools::script::parse(&script)?;
-
-    let parser_manager = ParserManager::new()?;
-    let repository = ast_editor::tools::session_db::SqliteSessionRepository;
-    if dry_run {
-        ast_editor::tools::edit::edit_lines_dry_run(&repository, &filepath, edits, &parser_manager).await
-    } else {
-        ast_editor::tools::edit::edit_lines_with_validation(&repository, &filepath, edits, strict, &parser_manager).await
-    }
+    call_with("edit_lines", arguments).await
 }
 
 /// Run one tool and return what it printed, so the shell sees the tool's own
 /// output rather than the JSON-RPC envelope around it.
 async fn call_once(tool: &str, args: &[String]) -> anyhow::Result<String> {
-    let arguments = ast_editor::cli::arguments(tool, args)?;
+    let tool = ast_editor::cli::resolve(tool)?;
+    let arguments = ast_editor::cli::arguments(&tool, args)?;
+    call_with(&tool, arguments).await
+}
 
+/// Dispatch one tool call that is already built.
+async fn call_with(tool: &str, arguments: serde_json::Value) -> anyhow::Result<String> {
     let parser_manager = Arc::new(ParserManager::new()?);
     let result = ToolDispatcher::new().call_tool(tool, arguments, &parser_manager).await?;
 

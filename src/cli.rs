@@ -14,17 +14,37 @@ use serde_json::{Map, Value};
 
 use crate::tools::ToolDispatcher;
 
+/// The tool a command-line name means. On the command line the binary name
+/// already says these are about a syntax tree, so the `_lines` and `_ast`
+/// suffixes carry nothing: any unambiguous prefix names the tool, and `view`
+/// is `view_lines`.
+pub fn resolve(tool: &str) -> Result<String> {
+    let names: Vec<String> = ToolDispatcher::new().list_tools().iter()
+        .filter_map(|candidate| candidate["name"].as_str().map(str::to_string))
+        .collect();
+
+    if names.iter().any(|name| name == tool) {
+        return Ok(tool.to_string());
+    }
+    let matched: Vec<&String> = names.iter().filter(|name| name.starts_with(tool)).collect();
+    match matched.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => bail!("Unknown tool '{}'. Available: {}", tool, names.join(", ")),
+        many => bail!(
+            "'{}' could be any of: {}.",
+            tool,
+            many.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(", ")
+        ),
+    }
+}
+
 /// The schema of one tool, or an error naming the ones that exist.
 fn schema_of(tool: &str) -> Result<Value> {
+    let name = resolve(tool)?;
     ToolDispatcher::new().list_tools().into_iter()
-        .find(|candidate| candidate["name"].as_str() == Some(tool))
+        .find(|candidate| candidate["name"].as_str() == Some(name.as_str()))
         .map(|candidate| candidate["inputSchema"].clone())
-        .with_context(|| {
-            let names: Vec<String> = ToolDispatcher::new().list_tools().iter()
-                .filter_map(|t| t["name"].as_str().map(str::to_string))
-                .collect();
-            format!("Unknown tool '{}'. Available: {}", tool, names.join(", "))
-        })
+        .with_context(|| format!("Unknown tool '{}'", name))
 }
 
 /// An absolute path, so that a session is keyed the same however the caller
@@ -171,6 +191,18 @@ mod tests {
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn test_a_prefix_names_the_tool_it_can_only_mean() {
+        assert_eq!(resolve("view").unwrap(), "view_lines");
+        assert_eq!(resolve("inspect").unwrap(), "inspect_ast");
+        assert_eq!(resolve("create").unwrap(), "create_lines");
+        // The written-out name keeps working, and an unknown one still says so.
+        assert_eq!(resolve("dump_ast").unwrap(), "dump_ast");
+        assert!(resolve("nope").is_err());
+        // A prefix two tools share names neither of them.
+        assert!(resolve("").is_err());
     }
 
     #[test]

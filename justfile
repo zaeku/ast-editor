@@ -21,10 +21,15 @@ build:
 test:
     cargo test
 
+# Format with rustfmt's defaults.
+fmt:
+    cargo fmt
+
 # Needs clippy and rustc from one toolchain; the devshell supplies both.
 
-# Lint.
+# Lint, and check the formatting.
 lint:
+    cargo fmt --check
     cargo clippy --all-targets
 
 # The generator runs as a test, so this is a subset of what `test` does.

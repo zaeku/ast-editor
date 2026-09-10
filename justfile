@@ -1,12 +1,10 @@
 # ast-editor tasks. Run `just` for the list.
 #
 # The binary is a build product, so it is installed rather than distributed:
-# `just install` puts it under AST_EDITOR_PREFIX, ~/.agents/dev by default.
-# Set AST_EDITOR_PREFIX=~/.agents to install where an agent's PATH sees it.
-# The skill content under agent_skill/ is separate — that is what a skills
-# installer consumes.
+# `just install` puts it on PATH for this machine. The skill content under
+# agent_skill/ is separate — that is what a skills installer consumes.
 
-prefix := env('AST_EDITOR_PREFIX', env('HOME') / '.agents' / 'dev')
+prefix := env('AST_EDITOR_PREFIX', env('HOME') / '.agents')
 bin_dir := prefix / 'bin'
 share_dir := prefix / 'share' / 'ast-editor'
 skill_dir := prefix / 'skills' / 'ast-editor'

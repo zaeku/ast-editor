@@ -81,8 +81,10 @@ is the first thing to check when a file will not parse.
 You never need a line number, and never need `grep` first. Three ways in, all
 returning the line IDs `edit` takes.
 
-`view` puts the id on the line it names — `<id>|<line>: <text>` — so nothing
-has to be cross-referenced against a table. A line too long to print in one
+`view` puts the id on the line it names — `<id>|<line>: <text>`, padded so the
+ids, the numbers and the text each stand in one column — so nothing has to be
+cross-referenced against a table, and a line's own indentation is what the
+text column shows. A line too long to print in one
 row is broken at a fixed count of characters onto `│:` and `└:` rows; they
 join back to exactly what the file holds, since the break adds and removes
 nothing. `--only-ids` answers with ids and line numbers as JSON instead.

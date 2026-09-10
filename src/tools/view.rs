@@ -416,8 +416,8 @@ mod tests {
                         if has_pending {
                             lines.push(serde_json::json!([current_id, current_n, current_content]));
                         }
-                        current_id = id.to_string();
-                        current_n = number.parse::<usize>().unwrap();
+                        current_id = id.trim().to_string();
+                        current_n = number.trim().parse::<usize>().unwrap();
                         current_content = content.to_string();
                         has_pending = true;
                     }

@@ -28,7 +28,7 @@ pub fn retrieve_and_format_lines(
 ) -> Result<FormattedLinesResult> {
     let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
     let mut id_items = Vec::new();
-    let mut text_lines = Vec::new();
+    let mut pending: Vec<(String, usize, Vec<String>)> = Vec::new();
 
     let mut actual_end_line = start_line.saturating_sub(1);
     let mut cumulative_bytes = 0;
@@ -80,10 +80,6 @@ pub fn retrieve_and_format_lines(
 
         id_items.push(format!("[\"{}\", {}]", line_id, current_idx));
         if !only_ids {
-            // The id is on the line it names, so reading one costs no
-            // cross-reference against a table further down the response.
-            let prefix = format!("{}|{}: ", line_id, current_idx);
-            let indent = " ".repeat(prefix.len().saturating_sub(3));
             let kept = &chars[..std::cmp::min(chars.len(), segments_to_add * SEGMENT_LENGTH)];
             let rows: Vec<String> = if kept.is_empty() {
                 vec![String::new()]
@@ -92,22 +88,41 @@ pub fn retrieve_and_format_lines(
                     .map(|row| row.iter().collect())
                     .collect()
             };
-            let last = rows.len() - 1;
-            for (row_idx, row) in rows.iter().enumerate() {
-                if row_idx == 0 {
-                    text_lines.push(format!("{}{}", prefix, row));
-                } else if row_idx == last {
-                    text_lines.push(format!("{}└: {}", indent, row));
-                } else {
-                    text_lines.push(format!("{}│: {}", indent, row));
-                }
-            }
+            pending.push((line_id.clone(), current_idx, rows));
         }
         segment_count += segments_to_add;
         actual_end_line = current_idx;
 
         if line_cap_reached {
             break;
+        }
+    }
+
+    // One column for the id, one for the number, so a line's own indentation
+    // reads true: with a ragged prefix two lines indented the same start at
+    // different columns and the block looks like something it is not. The
+    // padding is all before the colon — a space after it is the file's.
+    let id_width = pending.iter().map(|(id, _, _)| id.len()).max().unwrap_or(0);
+    let number_width = pending
+        .iter()
+        .map(|(_, number, _)| number.to_string().len())
+        .max()
+        .unwrap_or(0);
+    let indent = " ".repeat(id_width + number_width);
+    let mut text_lines = Vec::new();
+    for (line_id, number, rows) in &pending {
+        let last = rows.len() - 1;
+        for (row_idx, row) in rows.iter().enumerate() {
+            if row_idx == 0 {
+                text_lines.push(format!(
+                    "{:<id_width$}|{:>number_width$}: {}",
+                    line_id, number, row
+                ));
+            } else if row_idx == last {
+                text_lines.push(format!("{}└: {}", indent, row));
+            } else {
+                text_lines.push(format!("{}│: {}", indent, row));
+            }
         }
     }
 

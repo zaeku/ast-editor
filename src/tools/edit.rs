@@ -637,7 +637,7 @@ mod tests {
         for row in lines_text.lines() {
             if let Some((head, _)) = row.split_once(": ") {
                 if let Some((id, _)) = head.split_once('|') {
-                    current = id.to_string();
+                    current = id.trim().to_string();
                 }
             }
             if row.contains(pattern) {

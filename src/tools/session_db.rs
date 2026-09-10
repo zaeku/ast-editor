@@ -1542,8 +1542,8 @@ mod tests {
                 let (head, content) = row.split_once(": ").unwrap();
                 let (id, n) = head.split_once('|').unwrap();
                 lines.push(serde_json::json!([
-                    id,
-                    n.parse::<usize>().unwrap(),
+                    id.trim(),
+                    n.trim().parse::<usize>().unwrap(),
                     content
                 ]));
             }

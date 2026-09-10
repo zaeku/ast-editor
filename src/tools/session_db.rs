@@ -653,7 +653,7 @@ pub trait SessionRepository: Send + Sync {
     fn get_session_mtime(&self, filepath: &str) -> Result<Option<i64>>;
     fn get_session_crlf(&self, session_id: &str) -> Result<bool>;
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>>;
-    fn find_matching_lines(&self, session_id: &str, query: &str) -> Result<Vec<usize>>;
+    fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>>;
     fn smart_resync(&self, filepath: &str, session_id: &str, target_ids: &[String]) -> Result<()>;
     fn create_preview(&self, filepath: &str, edits: &[LineEdit]) -> Result<String>;
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
@@ -680,14 +680,14 @@ impl SessionRepository for SqliteSessionRepository {
         Ok(total_lines)
     }
 
-    fn find_matching_lines(&self, session_id: &str, query: &str) -> Result<Vec<usize>> {
+    fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>> {
         let mut conn = get_db_connection()?;
         let buffer = load_buffer(&mut conn, session_id)?;
         Ok(buffer
             .lines
             .iter()
             .enumerate()
-            .filter(|(_, line)| line.content.contains(query))
+            .filter(|(_, line)| pattern.is_match(&line.content))
             .map(|(idx, _)| idx + 1)
             .collect())
     }
@@ -1532,6 +1532,7 @@ mod tests {
             only_ids,
             None,
             None,
+            None,
         )?;
         let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
 
@@ -1898,7 +1899,8 @@ mod tests {
             Some(3),
             None,
             None,
-            None
+            None,
+            None,
         )
         .is_err());
         assert!(crate::tools::view::view_lines(
@@ -1908,7 +1910,8 @@ mod tests {
             Some(1),
             None,
             None,
-            None
+            None,
+            None,
         )
         .is_err());
 

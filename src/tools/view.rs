@@ -6,6 +6,7 @@ pub struct ViewLinesOutput {
     pub metadata_json: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn view_lines(
     repository: &impl SessionRepository,
     filepath: &str,
@@ -14,6 +15,7 @@ pub fn view_lines(
     only_ids: Option<bool>,
     query: Option<String>,
     context_lines: Option<usize>,
+    fixed_string: Option<bool>,
 ) -> Result<ViewLinesOutput> {
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;
@@ -53,8 +55,22 @@ pub fn view_lines(
         }
         let ctx_lines = context_lines.unwrap_or(5);
 
-        // Find matching lines
-        let matches = repository.find_matching_lines(&session_id, q)?;
+        // The query is a regular expression, so `(?i)` at its front is how a
+        // search is made case-insensitive, and a search for text that reads as
+        // a pattern asks for it to be taken literally.
+        let pattern = if fixed_string.unwrap_or(false) {
+            regex::Regex::new(&regex::escape(q))
+        } else {
+            regex::Regex::new(q)
+        }
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "'{}' is not a regular expression: {}. Pass fixed_string to search for it literally.",
+                q,
+                err
+            )
+        })?;
+        let matches = repository.find_matching_lines(&session_id, &pattern)?;
 
         if matches.is_empty() {
             let config = crate::tools::metadata::get_config();
@@ -376,6 +392,7 @@ mod tests {
             Some(start_line),
             Some(end_line),
             only_ids,
+            None,
             None,
             None,
         )?;
@@ -742,6 +759,7 @@ fn helper_func() {
             None,
             Some("field".to_string()),
             Some(1),
+            None,
         )?;
 
         let val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
@@ -799,6 +817,7 @@ Details here
             filepath_str,
             Some(1),
             Some(8),
+            None,
             None,
             None,
             None,

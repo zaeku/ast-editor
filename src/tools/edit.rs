@@ -662,6 +662,7 @@ mod tests {
             only_ids,
             None,
             None,
+            None,
         )
     }
 

@@ -109,7 +109,12 @@ impl ToolDispatcher {
                         },
                         "query": {
                             "type": "string",
-                            "description": "Optional search term to filter lines matching this keyword."
+                            "description": "Optional regular expression; only lines matching it are returned. Matched against the file's own lines, so it is unaffected by how the response is printed. Prefix with (?i) to ignore case."
+                        },
+                        "fixed_string": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "If true, 'query' is searched for literally rather than as a regular expression."
                         },
                         "context_lines": {
                             "type": "integer",
@@ -259,6 +264,7 @@ impl ToolDispatcher {
                     .get("context_lines")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as usize);
+                let fixed_string = arguments.get("fixed_string").and_then(|v| v.as_bool());
                 let repository = session_db::SqliteSessionRepository;
                 let res = view::view_lines(
                     &repository,
@@ -268,6 +274,7 @@ impl ToolDispatcher {
                     only_ids,
                     query,
                     context_lines,
+                    fixed_string,
                 )?;
 
                 let mut blocks = Vec::new();

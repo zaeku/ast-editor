@@ -98,10 +98,16 @@ ast-editor outline src/config.rs
 Pass `--sexp` instead to get the whole parse tree, which is what a custom
 `inspect` query is written against.
 
-**By content** — `view` takes a `query`, with optional `context_lines`:
+**By content** — `view` takes a `query`, a regular expression, with optional
+`context_lines`. Search with it rather than by piping the output to `grep` or
+`rg`: the query is matched against the file's own lines, while a pipe sees the
+printed rows, where the id prefix defeats `^` and a wrapped line hides a match
+that straddles the break. `(?i)` at the front ignores case, and
+`--fixed-string` takes the query literally.
 
 ```bash
 ast-editor view src/config.rs --query get_wasm_dir --context-lines 2
+ast-editor view src/config.rs --query '^\s*pub fn' --context-lines 0
 ```
 
 **By structure** — `inspect` matches carry `start_id` and `end_id`, so a

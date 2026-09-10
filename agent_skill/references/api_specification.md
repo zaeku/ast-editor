@@ -99,12 +99,17 @@ Retrieves a range of lines for any text file along with their persistent unique 
       "description": "Absolute path to the target file",
       "type": "string"
     },
+    "fixed_string": {
+      "default": false,
+      "description": "If true, 'query' is searched for literally rather than as a regular expression.",
+      "type": "boolean"
+    },
     "only_ids": {
       "description": "If true, only returns Line IDs and line numbers, omitting text content.",
       "type": "boolean"
     },
     "query": {
-      "description": "Optional search term to filter lines matching this keyword.",
+      "description": "Optional regular expression; only lines matching it are returned. Matched against the file's own lines, so it is unaffected by how the response is printed. Prefix with (?i) to ignore case.",
       "type": "string"
     },
     "start_line": {

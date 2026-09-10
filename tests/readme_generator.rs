@@ -98,6 +98,7 @@ async fn generate_readme() {
         None,
         None,
         None,
+        None,
     )
     .unwrap();
 
@@ -108,6 +109,7 @@ async fn generate_readme() {
         Some(1),
         Some(3),
         Some(true),
+        None,
         None,
         None,
     )

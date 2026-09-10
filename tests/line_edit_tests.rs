@@ -55,6 +55,7 @@ fn view_range(
         only_ids,
         None,
         None,
+        None,
     )?;
     let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
 
@@ -861,8 +862,17 @@ async fn test_view_lines_without_a_range_does_not_overflow() {
     let large = TestFile::new("norange_large.txt", &big);
     let repository = SqliteSessionRepository;
 
-    let res =
-        view::view_lines(&repository, small.path_str(), None, None, None, None, None).unwrap();
+    let res = view::view_lines(
+        &repository,
+        small.path_str(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let meta: serde_json::Value = serde_json::from_str(&res.metadata_json).unwrap();
     assert_eq!(meta["total_lines"], 1);
     assert!(
@@ -871,8 +881,17 @@ async fn test_view_lines_without_a_range_does_not_overflow() {
         meta
     );
 
-    let res =
-        view::view_lines(&repository, large.path_str(), None, None, None, None, None).unwrap();
+    let res = view::view_lines(
+        &repository,
+        large.path_str(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
     let meta: serde_json::Value = serde_json::from_str(&res.metadata_json).unwrap();
     assert_eq!(meta["total_lines"], 900);
     assert!(

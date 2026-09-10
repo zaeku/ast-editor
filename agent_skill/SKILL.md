@@ -1,14 +1,13 @@
 ---
 name: ast-editor
 description: >
-  Inspects code structure, finds target lines, and performs transactionally-validated line-level code edits using Tree-sitter. Resilient to syntax errors. Invoked as the `ast-editor` command.
+  Edits lines by id, validated as one transaction, and answers structural queries with Tree-sitter. Reads files a parser rejects. Invoked as the `ast-editor` command.
 ---
 
 # AST-based Code Editor and Inspector Skill
 
-A **general-purpose line-level editing framework** for any text file (Markdown,
-plain text, configuration), which **additionally** provides Abstract Syntax Tree
-queries and syntax validation for 21 programming and configuration languages.
+Edits any text file line by line, and answers structural queries and syntax
+checks for the 17 languages it carries a grammar for.
 
 ## 🚀 Invocation
 
@@ -24,16 +23,22 @@ ast-editor --help
 A tool is named by any unambiguous prefix, so `ins` is `inspect` and `cr` is
 `create`.
 
-The options are the schema: every parameter `ast-editor skill api` lists can be
-passed as `--kebab-case`, and a switch takes `--flag`, `--flag false` or
-`--no-flag`. A shape no option can carry, such as an array of edits, goes in as
-`--json '{...}'`, and a whole argument object still works as one JSON string.
+The options are the schema. Pass any parameter `ast-editor skill api` lists as
+`--kebab-case`. A boolean option takes `--flag`, `--flag false` or `--no-flag`.
+A shape no option can carry, such as an array of edits, goes in as
+`--json '{...}'`; a whole argument object still works as one JSON string.
 
-**Editing uses a script on stdin, not JSON** — unless an option already says
-what to change (`--apply <preview_id>`, or `--json '{"edits":[...]}'`), in
-which case stdin is not read. One directive per line, each block fenced with
-three or more backticks, so code goes in exactly as written — no quoting, no
-`\n`, no escaping of any kind:
+**Editing uses a script on stdin, not JSON.** What `edit` reads depends on the
+options it was given:
+
+- No option says what to change → the script on stdin does.
+- `--apply <preview_id>` or `--json '{"edits":[...]}'` → `edit` does not read
+  stdin at all.
+
+Write one directive per line, and fence each payload with three or more
+backticks. If the payload itself contains a line of three backticks, open with
+four: the closing fence must be at least as long, exactly as in Markdown. Code
+goes in as written — no quoting, no `\n`, no escaping of any kind:
 
 ```bash
 ast-editor edit /abs/path/file.rs <<'EOF'
@@ -48,21 +53,18 @@ delete 7c#aabb
 EOF
 ```
 
-Directives: `replace <id>`, `replace_range <start> <end>`, `insert_after <id>`,
-`insert_before <id>`, `append`, `prepend` (all with a block); `delete <id>` and
-`move <start> [<end>] before|after <dest>` (no block). Add `--dry-run` or
-`--strict` after the file.
+Directives taking a payload: `replace <id>`, `replace_range <start> <end>`,
+`insert_after <id>`, `insert_before <id>`, `append`, `prepend`. Directives
+taking none: `delete <id>`, `move <start> [<end>] before|after <dest>`.
 
-If the content itself contains a line of three backticks, open with four — the
-closing fence must be at least as long, exactly as in Markdown.
+Add `--dry-run` or `--strict` after the file. `--strict` is the
+`strict_validation` parameter the API reference names.
 
-Within one batch, do not target a line an earlier directive changed: the id
-carries that line's content hash, so it no longer matches and the batch is
-refused.
+Within one batch, do not target a line an earlier directive changed. The id
+carries that line's content hash, so it no longer matches and `edit` refuses
+the whole batch.
 
-The arguments are exactly the tool schema, so anything `ast-editor skill api`
-describes works here unchanged. Failures go to stderr with a non-zero exit
-status.
+Failures go to stderr with a non-zero exit status.
 
 **A response is a sequence of fenced blocks**, named by what they hold: the
 file's own language for code, `diff` for a diff, `json` for the data. So code
@@ -72,14 +74,23 @@ arrives unescaped and the data is still machine-readable:
 ast-editor view src/config.rs | awk '/^```json$/{f=1;next} /^```/{f=0} f' | jq .ids
 ````
 
-A fence is longer than any run of backticks that starts a line inside it — the
-rule the edit script reads — and no line of the json can begin with one, so a
-json block is always fenced with exactly three and the pattern above is exact.
-A code block holding a markdown file is not: match a run of three or more
-there, or take everything between the first fence and the last.
+A fence is longer than any run of backticks that starts a line inside it,
+which is the rule the edit script reads. Two cases follow:
 
-Tools: `outline`, `inspect`, `view`, `edit`, `create` — file, block, line,
-change, new file.
+- A `json` block is always exactly three, since no line of JSON can begin with
+  a backtick. The pattern above is an exact match for one.
+- A code block holding a markdown file can be longer. Match a run of three or
+  more, or take everything between the first fence and the last.
+
+Five tools, narrowing by scale: `outline` reads a whole file, `inspect` finds
+a block in it, `view` reads that block's lines, `edit` changes them, and
+`create` makes a file that does not exist yet. `create` refuses a path that
+does exist, so an existing file is only ever edited:
+
+```bash
+ast-editor create src/new.rs --content 'fn main() {}
+' --return-ids
+```
 
 This document and its references are carried inside the binary, so they are
 readable wherever it is: `ast-editor skill` prints this page, `ast-editor skill
@@ -93,15 +104,7 @@ is the first thing to check when a file will not parse.
 ## 🔎 Finding What to Edit
 
 You never need a line number, and never need `grep` first. Three ways in, all
-returning the line IDs `edit` takes.
-
-`view` puts the id on the line it names — `<id>|<line>: <text>`, padded so the
-ids, the numbers and the text each stand in one column — so nothing has to be
-cross-referenced against a table, and a line's own indentation is what the
-text column shows. A line too long to print in one
-row is broken at a fixed count of characters onto `│:` and `└:` rows; they
-join back to exactly what the file holds, since the break adds and removes
-nothing. `--only-ids` answers with ids and line numbers as JSON instead.
+returning the line ids `edit` takes.
 
 **By file** — `outline` lists what the file declares, which is the first look
 at one you have not read:
@@ -116,9 +119,9 @@ Pass `--sexp` instead to get the whole parse tree, which is what a custom
 
 **By content** — `view` takes a `query`, a regular expression, with optional
 `context_lines`. Search with it rather than by piping the output to `grep` or
-`rg`: the query is matched against the file's own lines, while a pipe sees the
-printed rows, where the id prefix defeats `^` and a wrapped line hides a match
-that straddles the break. `(?i)` at the front ignores case, and
+`rg`. `view` matches the query against the file's own lines, while a pipe sees
+the printed rows: there the id prefix defeats `^`, and a wrapped line hides a
+match that straddles the break. `(?i)` at the front ignores case, and
 `--fixed-string` takes the query literally.
 
 ```bash
@@ -126,8 +129,9 @@ ast-editor view src/config.rs --query get_wasm_dir --context-lines 2
 ast-editor view src/config.rs --query '^\s*pub fn' --context-lines 0
 ```
 
-**By structure** — `inspect` matches carry `start_id` and `end_id`, so a
-whole definition can be replaced in the next call:
+**By structure** — `inspect` searches, so give it a `query` or a `template`;
+called with neither, it says to run `outline` instead. Its matches carry
+`start_id` and `end_id`, so the next call can replace a whole definition:
 
 ```bash
 ast-editor inspect src/config.rs --template functions
@@ -139,27 +143,31 @@ replace_range <start_id> <end_id> ```
 EOF
 ```
 
-`inspect` searches, so it needs a `query` or a `template`; called with
-neither it says to run `outline` instead. An empty `matches` therefore always
-means the search found nothing, never that nothing was asked for.
+An empty `matches` therefore always means the search found nothing, never that
+nothing was asked for.
+
+`view` puts the id on the line it names — `<id>|<line>: <text>`, padded so the
+ids, the numbers and the text each stand in one column. Nothing has to be
+cross-referenced against a table, and the text column shows a line's own
+indentation. `view` breaks a line too long for one row at a fixed count of
+characters onto `│:` and `└:` rows; those rows join back to exactly what the
+file holds, because the break adds and removes nothing. `--only-ids` answers
+with ids and line numbers as JSON instead.
 
 ---
 
-## 🌟 Why Use This Tool?
+## 🌟 What a Line Id Holds
 
-1. **Shift-Invariant Targeting** — lines are addressed by stable IDs
-   (`"1#dfca"`), not by number. Inserting or deleting lines elsewhere does not
-   move them, so a batch of edits cannot slide out of alignment.
-2. **Duplicate Safety** — search-and-replace overwrites the wrong line when a
-   pattern repeats. A Line ID names one line.
-3. **Reuse IDs Across Turns** — an ID stays valid while its line is unchanged,
-   and survives edits elsewhere in the file, restarts, and reformatting by an
-   external formatter. Re-reading the file to find a line you already have an
-   ID for is wasted context.
-4. **Verify Before Committing** — `"dry_run": true` returns the unified diff
-   and syntax result an edit batch would produce, without writing. A batch that
-   validates also returns a short `preview_id`; pass it back as `apply` with
-   the same `filepath` to commit that exact batch without resending `edits`:
+1. **A line id addresses one line, not a position.** Inserting or deleting
+   lines elsewhere does not move it, so a batch cannot slide out of alignment,
+   and a pattern that repeats cannot send an edit to the wrong line.
+2. **An id stays valid while its line is unchanged.** It survives edits
+   elsewhere in the file, restarts, and reformatting by an external formatter,
+   so an id held from an earlier turn still edits the line it named.
+3. **`--dry-run` answers with the diff and the syntax result an edit batch
+   would produce, and writes nothing.** A batch that validates also mints a
+   short `preview_id`. Pass it back with `--apply` and the same file to commit
+   that exact batch without resending the script:
 
    ````bash
    ID=$(ast-editor edit src/config.rs --dry-run < edits.txt |
@@ -167,20 +175,16 @@ means the search found nothing, never that nothing was asked for.
    ast-editor edit src/config.rs --apply "$ID"
    ````
 
-5. **Graceful Degradation** — Markdown, text, and configuration files are
-   written with warnings rather than rejected, and edits still apply when no
-   parser is available for the language.
+4. **`edit` writes Markdown, text and configuration files with a warning
+   rather than rejecting them**, and applies edits to a language it has no
+   parser for.
 
 ---
 
 ## 🧭 Reference Index
 
-Each is a command, because this document is read wherever the binary is — in a
-terminal, in an installed skill tree, or on a machine where nothing was
-installed beside it. A relative path would resolve in only one of those.
-
-Load only what the immediate task needs; none of it belongs in context by
-default.
+Each reference is a command, so it is readable wherever the binary is. Load
+only what the immediate task needs.
 
 ```bash
 ast-editor skill api      # every tool and parameter, from the live schemas

@@ -38,8 +38,15 @@ fn test_help_lists_the_tools() {
 #[test]
 fn test_a_tool_prints_its_own_output() {
     let file = scratch("shown.rs", "fn main() {\n    let a = 1;\n}\n");
-    let out = ast_editor("shown", &["view", &format!(r#"{{"filepath":"{}"}}"#, file.display())]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = ast_editor(
+        "shown",
+        &["view", &format!(r#"{{"filepath":"{}"}}"#, file.display())],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     // The tool's text, not the JSON-RPC envelope around it.
     assert!(text.contains("1: fn main() {"), "{}", text);
@@ -51,17 +58,41 @@ fn test_an_edit_reaches_the_file() {
     let file = scratch("edited.rs", "fn main() {\n    let a = 1;\n}\n");
     let path = file.display().to_string();
 
-    let ids = ast_editor("edited", &["view", &format!(r#"{{"filepath":"{}","only_ids":true}}"#, path)]);
-    assert!(ids.status.success(), "{}", String::from_utf8_lossy(&ids.stderr));
-    let meta: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&ids.stdout)).unwrap();
+    let ids = ast_editor(
+        "edited",
+        &[
+            "view",
+            &format!(r#"{{"filepath":"{}","only_ids":true}}"#, path),
+        ],
+    );
+    assert!(
+        ids.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ids.stderr)
+    );
+    let meta: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&ids.stdout)).unwrap();
     let target = meta["ids"][1][0].as_str().unwrap().to_string();
 
-    let edit = ast_editor("edited", &["edit", &format!(
-        r#"{{"filepath":"{}","edits":[{{"op":"replace","target_id":"{}","content":"    let a = 2;"}}]}}"#,
-        path, target
-    )]);
-    assert!(edit.status.success(), "{}", String::from_utf8_lossy(&edit.stderr));
-    assert_eq!(std::fs::read_to_string(&file).unwrap(), "fn main() {\n    let a = 2;\n}\n");
+    let edit = ast_editor(
+        "edited",
+        &[
+            "edit",
+            &format!(
+                r#"{{"filepath":"{}","edits":[{{"op":"replace","target_id":"{}","content":"    let a = 2;"}}]}}"#,
+                path, target
+            ),
+        ],
+    );
+    assert!(
+        edit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn main() {\n    let a = 2;\n}\n"
+    );
 }
 
 #[test]
@@ -94,19 +125,42 @@ fn test_version_reports_the_grammar_set_it_is_paired_with() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.starts_with("ast-editor "), "{}", text);
     assert!(text.contains("grammars "), "{}", text);
-    assert!(text.contains("rust"), "the grammar list is missing: {}", text);
+    assert!(
+        text.contains("rust"),
+        "the grammar list is missing: {}",
+        text
+    );
 }
 
 #[test]
 fn test_a_tool_takes_a_path_and_options_instead_of_json() {
-    let file = scratch("flags.rs", "fn main() {\n    let a = 1;\n    let b = 2;\n}\n");
-    let out = ast_editor("flags", &[
-        "view", file.to_str().unwrap(), "--start-line", "2", "--end-line", "2",
-    ]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let file = scratch(
+        "flags.rs",
+        "fn main() {\n    let a = 1;\n    let b = 2;\n}\n",
+    );
+    let out = ast_editor(
+        "flags",
+        &[
+            "view",
+            file.to_str().unwrap(),
+            "--start-line",
+            "2",
+            "--end-line",
+            "2",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("let a = 1;"), "{}", text);
-    assert!(!text.contains("let b = 2;"), "the range was ignored: {}", text);
+    assert!(
+        !text.contains("let b = 2;"),
+        "the range was ignored: {}",
+        text
+    );
 }
 
 #[test]
@@ -122,19 +176,31 @@ fn test_a_relative_path_is_taken_from_the_working_directory() {
         .env("AST_EDITOR_CACHE_DIR", store_for("relative"))
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let meta: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let meta: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     assert_eq!(meta["total_lines"], 1);
 }
 
 #[test]
 fn test_an_unknown_option_lists_the_ones_the_tool_has() {
     let file = scratch("unknownopt.rs", "fn main() {}\n");
-    let out = ast_editor("unknownopt", &["view", file.to_str().unwrap(), "--start-lines", "2"]);
+    let out = ast_editor(
+        "unknownopt",
+        &["view", file.to_str().unwrap(), "--start-lines", "2"],
+    );
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("--start-lines"), "{}", err);
-    assert!(err.contains("--start-line"), "the real options are not offered: {}", err);
+    assert!(
+        err.contains("--start-line"),
+        "the real options are not offered: {}",
+        err
+    );
 }
 
 #[test]
@@ -142,13 +208,38 @@ fn test_the_json_form_a_program_would_send_still_works() {
     let file = scratch("stilljson.rs", "fn main() {\n    let a = 1;\n}\n");
     let path = file.display().to_string();
 
-    let bare = ast_editor("stilljson", &["view", &format!(r#"{{"filepath":"{}","only_ids":true}}"#, path)]);
-    assert!(bare.status.success(), "{}", String::from_utf8_lossy(&bare.stderr));
+    let bare = ast_editor(
+        "stilljson",
+        &[
+            "view",
+            &format!(r#"{{"filepath":"{}","only_ids":true}}"#, path),
+        ],
+    );
+    assert!(
+        bare.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bare.stderr)
+    );
 
-    let flagged = ast_editor("stilljson", &[
-        "view", file.to_str().unwrap(), "--json", r#"{"only_ids":true}"#,
-    ]);
-    assert!(flagged.status.success(), "{}", String::from_utf8_lossy(&flagged.stderr));
-    let meta: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&flagged.stdout)).unwrap();
-    assert!(meta["ids"].is_array(), "{}", String::from_utf8_lossy(&flagged.stdout));
+    let flagged = ast_editor(
+        "stilljson",
+        &[
+            "view",
+            file.to_str().unwrap(),
+            "--json",
+            r#"{"only_ids":true}"#,
+        ],
+    );
+    assert!(
+        flagged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&flagged.stderr)
+    );
+    let meta: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&flagged.stdout)).unwrap();
+    assert!(
+        meta["ids"].is_array(),
+        "{}",
+        String::from_utf8_lossy(&flagged.stdout)
+    );
 }

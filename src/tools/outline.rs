@@ -1,12 +1,11 @@
-use std::sync::Arc;
+use anyhow::{bail, Context, Result};
+use serde::Deserialize;
 use std::fs;
 use std::path::Path;
-use anyhow::{Result, Context, bail};
-use serde::Deserialize;
+use std::sync::Arc;
 use tree_sitter::Node;
 
 use crate::parser::ParserManager;
-
 
 #[derive(Debug, Deserialize)]
 pub struct OutlineArgs {
@@ -14,17 +13,24 @@ pub struct OutlineArgs {
     pub sexp: Option<bool>,
 }
 
-fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, max_depth: usize, out: &mut String) {
+fn format_node(
+    node: Node,
+    field_name: Option<&str>,
+    code: &str,
+    depth: usize,
+    max_depth: usize,
+    out: &mut String,
+) {
     let indent = "  ".repeat(depth);
     let start = node.start_position();
     let end = node.end_position();
-    
+
     let kind_str = if let Some(field) = field_name {
         format!("{}: {}", field, node.kind())
     } else {
         node.kind().to_string()
     };
-    
+
     out.push_str(&format!(
         "{}{} [{}:{} - {}:{}]\n",
         indent,
@@ -34,7 +40,7 @@ fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, m
         end.row + 1,
         end.column
     ));
-    
+
     // For leaves (tokens) with text, append value
     if node.child_count() == 0 {
         if let Ok(text) = node.utf8_text(code.as_bytes()) {
@@ -46,7 +52,7 @@ fn format_node(node: Node, field_name: Option<&str>, code: &str, depth: usize, m
             }
         }
     }
-    
+
     if depth < max_depth {
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i as u32) {
@@ -76,10 +82,8 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
 
     let code = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {:?}", file_path))?;
-    
-    let ext = file_path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let max_depth = 3; // Align with Node.js default limit
     let is_markdown = ext == "md" || ext == "markdown";
@@ -96,7 +100,7 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
         let line_range_end = code.lines().count();
         let mut formatted = String::new();
         format_comrak_node(root, 0, max_depth, &mut formatted);
-        
+
         let root_kind = {
             let data = root.data.borrow();
             let debug_str = format!("{:?}", data.value);
@@ -109,7 +113,9 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
         (formatted, root_kind, line_range_end)
     } else {
         // 1. Delegated parsing via sticky session cache in ParserManager
-        let (tree, _language) = parser_manager.parse_code(ext, &code).await
+        let (tree, _language) = parser_manager
+            .parse_code(ext, &code)
+            .await
             .context("Failed to parse code via ParserManager delegation")?;
 
         let root_node = tree.root_node();
@@ -126,11 +132,9 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
          Target Node Line Range: 1-{}\n\
          Searched by range parameter: no\n\
          ========================================================================\n",
-        max_depth,
-        root_kind,
-        line_range_end
+        max_depth, root_kind, line_range_end
     );
-    
+
     let tip = crate::tools::metadata::get_tool_tip("outline");
     let final_text = if !tip.is_empty() {
         format!("{}{}\n{}", header, formatted_tree, tip)
@@ -149,25 +153,17 @@ fn format_comrak_node<'a>(
 ) {
     let indent = "  ".repeat(depth);
     let data = node.data.borrow();
-    
+
     // Extract variant name from Debug representation of NodeValue
     let debug_str = format!("{:?}", data.value);
-    let kind = debug_str
-        .split(['(', '{', ' '])
-        .next()
-        .unwrap_or("Unknown");
-        
+    let kind = debug_str.split(['(', '{', ' ']).next().unwrap_or("Unknown");
+
     let pos = data.sourcepos;
     out.push_str(&format!(
         "{}{} [{}:{} - {}:{}]\n",
-        indent,
-        kind,
-        pos.start.line,
-        pos.start.column,
-        pos.end.line,
-        pos.end.column
+        indent, kind, pos.start.line, pos.start.column, pos.end.line, pos.end.column
     ));
-    
+
     // For leaves with content (Text, Code, CodeBlock), print their string contents
     if node.first_child().is_none() {
         let mut leaf_text = None;
@@ -191,7 +187,7 @@ fn format_comrak_node<'a>(
             }
         }
     }
-    
+
     if depth < max_depth {
         let mut child = node.first_child();
         while let Some(c) = child {
@@ -206,9 +202,9 @@ fn format_comrak_node<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::ParserManager;
     use std::fs;
     use std::sync::Arc;
-    use crate::parser::ParserManager;
 
     #[tokio::test]
     async fn test_the_sexp_form_dumps_the_markdown_tree() {
@@ -240,6 +236,3 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
-
-
-

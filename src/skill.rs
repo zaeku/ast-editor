@@ -18,14 +18,38 @@ pub const SKILL: &str = include_str!("../agent_skill/SKILL.md");
 
 /// Topics that are authored documents, embedded verbatim.
 const REFERENCES: &[(&str, &str)] = &[
-    ("usage", include_str!("../agent_skill/references/usage_guides.md")),
-    ("javascript", include_str!("../agent_skill/references/languages/javascript.md")),
-    ("markup", include_str!("../agent_skill/references/languages/markup.md")),
-    ("nix", include_str!("../agent_skill/references/languages/nix.md")),
-    ("python", include_str!("../agent_skill/references/languages/python.md")),
-    ("rust", include_str!("../agent_skill/references/languages/rust.md")),
-    ("shell", include_str!("../agent_skill/references/languages/shell.md")),
-    ("swift", include_str!("../agent_skill/references/languages/swift.md")),
+    (
+        "usage",
+        include_str!("../agent_skill/references/usage_guides.md"),
+    ),
+    (
+        "javascript",
+        include_str!("../agent_skill/references/languages/javascript.md"),
+    ),
+    (
+        "markup",
+        include_str!("../agent_skill/references/languages/markup.md"),
+    ),
+    (
+        "nix",
+        include_str!("../agent_skill/references/languages/nix.md"),
+    ),
+    (
+        "python",
+        include_str!("../agent_skill/references/languages/python.md"),
+    ),
+    (
+        "rust",
+        include_str!("../agent_skill/references/languages/rust.md"),
+    ),
+    (
+        "shell",
+        include_str!("../agent_skill/references/languages/shell.md"),
+    ),
+    (
+        "swift",
+        include_str!("../agent_skill/references/languages/swift.md"),
+    ),
 ];
 
 /// Every topic `ast-editor skill <topic>` accepts, in the order it lists them.
@@ -41,12 +65,17 @@ pub fn document(topic: Option<&str>) -> anyhow::Result<String> {
     match topic {
         None => Ok(SKILL.to_string()),
         Some("api") => Ok(render_api()),
-        Some(name) => REFERENCES.iter()
+        Some(name) => REFERENCES
+            .iter()
             .find(|(topic, _)| *topic == name)
             .map(|(_, text)| text.to_string())
-            .ok_or_else(|| anyhow::anyhow!(
-                "No skill topic '{}'. Topics: {}.", name, topics().join(", ")
-            )),
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No skill topic '{}'. Topics: {}.",
+                    name,
+                    topics().join(", ")
+                )
+            }),
     }
 }
 
@@ -67,11 +96,14 @@ pub fn render_api() -> String {
         }
 
         let schema = &tool["inputSchema"];
-        let required: Vec<&str> = schema["required"].as_array()
+        let required: Vec<&str> = schema["required"]
+            .as_array()
             .map(|names| names.iter().filter_map(|n| n.as_str()).collect())
             .unwrap_or_default();
 
-        let Some(properties) = schema["properties"].as_object() else { continue };
+        let Some(properties) = schema["properties"].as_object() else {
+            continue;
+        };
         let mut names: Vec<&String> = properties.keys().collect();
         names.sort();
 
@@ -79,7 +111,8 @@ pub fn render_api() -> String {
         for parameter in names {
             let field = &properties[parameter];
             let kind = match field["enum"].as_array() {
-                Some(values) => values.iter()
+                Some(values) => values
+                    .iter()
                     .filter_map(|v| v.as_str())
                     .map(|v| format!("`{}`", v))
                     .collect::<Vec<_>>()
@@ -90,8 +123,15 @@ pub fn render_api() -> String {
                 "| `{}` | {} | {} | {} |\n",
                 parameter,
                 kind,
-                if required.contains(&parameter.as_str()) { "yes" } else { "" },
-                field["description"].as_str().unwrap_or("").replace('|', "\\|"),
+                if required.contains(&parameter.as_str()) {
+                    "yes"
+                } else {
+                    ""
+                },
+                field["description"]
+                    .as_str()
+                    .unwrap_or("")
+                    .replace('|', "\\|"),
             ));
         }
 
@@ -103,7 +143,8 @@ pub fn render_api() -> String {
             for field_name in fields {
                 let field = &items[field_name];
                 let kind = match field["enum"].as_array() {
-                    Some(values) => values.iter()
+                    Some(values) => values
+                        .iter()
                         .filter_map(|v| v.as_str())
                         .map(|v| format!("`{}`", v))
                         .collect::<Vec<_>>()
@@ -114,7 +155,10 @@ pub fn render_api() -> String {
                     "| `{}` | {} | {} |\n",
                     field_name,
                     kind,
-                    field["description"].as_str().unwrap_or("").replace('|', "\\|"),
+                    field["description"]
+                        .as_str()
+                        .unwrap_or("")
+                        .replace('|', "\\|"),
                 ));
             }
         }
@@ -162,10 +206,17 @@ mod tests {
         }
 
         let directives = [
-            "replace", "replace_range", "insert_after", "insert_before",
-            "append", "prepend", "delete", "move",
+            "replace",
+            "replace_range",
+            "insert_after",
+            "insert_before",
+            "append",
+            "prepend",
+            "delete",
+            "move",
         ];
-        let undocumented: Vec<&str> = directives.into_iter()
+        let undocumented: Vec<&str> = directives
+            .into_iter()
             .filter(|directive| !corpus.contains(directive))
             .collect();
 
@@ -182,7 +233,8 @@ mod tests {
     #[test]
     fn test_the_rendered_reference_covers_every_parameter() {
         let rendered = render_api();
-        let missing: Vec<String> = schema_parameters().into_iter()
+        let missing: Vec<String> = schema_parameters()
+            .into_iter()
             .filter(|(_, parameter)| !rendered.contains(&format!("`{}`", parameter)))
             .map(|(tool, parameter)| format!("{}.{}", tool, parameter))
             .collect();
@@ -213,7 +265,8 @@ mod tests {
             assert!(
                 SKILL.contains(&invocation),
                 "no way to reach '{}' from the hub: it never says `{}`",
-                topic, invocation
+                topic,
+                invocation
             );
         }
     }

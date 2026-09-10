@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::tools::session_db::SessionRepository;
+use anyhow::Result;
 
 pub struct ViewLinesOutput {
     pub lines_text: Option<String>,
@@ -24,7 +24,7 @@ pub fn view_lines(
     let conn = crate::tools::session_db::get_db_connection()?;
     let all_parent_contexts = {
         let mut stmt = conn.prepare(
-            "SELECT parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+            "SELECT parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order",
         )?;
         let mut rows = stmt.query(rusqlite::params![session_id])?;
         let mut contexts = Vec::new();
@@ -38,7 +38,9 @@ pub fn view_lines(
     let mut context_ranges = std::collections::HashMap::new();
     for (idx, ctx_opt) in all_parent_contexts.iter().enumerate() {
         if let Some(ctx) = ctx_opt {
-            let entry = context_ranges.entry(ctx.clone()).or_insert((idx + 1, idx + 1));
+            let entry = context_ranges
+                .entry(ctx.clone())
+                .or_insert((idx + 1, idx + 1));
             entry.1 = idx + 1;
         }
     }
@@ -50,7 +52,7 @@ pub fn view_lines(
             anyhow::bail!("Invalid query: query string cannot be empty");
         }
         let ctx_lines = context_lines.unwrap_or(5);
-        
+
         // Find matching lines
         let matches = repository.find_matching_lines(&session_id, q)?;
 
@@ -103,7 +105,11 @@ pub fn view_lines(
             }
         });
         if start > end {
-            anyhow::bail!("Invalid bounds: start_line ({}) cannot be greater than end_line ({})", start, end);
+            anyhow::bail!(
+                "Invalid bounds: start_line ({}) cannot be greater than end_line ({})",
+                start,
+                end
+            );
         }
         let requested_len = if end >= start { end - start + 1 } else { 0 };
         let capped_end = if requested_len > 800 {
@@ -157,7 +163,9 @@ pub fn view_lines(
     let config = crate::tools::metadata::get_config();
     let requested_start = start_line.unwrap_or(1);
     let requested_end = end_line.unwrap_or(total_lines);
-    let line_count_capped = query.is_none() && requested_end.saturating_sub(requested_start) + 1 > 800 && total_lines > 800;
+    let line_count_capped = query.is_none()
+        && requested_end.saturating_sub(requested_start) + 1 > 800
+        && total_lines > 800;
     let mut message = None;
     if line_count_capped {
         message = Some(config.warning_line_limit_exceeded.clone());
@@ -196,14 +204,23 @@ pub fn view_lines(
     let total_bytes = std::path::Path::new(filepath).metadata()?.len();
 
     let mut parts = Vec::new();
-    parts.push(format!("  \"enclosing_contexts\": {}", serde_json::to_string(&enclosing_list)?));
+    parts.push(format!(
+        "  \"enclosing_contexts\": {}",
+        serde_json::to_string(&enclosing_list)?
+    ));
     parts.push(format!("  \"ids\": {}", serde_json::to_value(&all_ids)?));
     if let Some(msg) = message {
         parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
     }
     parts.push(format!("  \"showing_end\": {}", actual_end));
-    parts.push(format!("  \"showing_start\": {}", actual_start.unwrap_or(1)));
-    parts.push(format!("  \"tip\": {}", serde_json::to_string(&config.view_response_tip)?));
+    parts.push(format!(
+        "  \"showing_start\": {}",
+        actual_start.unwrap_or(1)
+    ));
+    parts.push(format!(
+        "  \"tip\": {}",
+        serde_json::to_string(&config.view_response_tip)?
+    ));
     parts.push(format!("  \"total_bytes\": {}", total_bytes));
     parts.push(format!("  \"total_lines\": {}", total_lines));
 
@@ -244,7 +261,11 @@ pub fn create_lines(
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if return_ids_bool {
             if meta.total_lines > 0 {
-                let end_line = if meta.total_lines > 800 { 800 } else { meta.total_lines };
+                let end_line = if meta.total_lines > 800 {
+                    800
+                } else {
+                    meta.total_lines
+                };
                 let config = crate::tools::metadata::get_config();
                 let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
                     repository,
@@ -254,7 +275,12 @@ pub fn create_lines(
                     true,
                     config.only_ids_wrap_trigger_length,
                 )?;
-                Ok((Some(formatted_res.ids_json), formatted_res.warning_msg, meta.total_lines, total_bytes))
+                Ok((
+                    Some(formatted_res.ids_json),
+                    formatted_res.warning_msg,
+                    meta.total_lines,
+                    total_bytes,
+                ))
             } else {
                 Ok((Some("[]".to_string()), None, 0, total_bytes))
             }
@@ -277,7 +303,11 @@ pub fn create_lines(
 
             let mut message = config.status_file_created.clone();
             if !warning_parts.is_empty() {
-                message = format!("{} Truncation details: {}", message, warning_parts.join("; "));
+                message = format!(
+                    "{} Truncation details: {}",
+                    message,
+                    warning_parts.join("; ")
+                );
             }
 
             let output = if return_ids_bool {
@@ -295,7 +325,10 @@ pub fn create_lines(
                             .collect()
                     })
                     .unwrap_or_default();
-                let formatted_ids = crate::tools::formatter::format_modified_ids(&ids, config.only_ids_wrap_trigger_length);
+                let formatted_ids = crate::tools::formatter::format_modified_ids(
+                    &ids,
+                    config.only_ids_wrap_trigger_length,
+                );
                 let indented_ids = formatted_ids.replace("\n", "\n  ");
                 format!(
                     "{{\n  \"ids\": {},\n  \"message\": {},\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
@@ -335,10 +368,18 @@ mod tests {
         end_line: usize,
         only_ids: Option<bool>,
     ) -> Result<String> {
-        let res = view_lines(repository, filepath, Some(start_line), Some(end_line), only_ids, None, None)?;
+        let res = view_lines(
+            repository,
+            filepath,
+            Some(start_line),
+            Some(end_line),
+            only_ids,
+            None,
+            None,
+        )?;
         let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
         let ids = ids_val["ids"].as_array().unwrap();
-        
+
         let mut lines = Vec::new();
         if let Some(ref text) = res.lines_text {
             let mut current_id = String::new();
@@ -381,7 +422,7 @@ mod tests {
                 lines.push(serde_json::json!([id, n]));
             }
         }
-        
+
         let mut val = ids_val.clone();
         val["lines"] = serde_json::Value::Array(lines);
         let columns = if only_ids.unwrap_or(false) {
@@ -410,7 +451,10 @@ mod tests {
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");
-        assert_eq!(val["message"], "File successfully created and line editing session initialized.");
+        assert_eq!(
+            val["message"],
+            "File successfully created and line editing session initialized."
+        );
         assert!(val["columns"].is_null());
         assert!(val["lines"].is_null());
 
@@ -447,7 +491,10 @@ mod tests {
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");
-        assert_eq!(val["message"], "File successfully created and line editing session initialized.");
+        assert_eq!(
+            val["message"],
+            "File successfully created and line editing session initialized."
+        );
         assert!(val["ids"].is_null());
         assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
         assert_eq!(val["total_bytes"].as_u64().unwrap(), content.len() as u64);
@@ -602,7 +649,10 @@ mod tests {
         let val_only_ids: serde_json::Value = serde_json::from_str(&output_only_ids)?;
         let lines_array_only_ids = val_only_ids["lines"].as_array().unwrap();
         assert_eq!(lines_array_only_ids.len(), 3);
-        assert!(!lines_array_only_ids[1][0].as_str().unwrap().ends_with("#TRUNC"));
+        assert!(!lines_array_only_ids[1][0]
+            .as_str()
+            .unwrap()
+            .ends_with("#TRUNC"));
         assert_eq!(lines_array_only_ids[1].as_array().unwrap().len(), 2); // [id, n], content omitted
 
         fs::remove_dir_all(&temp_dir)?;
@@ -638,7 +688,10 @@ mod tests {
         // 45 lines * 1000 chars = 45,000 chars.
         assert_eq!(lines_array.len(), 45);
         assert_eq!(val["showing_end"], 45);
-        assert!(val["message"].as_str().unwrap().contains("cumulative response size limit"));
+        assert!(val["message"]
+            .as_str()
+            .unwrap()
+            .contains("cumulative response size limit"));
 
         // With only_ids = true, the limit of 45,000 bytes should NOT be exceeded
         let output_only_ids = test_view_lines(&repository, filepath_str, 1, 50, Some(true))?;
@@ -696,19 +749,28 @@ fn helper_func() {
         )?;
 
         let val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
-        
-        let enclosing = val["enclosing_contexts"].as_array().unwrap();
-        assert!(enclosing.iter().any(|item| item["name"].as_str().unwrap() == "impl MyStruct"));
-        assert!(enclosing.iter().any(|item| item["name"].as_str().unwrap() == "fn:new"));
-        assert!(enclosing.iter().any(|item| item["name"].as_str().unwrap() == "fn:get_field"));
 
-        let get_field_ctx = enclosing.iter().find(|item| item["name"].as_str().unwrap() == "fn:get_field").unwrap();
+        let enclosing = val["enclosing_contexts"].as_array().unwrap();
+        assert!(enclosing
+            .iter()
+            .any(|item| item["name"].as_str().unwrap() == "impl MyStruct"));
+        assert!(enclosing
+            .iter()
+            .any(|item| item["name"].as_str().unwrap() == "fn:new"));
+        assert!(enclosing
+            .iter()
+            .any(|item| item["name"].as_str().unwrap() == "fn:get_field"));
+
+        let get_field_ctx = enclosing
+            .iter()
+            .find(|item| item["name"].as_str().unwrap() == "fn:get_field")
+            .unwrap();
         assert_eq!(get_field_ctx["start"].as_u64().unwrap(), 10);
         assert_eq!(get_field_ctx["end"].as_u64().unwrap(), 12);
 
         let text = res.lines_text.unwrap();
         assert!(text.contains("..."));
-        
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -749,11 +811,20 @@ Details here
         let val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
         let enclosing = val["enclosing_contexts"].as_array().unwrap();
 
-        assert!(enclosing.iter().any(|item| item["name"].as_str().unwrap() == "# Main Title"));
-        assert!(enclosing.iter().any(|item| item["name"].as_str().unwrap() == "## Section 1"));
-        assert!(enclosing.iter().any(|item| item["name"].as_str().unwrap() == "### Subsection 1.1"));
+        assert!(enclosing
+            .iter()
+            .any(|item| item["name"].as_str().unwrap() == "# Main Title"));
+        assert!(enclosing
+            .iter()
+            .any(|item| item["name"].as_str().unwrap() == "## Section 1"));
+        assert!(enclosing
+            .iter()
+            .any(|item| item["name"].as_str().unwrap() == "### Subsection 1.1"));
 
-        let sec1 = enclosing.iter().find(|item| item["name"].as_str().unwrap() == "## Section 1").unwrap();
+        let sec1 = enclosing
+            .iter()
+            .find(|item| item["name"].as_str().unwrap() == "## Section 1")
+            .unwrap();
         assert_eq!(sec1["start"].as_u64().unwrap(), 5);
         assert_eq!(sec1["end"].as_u64().unwrap(), 7);
 
@@ -761,4 +832,3 @@ Details here
         Ok(())
     }
 }
-

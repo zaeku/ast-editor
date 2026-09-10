@@ -5,7 +5,7 @@
 //! into the same `LineEdit` values the JSON form produces; everything after
 //! that is shared.
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::tools::session_db::{EditOp, LineEdit, MovePosition};
 
@@ -89,7 +89,11 @@ fn read_payload(
     )
 }
 
-fn directive_to_edit(words: &[&str], payload: Option<Vec<String>>, line: usize) -> Result<LineEdit> {
+fn directive_to_edit(
+    words: &[&str],
+    payload: Option<Vec<String>>,
+    line: usize,
+) -> Result<LineEdit> {
     let op_name = *words.first().unwrap_or(&"");
     let args = &words[1.min(words.len())..];
     let content = payload.as_ref().map(|body| body.join("\n"));
@@ -99,10 +103,18 @@ fn directive_to_edit(words: &[&str], payload: Option<Vec<String>>, line: usize) 
         "replace" | "replace_range" | "insert_after" | "insert_before" | "append" | "prepend"
     );
     if takes_payload && payload.is_none() {
-        bail!("line {}: '{}' needs content. End the line with ``` and put the new lines under it.", line, op_name);
+        bail!(
+            "line {}: '{}' needs content. End the line with ``` and put the new lines under it.",
+            line,
+            op_name
+        );
     }
     if !takes_payload && payload.is_some() {
-        bail!("line {}: '{}' takes no content, so it must not open a block.", line, op_name);
+        bail!(
+            "line {}: '{}' takes no content, so it must not open a block.",
+            line,
+            op_name
+        );
     }
 
     let edit = match (op_name, args.len()) {
@@ -131,8 +143,16 @@ fn directive_to_edit(words: &[&str], payload: Option<Vec<String>>, line: usize) 
             content,
             ..Default::default()
         },
-        ("append", 0) => LineEdit { op: EditOp::Append, content, ..Default::default() },
-        ("prepend", 0) => LineEdit { op: EditOp::Prepend, content, ..Default::default() },
+        ("append", 0) => LineEdit {
+            op: EditOp::Append,
+            content,
+            ..Default::default()
+        },
+        ("prepend", 0) => LineEdit {
+            op: EditOp::Prepend,
+            content,
+            ..Default::default()
+        },
         ("delete", 1) => LineEdit {
             op: EditOp::Delete,
             target_id: Some(args[0].to_string()),
@@ -147,12 +167,16 @@ fn directive_to_edit(words: &[&str], payload: Option<Vec<String>>, line: usize) 
         ),
         (op, _) if is_known(op) => bail!(
             "line {}: '{}' was given {} argument(s). {}",
-            line, op, args.len(), usage_of(op)
+            line,
+            op,
+            args.len(),
+            usage_of(op)
         ),
         (op, _) => bail!(
             "line {}: unknown operation '{}'. Known: replace, replace_range, insert_after, \
              insert_before, append, prepend, delete, move.",
-            line, op
+            line,
+            op
         ),
     };
 
@@ -162,14 +186,23 @@ fn directive_to_edit(words: &[&str], payload: Option<Vec<String>>, line: usize) 
 /// `move <start> [<end>] <before|after> <dest>` or
 /// `move <start> [<end>] <prepend|append>`.
 fn parse_move(args: &[&str], line: usize) -> Result<LineEdit> {
-    let position_at = args.iter().position(|word| {
-        matches!(*word, "before" | "after" | "prepend" | "append")
-    }).ok_or_else(|| anyhow::anyhow!(
-        "line {}: 'move' needs a position. {}", line, usage_of("move")
-    ))?;
+    let position_at = args
+        .iter()
+        .position(|word| matches!(*word, "before" | "after" | "prepend" | "append"))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "line {}: 'move' needs a position. {}",
+                line,
+                usage_of("move")
+            )
+        })?;
 
     if position_at == 0 || position_at > 2 {
-        bail!("line {}: 'move' takes one or two line ids before the position. {}", line, usage_of("move"));
+        bail!(
+            "line {}: 'move' takes one or two line ids before the position. {}",
+            line,
+            usage_of("move")
+        );
     }
 
     let (position, needs_dest) = match args[position_at] {
@@ -182,15 +215,29 @@ fn parse_move(args: &[&str], line: usize) -> Result<LineEdit> {
     let rest = &args[position_at + 1..];
     let dest = match (needs_dest, rest.len()) {
         (true, 1) => Some(rest[0].to_string()),
-        (true, _) => bail!("line {}: '{}' needs one destination line id. {}", line, args[position_at], usage_of("move")),
+        (true, _) => bail!(
+            "line {}: '{}' needs one destination line id. {}",
+            line,
+            args[position_at],
+            usage_of("move")
+        ),
         (false, 0) => None,
-        (false, _) => bail!("line {}: '{}' takes no destination. {}", line, args[position_at], usage_of("move")),
+        (false, _) => bail!(
+            "line {}: '{}' takes no destination. {}",
+            line,
+            args[position_at],
+            usage_of("move")
+        ),
     };
 
     Ok(LineEdit {
         op: EditOp::Move,
         target_id: Some(args[0].to_string()),
-        end_target_id: if position_at == 2 { Some(args[1].to_string()) } else { None },
+        end_target_id: if position_at == 2 {
+            Some(args[1].to_string())
+        } else {
+            None
+        },
         dest_target_id: dest,
         move_position: Some(position),
         ..Default::default()
@@ -200,8 +247,14 @@ fn parse_move(args: &[&str], line: usize) -> Result<LineEdit> {
 fn is_known(op: &str) -> bool {
     matches!(
         op,
-        "replace" | "replace_range" | "insert_after" | "insert_before"
-            | "append" | "prepend" | "delete" | "move"
+        "replace"
+            | "replace_range"
+            | "insert_after"
+            | "insert_before"
+            | "append"
+            | "prepend"
+            | "delete"
+            | "move"
     )
 }
 

@@ -1,7 +1,7 @@
+use anyhow::Context;
 use ast_editor::parser::ParserManager;
 use ast_editor::tools::ToolDispatcher;
 use std::sync::Arc;
-use anyhow::Context;
 use tracing_subscriber::EnvFilter;
 
 const USAGE: &str = "\
@@ -55,18 +55,16 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Some("skill") => {
-            match ast_editor::skill::document(args.get(1).map(String::as_str)) {
-                Ok(text) => {
-                    print!("{}", text);
-                    Ok(())
-                }
-                Err(err) => {
-                    eprintln!("{:#}", err);
-                    std::process::exit(2);
-                }
+        Some("skill") => match ast_editor::skill::document(args.get(1).map(String::as_str)) {
+            Ok(text) => {
+                print!("{}", text);
+                Ok(())
             }
-        }
+            Err(err) => {
+                eprintln!("{:#}", err);
+                std::process::exit(2);
+            }
+        },
         Some("--version") | Some("-V") | Some("version") => {
             print!("{}", version_report());
             Ok(())
@@ -115,14 +113,23 @@ fn version_report() -> String {
 
     match ast_editor::config::describe_languages(&wasm_dir) {
         Ok(languages) => {
-            let missing: Vec<&str> = languages.iter()
+            let missing: Vec<&str> = languages
+                .iter()
                 .filter(|(_, present)| !present)
                 .map(|(name, _)| name.as_str())
                 .collect();
             let names: Vec<&str> = languages.iter().map(|(name, _)| name.as_str()).collect();
-            out.push_str(&format!("         {} declared: {}\n", names.len(), names.join(", ")));
+            out.push_str(&format!(
+                "         {} declared: {}\n",
+                names.len(),
+                names.join(", ")
+            ));
             if !missing.is_empty() {
-                out.push_str(&format!("         {} MISSING: {}\n", missing.len(), missing.join(", ")));
+                out.push_str(&format!(
+                    "         {} MISSING: {}\n",
+                    missing.len(),
+                    missing.join(", ")
+                ));
             }
         }
         Err(err) => out.push_str(&format!("         unreadable: {:#}\n", err)),
@@ -131,7 +138,9 @@ fn version_report() -> String {
 }
 
 fn tool_names() -> Vec<String> {
-    ToolDispatcher::new().list_tools().iter()
+    ToolDispatcher::new()
+        .list_tools()
+        .iter()
         .filter_map(|tool| tool.get("name")?.as_str().map(str::to_string))
         .collect()
 }
@@ -142,12 +151,21 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     use std::io::Read;
 
     // `--strict` is how the script form has always spelled strict_validation.
-    let args: Vec<String> = args.iter()
-        .map(|arg| if arg == "--strict" { "--strict-validation".to_string() } else { arg.clone() })
+    let args: Vec<String> = args
+        .iter()
+        .map(|arg| {
+            if arg == "--strict" {
+                "--strict-validation".to_string()
+            } else {
+                arg.clone()
+            }
+        })
         .collect();
 
     let mut arguments = ast_editor::cli::arguments("edit", &args)?;
-    let given = arguments.as_object_mut().context("edit takes options, not a bare value")?;
+    let given = arguments
+        .as_object_mut()
+        .context("edit takes options, not a bare value")?;
     if !given.contains_key("filepath") {
         anyhow::bail!("edit needs a file: ast-editor edit <file> < script");
     }
@@ -156,10 +174,13 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     // only when nothing on the command line already carries the edits.
     if !given.contains_key("edits") && !given.contains_key("apply") {
         let mut script = String::new();
-        std::io::stdin().read_to_string(&mut script)
+        std::io::stdin()
+            .read_to_string(&mut script)
             .context("Failed to read the edit script from stdin")?;
         if script.trim().is_empty() {
-            anyhow::bail!("The edit script is empty. It is read from stdin, so pass it as a heredoc.");
+            anyhow::bail!(
+                "The edit script is empty. It is read from stdin, so pass it as a heredoc."
+            );
         }
         let edits = ast_editor::tools::script::parse(&script)?;
         given.insert("edits".to_string(), serde_json::to_value(edits)?);
@@ -179,5 +200,7 @@ async fn call_once(tool: &str, args: &[String]) -> anyhow::Result<String> {
 /// Dispatch one tool call that is already built.
 async fn call_with(tool: &str, arguments: serde_json::Value) -> anyhow::Result<String> {
     let parser_manager = Arc::new(ParserManager::new()?);
-    ToolDispatcher::new().call_tool(tool, arguments, &parser_manager).await
+    ToolDispatcher::new()
+        .call_tool(tool, arguments, &parser_manager)
+        .await
 }

@@ -1,9 +1,7 @@
+pub use crate::tools::session_db::LineEdit;
+use crate::tools::session_db::{check_language_supported, SessionRepository};
 use anyhow::Result;
 use std::fs;
-pub use crate::tools::session_db::LineEdit;
-use crate::tools::session_db::{
-    SessionRepository, check_language_supported,
-};
 
 fn validate_markdown(content: &str) -> Result<()> {
     let arena = comrak::Arena::new();
@@ -11,24 +9,25 @@ fn validate_markdown(content: &str) -> Result<()> {
     options.extension.table = true;
     options.extension.tasklist = true;
     options.extension.strikethrough = true;
-    
+
     let root = comrak::parse_document(&arena, content, &options);
     let lines: Vec<&str> = content.split('\n').collect();
-    
+
     for node in root.descendants() {
         let data = node.data.borrow();
         if let comrak::nodes::NodeValue::CodeBlock(ref cb) = data.value {
             if cb.fenced {
                 let start_line = data.sourcepos.start.line;
                 let end_line = data.sourcepos.end.line;
-                
+
                 let start_idx = start_line.saturating_sub(1);
                 let end_idx = end_line.saturating_sub(1);
-                
+
                 if start_idx < lines.len() && end_idx < lines.len() {
                     let start_line_str = lines[start_idx];
                     let trimmed = start_line_str.trim_start();
-                    let start_lead_spaces = start_line_str.len() - start_line_str.trim_start().len();
+                    let start_lead_spaces =
+                        start_line_str.len() - start_line_str.trim_start().len();
                     let fence_char = if trimmed.starts_with('`') {
                         Some('`')
                     } else if trimmed.starts_with('~') {
@@ -36,22 +35,26 @@ fn validate_markdown(content: &str) -> Result<()> {
                     } else {
                         None
                     };
-                    
+
                     if let Some(fc) = fence_char {
                         let fence_len = trimmed.chars().take_while(|&c| c == fc).count();
                         if fence_len >= 3 {
                             let end_line_str = lines[end_idx];
                             let end_trimmed = end_line_str.trim_end_matches('\r').trim_start();
-                            let end_lead_spaces = end_line_str.len() - end_line_str.trim_start().len();
-                            
-                            let is_valid_closing_fence = if end_lead_spaces <= start_lead_spaces + 3 && end_trimmed.starts_with(fc) {
-                                let end_fence_len = end_trimmed.chars().take_while(|&c| c == fc).count();
+                            let end_lead_spaces =
+                                end_line_str.len() - end_line_str.trim_start().len();
+
+                            let is_valid_closing_fence = if end_lead_spaces <= start_lead_spaces + 3
+                                && end_trimmed.starts_with(fc)
+                            {
+                                let end_fence_len =
+                                    end_trimmed.chars().take_while(|&c| c == fc).count();
                                 let remainder = &end_trimmed[end_fence_len..];
                                 end_fence_len >= fence_len && remainder.trim().is_empty()
                             } else {
                                 false
                             };
-                            
+
                             if !is_valid_closing_fence {
                                 anyhow::bail!("Validation error: Unclosed fenced code block starting at line {}", start_line);
                             }
@@ -81,11 +84,15 @@ fn lint_markdown(content: &str) -> Vec<String> {
         let trimmed = line.trim();
         if trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|&c| c == '#').count();
-            let is_header = trimmed.chars().nth(level).is_some_and(|c| c.is_whitespace());
+            let is_header = trimmed
+                .chars()
+                .nth(level)
+                .is_some_and(|c| c.is_whitespace());
             if is_header {
                 if level > last_level + 1 && last_level > 0 {
                     let config = crate::tools::metadata::get_config();
-                    let msg = config.warning_header_hierarchy
+                    let msg = config
+                        .warning_header_hierarchy
                         .replace("{}", &(line_num + 1).to_string())
                         .replace("{}", &level.to_string())
                         .replace("{}", &last_level.to_string())
@@ -100,7 +107,9 @@ fn lint_markdown(content: &str) -> Vec<String> {
     for (line_num, line) in content.lines().enumerate() {
         if line.contains('[') && !line.contains(']') && line.contains('(') {
             let config = crate::tools::metadata::get_config();
-            let msg = config.warning_malformed_link.replace("{}", &(line_num + 1).to_string());
+            let msg = config
+                .warning_malformed_link
+                .replace("{}", &(line_num + 1).to_string());
             warnings.push(msg);
         }
     }
@@ -119,10 +128,18 @@ enum SyntaxValidationResult {
     InfrastructureFailure(String),
 }
 
-fn gather_syntax_errors(node: tree_sitter::Node, source_code: &str, errors: &mut Vec<(usize, String)>) {
+fn gather_syntax_errors(
+    node: tree_sitter::Node,
+    source_code: &str,
+    errors: &mut Vec<(usize, String)>,
+) {
     if node.is_error() {
         let start_pos = node.start_position();
-        let snippet = source_code.lines().nth(start_pos.row).unwrap_or("").to_string();
+        let snippet = source_code
+            .lines()
+            .nth(start_pos.row)
+            .unwrap_or("")
+            .to_string();
         errors.push((
             start_pos.row,
             format!(
@@ -136,10 +153,7 @@ fn gather_syntax_errors(node: tree_sitter::Node, source_code: &str, errors: &mut
         let start_pos = node.start_position();
         errors.push((
             start_pos.row,
-            format!(
-                "Missing element at line {}",
-                start_pos.row + 1
-            ),
+            format!("Missing element at line {}", start_pos.row + 1),
         ));
         return;
     }
@@ -251,7 +265,10 @@ fn resync_if_stale(
 
     let mut target_ids = Vec::new();
     for edit in edits {
-        for id in [&edit.target_id, &edit.end_target_id, &edit.dest_target_id].into_iter().flatten() {
+        for id in [&edit.target_id, &edit.end_target_id, &edit.dest_target_id]
+            .into_iter()
+            .flatten()
+        {
             target_ids.push(id.clone());
         }
     }
@@ -276,7 +293,11 @@ pub async fn edit_lines_dry_run(
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;
 
-    let line_ending = if repository.get_session_crlf(&session_id)? { "\r\n" } else { "\n" };
+    let line_ending = if repository.get_session_crlf(&session_id)? {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let original_content = fs::read_to_string(filepath)?;
 
     // A preview is a plan that is never committed, so there is nothing to undo.
@@ -303,7 +324,11 @@ pub async fn edit_lines_dry_run(
             "warnings": warnings,
             "preview_id": repository.create_preview(filepath, &edits)?,
         }),
-        SyntaxValidationResult::SyntaxErrors { errors, contexts, _raw_ast: _ } => {
+        SyntaxValidationResult::SyntaxErrors {
+            errors,
+            contexts,
+            _raw_ast: _,
+        } => {
             let diagnostics: Vec<_> = errors.iter().zip(contexts.iter())
                 .map(|(message, context)| serde_json::json!({ "message": message, "context": context }))
                 .collect();
@@ -335,7 +360,14 @@ pub async fn apply_preview(
     parser_manager: &crate::parser::ParserManager,
 ) -> Result<String> {
     let edits = repository.take_preview(filepath, preview_id)?;
-    edit_lines_with_validation(repository, filepath, edits, strict_validation, parser_manager).await
+    edit_lines_with_validation(
+        repository,
+        filepath,
+        edits,
+        strict_validation,
+        parser_manager,
+    )
+    .await
 }
 
 pub async fn edit_lines_with_validation(
@@ -350,7 +382,11 @@ pub async fn edit_lines_with_validation(
     let meta = repository.init_session(filepath, false)?;
     let session_id = meta.session_id;
 
-    let line_ending = if repository.get_session_crlf(&session_id)? { "\r\n" } else { "\n" };
+    let line_ending = if repository.get_session_crlf(&session_id)? {
+        "\r\n"
+    } else {
+        "\n"
+    };
 
     // Plan the batch without persisting it. Nothing is committed until the
     // content it produces has been accepted, so a rejected edit needs no undo.
@@ -363,7 +399,11 @@ pub async fn edit_lines_with_validation(
     let warnings = match validation {
         SyntaxValidationResult::Success => None,
         SyntaxValidationResult::Warnings(warns) => Some(warns),
-        SyntaxValidationResult::SyntaxErrors { errors, contexts, _raw_ast: _ } => {
+        SyntaxValidationResult::SyntaxErrors {
+            errors,
+            contexts,
+            _raw_ast: _,
+        } => {
             if strict_validation {
                 // Construct a detailed error message
                 let mut err_msg = "Validation error: Syntactical errors detected in code after edits. Compilation/AST verification aborted.\n".to_string();
@@ -383,7 +423,10 @@ pub async fn edit_lines_with_validation(
 
                 let config = crate::tools::metadata::get_config();
                 let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
-                let formatted_ids = crate::tools::formatter::format_modified_ids(&newly_modified_ids, only_ids_wrap_trigger_length);
+                let formatted_ids = crate::tools::formatter::format_modified_ids(
+                    &newly_modified_ids,
+                    only_ids_wrap_trigger_length,
+                );
                 let mut indented_ids = String::new();
                 for (i, line) in formatted_ids.lines().enumerate() {
                     if i == 0 {
@@ -413,7 +456,10 @@ pub async fn edit_lines_with_validation(
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => {
             if strict_validation {
-                anyhow::bail!("Validation error: Failed to parse code for syntax validation: {}", reason);
+                anyhow::bail!(
+                    "Validation error: Failed to parse code for syntax validation: {}",
+                    reason
+                );
             } else {
                 // Permissive Mode: Write to disk, but return "saved" with error reason message
                 fs::write(filepath, &final_content)?;
@@ -422,7 +468,10 @@ pub async fn edit_lines_with_validation(
 
                 let config = crate::tools::metadata::get_config();
                 let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
-                let formatted_ids = crate::tools::formatter::format_modified_ids(&newly_modified_ids, only_ids_wrap_trigger_length);
+                let formatted_ids = crate::tools::formatter::format_modified_ids(
+                    &newly_modified_ids,
+                    only_ids_wrap_trigger_length,
+                );
                 let mut indented_ids = String::new();
                 for (i, line) in formatted_ids.lines().enumerate() {
                     if i == 0 {
@@ -433,13 +482,13 @@ pub async fn edit_lines_with_validation(
                     }
                 }
 
-                let message = serde_json::to_string(
-                    &format!("saved (validation failed because: {})", reason)
-                )?;
+                let message = serde_json::to_string(&format!(
+                    "saved (validation failed because: {})",
+                    reason
+                ))?;
                 let output = format!(
                     "{{\n  \"status\": \"saved\",\n  \"modified_ids\": {},\n  \"message\": {}\n}}",
-                    indented_ids,
-                    message
+                    indented_ids, message
                 );
                 return Ok(output);
             }
@@ -449,13 +498,16 @@ pub async fn edit_lines_with_validation(
     // Save to disk
     fs::write(filepath, &final_content)?;
     repository.commit_buffer(&session_id, &buffer)?;
-    
+
     // Resync database session to update parent contexts, line hashes, and mtime/file_hash metadata
     repository.smart_resync(filepath, &session_id, &[])?;
 
     let config = crate::tools::metadata::get_config();
     let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
-    let formatted_ids = crate::tools::formatter::format_modified_ids(&newly_modified_ids, only_ids_wrap_trigger_length);
+    let formatted_ids = crate::tools::formatter::format_modified_ids(
+        &newly_modified_ids,
+        only_ids_wrap_trigger_length,
+    );
     let mut indented_ids = String::new();
     for (i, line) in formatted_ids.lines().enumerate() {
         if i == 0 {
@@ -494,8 +546,10 @@ pub async fn edit_lines(
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
-    use crate::tools::session_db::{init_edit_session, SqliteSessionRepository, parse_line_id, EditOp, MovePosition};
     use crate::parser::ParserManager;
+    use crate::tools::session_db::{
+        init_edit_session, parse_line_id, EditOp, MovePosition, SqliteSessionRepository,
+    };
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
 
     // Helper to setup mock language config and raw wasm files in temporary wasm directory
@@ -531,21 +585,35 @@ mod tests {
                     "wasm_file": "tree-sitter-html.wasm"
                 }
             });
-            fs::write(&langs_json_path, serde_json::to_string(&mock_config).unwrap()).unwrap();
+            fs::write(
+                &langs_json_path,
+                serde_json::to_string(&mock_config).unwrap(),
+            )
+            .unwrap();
 
             // Copy real rust, bash and html wasm so parsing/compilation succeeds
-            let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-            let real_wasm_path = manifest_dir.join("resources").join("wasm").join("tree-sitter-rust.wasm");
+            let manifest_dir =
+                std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+            let real_wasm_path = manifest_dir
+                .join("resources")
+                .join("wasm")
+                .join("tree-sitter-rust.wasm");
             let target_wasm_path = wasm_dir.join("tree-sitter-rust.wasm");
             if real_wasm_path.exists() {
                 fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
             }
-            let real_bash_wasm_path = manifest_dir.join("resources").join("wasm").join("tree-sitter-bash.wasm");
+            let real_bash_wasm_path = manifest_dir
+                .join("resources")
+                .join("wasm")
+                .join("tree-sitter-bash.wasm");
             let target_bash_wasm_path = wasm_dir.join("tree-sitter-bash.wasm");
             if real_bash_wasm_path.exists() {
                 fs::copy(&real_bash_wasm_path, &target_bash_wasm_path).unwrap();
             }
-            let real_html_wasm_path = manifest_dir.join("resources").join("wasm").join("tree-sitter-html.wasm");
+            let real_html_wasm_path = manifest_dir
+                .join("resources")
+                .join("wasm")
+                .join("tree-sitter-html.wasm");
             let target_html_wasm_path = wasm_dir.join("tree-sitter-html.wasm");
             if real_html_wasm_path.exists() {
                 fs::copy(&real_html_wasm_path, &target_html_wasm_path).unwrap();
@@ -566,7 +634,7 @@ mod tests {
         let lines_text = view_res.lines_text.as_ref().unwrap();
         let ids_val: serde_json::Value = serde_json::from_str(&view_res.metadata_json).unwrap();
         let ids = ids_val["ids"].as_array().unwrap();
-        
+
         for line in lines_text.lines() {
             if line.contains(pattern) {
                 let colon_idx = line.find(':').unwrap();
@@ -590,7 +658,15 @@ mod tests {
         end_line: usize,
         only_ids: Option<bool>,
     ) -> Result<crate::tools::view::ViewLinesOutput> {
-        crate::tools::view::view_lines(repository, filepath, Some(start_line), Some(end_line), only_ids, None, None)
+        crate::tools::view::view_lines(
+            repository,
+            filepath,
+            Some(start_line),
+            Some(end_line),
+            only_ids,
+            None,
+            None,
+        )
     }
 
     #[tokio::test]
@@ -612,22 +688,25 @@ mod tests {
         assert!(!target_id.is_empty());
 
         // 1. Test update
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id.clone()),
-                content: Some("    let a = 42;".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id.clone()),
+            content: Some("    let a = 42;".to_string()),
+            ..Default::default()
+        }];
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert_eq!(res["status"], "success");
         let modified = res["modified_ids"].as_array().unwrap();
         let (seq, _) = parse_line_id(&target_id)?;
         let expected_prefix = format!("{:x}#", seq);
-        assert!(modified.iter().any(|id| id.as_str().unwrap().starts_with(&expected_prefix)));
-        assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n}\n");
+        assert!(modified
+            .iter()
+            .any(|id| id.as_str().unwrap().starts_with(&expected_prefix)));
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "fn main() {\n    let a = 42;\n}\n"
+        );
 
         // Refresh metadata/session
         let _metadata = init_edit_session(filepath_str, false)?;
@@ -636,19 +715,20 @@ mod tests {
         assert!(!new_target_id.is_empty());
 
         // 2. Test insert_after
-        let edits = vec![
-            LineEdit {
-                op: EditOp::InsertAfter,
-                target_id: Some(new_target_id.clone()),
-                content: Some("    let b = 2;".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::InsertAfter,
+            target_id: Some(new_target_id.clone()),
+            content: Some("    let b = 2;".to_string()),
+            ..Default::default()
+        }];
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert_eq!(res["status"], "success");
         let modified = res["modified_ids"].as_array().unwrap();
-        assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n    let b = 2;\n}\n");
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "fn main() {\n    let a = 42;\n    let b = 2;\n}\n"
+        );
 
         // Refresh session to get latest target IDs
         let _ = init_edit_session(filepath_str, false)?;
@@ -658,16 +738,17 @@ mod tests {
         assert!(modified.iter().any(|id| id.as_str().unwrap() == b_id));
 
         // 3. Test delete
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Delete,
-                target_id: Some(b_id.clone()),
-                content: None,
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Delete,
+            target_id: Some(b_id.clone()),
+            content: None,
+            ..Default::default()
+        }];
         let _preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n}\n");
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "fn main() {\n    let a = 42;\n}\n"
+        );
 
         Ok(())
     }
@@ -688,14 +769,12 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(1100)).await;
         fs::write(&file_path, "fn main() {\n    // changed externally\n}\n")?;
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::InsertAfter,
-                target_id: None,
-                content: Some("// success after resync\n".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::InsertAfter,
+            target_id: None,
+            content: Some("// success after resync\n".to_string()),
+            ..Default::default()
+        }];
 
         let res = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert!(res.contains("success"));
@@ -720,19 +799,21 @@ mod tests {
 
         let _metadata = init_edit_session(filepath_str, false)?;
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some("1#9999".to_string()), // Invalid hash prefix
-                content: Some("fn main() { // updated }".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some("1#9999".to_string()), // Invalid hash prefix
+            content: Some("fn main() { // updated }".to_string()),
+            ..Default::default()
+        }];
 
         let res = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
-        assert!(err_msg.contains("CHECKSUM_ERROR"), "Expected checksum error, got: {}", err_msg);
+        assert!(
+            err_msg.contains("CHECKSUM_ERROR"),
+            "Expected checksum error, got: {}",
+            err_msg
+        );
 
         Ok(())
     }
@@ -756,14 +837,12 @@ mod tests {
         assert!(!target_id.is_empty());
 
         // Apply edit that introduces syntax error (e.g. mismatched braces / parsing error)
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id),
-                content: Some("    let a = {;".to_string()), // Syntax error
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id),
+            content: Some("    let a = {;".to_string()), // Syntax error
+            ..Default::default()
+        }];
 
         // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines)
         let res = edit_lines(&repository, filepath_str, edits.clone(), &env.pm).await?;
@@ -771,29 +850,36 @@ mod tests {
         assert_eq!(val["status"], "saved_with_errors");
         assert_eq!(val["syntax_valid"], false);
         assert!(val["diagnostics"].is_array());
-        
+
         // Verify disk content was saved (i.e. changed)
-        assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = {;\n}\n");
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "fn main() {\n    let a = {;\n}\n"
+        );
 
         // Restore initial content for strict validation test
         fs::write(&file_path, initial_content)?;
         let _metadata_strict = init_edit_session(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let target_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
-        let edits_strict = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id_strict),
-                content: Some("    let a = {;".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits_strict = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id_strict),
+            content: Some("    let a = {;".to_string()),
+            ..Default::default()
+        }];
 
         // 2. Test Strict Mode (strict_validation: true)
-        let res_strict = edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &env.pm).await;
+        let res_strict =
+            edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &env.pm)
+                .await;
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
-        assert!(err_msg.contains("Validation error"), "Expected syntax validation error, got: {}", err_msg);
+        assert!(
+            err_msg.contains("Validation error"),
+            "Expected syntax validation error, got: {}",
+            err_msg
+        );
 
         // Verify disk content was rolled back (i.e. remains unchanged)
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
@@ -820,14 +906,12 @@ mod tests {
         let metadata = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 0);
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Append,
-                target_id: None,
-                content: Some("fn main() {\n}".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Append,
+            target_id: None,
+            content: Some("fn main() {\n}".to_string()),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -847,7 +931,10 @@ mod tests {
 
         // Use uppercase extension: .RS
         let file_path = env.dir.join("code.RS");
-        fs::write(&file_path, "fn main() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n")?;
+        fs::write(
+            &file_path,
+            "fn main() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n",
+        )?;
         let filepath_str = file_path.to_str().unwrap();
 
         let metadata = init_edit_session(filepath_str, false)?;
@@ -859,14 +946,12 @@ mod tests {
         assert!(!b_id.is_empty());
 
         // Test delete on .RS file (verifies lowercase lookup/delegation works for uppercase extensions too)
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Delete,
-                target_id: Some(b_id.clone()),
-                content: None,
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Delete,
+            target_id: Some(b_id.clone()),
+            content: None,
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -895,14 +980,12 @@ mod tests {
         let metadata = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 0);
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Append,
-                target_id: None,
-                content: Some("pub fn foo() {}".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Append,
+            target_id: None,
+            content: Some("pub fn foo() {}".to_string()),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -927,21 +1010,22 @@ mod tests {
         let metadata = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 1);
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Append,
-                target_id: None,
-                content: Some("pub fn bar() -> i32 {\n    42\n}".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Append,
+            target_id: None,
+            content: Some("pub fn bar() -> i32 {\n    42\n}".to_string()),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert_eq!(res["status"], "success");
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
-        assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\npub fn bar() -> i32 {\n    42\n}\n");
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "pub fn foo() {}\npub fn bar() -> i32 {\n    42\n}\n"
+        );
 
         Ok(())
     }
@@ -960,14 +1044,12 @@ mod tests {
         assert_eq!(metadata.total_lines, 1);
 
         // Call update with target_id = None
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: None,
-                content: Some("pub fn bar() {}".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: None,
+            content: Some("pub fn bar() {}".to_string()),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
@@ -989,14 +1071,12 @@ mod tests {
 
         let _metadata = init_edit_session(filepath_str, false)?;
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Prepend,
-                target_id: None,
-                content: Some("use std::collections::HashMap;\n\n".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Prepend,
+            target_id: None,
+            content: Some("use std::collections::HashMap;\n\n".to_string()),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -1018,7 +1098,10 @@ mod tests {
         let repository = SqliteSessionRepository;
 
         let file_path = env.dir.join("code.rs");
-        fs::write(&file_path, "pub fn foo() {\n    let a = 1;\n    let b = 2;\n}\n")?;
+        fs::write(
+            &file_path,
+            "pub fn foo() {\n    let a = 1;\n    let b = 2;\n}\n",
+        )?;
         let filepath_str = file_path.to_str().unwrap();
 
         let _metadata = init_edit_session(filepath_str, false)?;
@@ -1028,15 +1111,13 @@ mod tests {
         let id_2 = find_line_id(&lines_view, "let a = 1;");
         let id_3 = find_line_id(&lines_view, "let b = 2;");
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::ReplaceRange,
-                target_id: Some(id_2),
-                end_target_id: Some(id_3),
-                content: Some("    let val = 42;".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::ReplaceRange,
+            target_id: Some(id_2),
+            end_target_id: Some(id_3),
+            content: Some("    let val = 42;".to_string()),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -1058,7 +1139,10 @@ mod tests {
         let repository = SqliteSessionRepository;
 
         let file_path = env.dir.join("code.rs");
-        fs::write(&file_path, "pub fn main() {\n    foo();\n}\npub fn foo() {}\n")?;
+        fs::write(
+            &file_path,
+            "pub fn main() {\n    foo();\n}\npub fn foo() {}\n",
+        )?;
         let filepath_str = file_path.to_str().unwrap();
 
         let _metadata = init_edit_session(filepath_str, false)?;
@@ -1072,15 +1156,13 @@ mod tests {
         let main_id = find_line_id(&lines_view_main, "pub fn main() {");
 
         // Move 'foo' function before 'main' function
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Move,
-                target_id: Some(foo_id),
-                dest_target_id: Some(main_id),
-                move_position: Some(MovePosition::Before),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Move,
+            target_id: Some(foo_id),
+            dest_target_id: Some(main_id),
+            move_position: Some(MovePosition::Before),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -1099,7 +1181,7 @@ mod tests {
     async fn test_edit_lines_jit_initialization() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("test_jit_edit");
-        
+
         let file_path = env.dir.join("code.txt");
         fs::write(&file_path, "line 1\nline 2\n")?;
         let filepath_str = file_path.to_str().unwrap();
@@ -1110,13 +1192,11 @@ mod tests {
 
         // Call edit_lines directly without calling init_edit_session.
         // We can append a line. Since it's append, target_id is ignored.
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Append,
-                content: Some("line 3".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Append,
+            content: Some("line 3".to_string()),
+            ..Default::default()
+        }];
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
@@ -1160,16 +1240,14 @@ mod tests {
         assert!(!target_id.contains("#TRUNC"));
 
         // 1. Perform replace_substring on the long line
-        let edits = vec![
-            LineEdit {
-                op: EditOp::ReplaceSubstring,
-                target_id: Some(target_id.clone()),
-                pattern: Some("aaaaa".to_string()),
-                replacement: Some("bbbbb".to_string()),
-                occurrence: Some(1),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::ReplaceSubstring,
+            target_id: Some(target_id.clone()),
+            pattern: Some("aaaaa".to_string()),
+            replacement: Some("bbbbb".to_string()),
+            occurrence: Some(1),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert!(result.contains("success"));
@@ -1202,17 +1280,15 @@ mod tests {
         assert!(!target_id.is_empty());
 
         // Make an edit that introduces a lint warning (unclosed fence, header hierarchy gap, and malformed link)
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id),
-                content: Some("### Heading Gap\n\n[text(url)\n\n```rust\nlet x = 1;\n".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id),
+            content: Some("### Heading Gap\n\n[text(url)\n\n```rust\nlet x = 1;\n".to_string()),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        
+
         // The edit should succeed (status success) but return warnings!
         assert!(result.contains("\"status\": \"success\""));
         assert!(result.contains("\"warnings\":"));
@@ -1249,17 +1325,15 @@ mod tests {
         assert!(!target_id.is_empty());
 
         // Make an edit that has invalid HTML syntax
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id),
-                content: Some("<p>Hello <span class=</p>".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id),
+            content: Some("<p>Hello <span class=</p>".to_string()),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        
+
         // The edit should succeed (status success) but return HTML warnings!
         assert!(result.contains("\"status\": \"success\""));
         assert!(result.contains("\"warnings\":"));
@@ -1301,7 +1375,10 @@ fn main() {
 "#;
         let res = validate_markdown(invalid_md);
         assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("Unclosed fenced code block"));
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Unclosed fenced code block"));
     }
 
     #[test]
@@ -1334,24 +1411,25 @@ fn main() {
 
         let filepath_str = file_path.to_str().unwrap();
         let _init_res = init_edit_session(filepath_str, false)?;
-        
+
         let lines_view = test_view_lines(&repository, filepath_str, 1, 100, None)?;
         let start_line_id = find_line_id(&lines_view, "fn main()");
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(start_line_id),
-                content: Some("fn main() { println!(\"x\"); }".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(start_line_id),
+            content: Some("fn main() { println!(\"x\"); }".to_string()),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_ok());
 
         let disk_content = fs::read_to_string(&file_path)?;
-        assert_eq!(disk_content, "# Title\n\n```rust\nfn main() { println!(\"x\"); }\n```\n");
+        assert_eq!(
+            disk_content,
+            "# Title\n\n```rust\nfn main() { println!(\"x\"); }\n```\n"
+        );
 
         fs::remove_dir_all(&env.dir)?;
         Ok(())
@@ -1369,17 +1447,15 @@ fn main() {
 
         let filepath_str = file_path.to_str().unwrap();
         let _init_res = init_edit_session(filepath_str, false)?;
-        
+
         let lines_view = test_view_lines(&repository, filepath_str, 1, 100, None)?;
         let target_line_id = find_line_id(&lines_view, "````");
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Delete,
-                target_id: Some(target_line_id),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Delete,
+            target_id: Some(target_line_id),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert!(result.contains("\"status\": \"success\""));
@@ -1408,17 +1484,15 @@ fn main() {
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let line_1_id = find_line_id(&lines_view, "line 1");
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(line_1_id.clone()),
-                content: Some("new line 1".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(line_1_id.clone()),
+            content: Some("new line 1".to_string()),
+            ..Default::default()
+        }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        
+
         let val: serde_json::Value = serde_json::from_str(&result)?;
         assert_eq!(val["status"], "success");
         let modified_ids = val["modified_ids"].as_array().unwrap();
@@ -1433,7 +1507,7 @@ fn main() {
             new_id
         );
         assert_eq!(result, expected_json);
-        
+
         fs::remove_dir_all(&env.dir)?;
         Ok(())
     }
@@ -1457,14 +1531,12 @@ fn main() {
         assert!(!target_id.is_empty());
 
         // Apply edit that introduces syntax error (e.g. replacing "fi" with "else")
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id),
-                content: Some("else".to_string()), // Syntax error since mismatched if/else without fi
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id),
+            content: Some("else".to_string()), // Syntax error since mismatched if/else without fi
+            ..Default::default()
+        }];
 
         // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines)
         let res = edit_lines(&repository, filepath_str, edits.clone(), &env.pm).await?;
@@ -1472,29 +1544,36 @@ fn main() {
         assert_eq!(val["status"], "saved_with_errors");
         assert_eq!(val["syntax_valid"], false);
         assert!(val["diagnostics"].is_array());
-        
+
         // Verify disk content was saved (i.e. changed)
-        assert_eq!(fs::read_to_string(&file_path)?, "if [ \"$x\" = \"1\" ]; then\n    echo \"one\"\nelse\n");
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "if [ \"$x\" = \"1\" ]; then\n    echo \"one\"\nelse\n"
+        );
 
         // Restore initial content for strict validation test
         fs::write(&file_path, initial_content)?;
         let _metadata_strict = init_edit_session(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let target_id_strict = find_line_id(&lines_view_strict, "fi");
-        let edits_strict = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id_strict),
-                content: Some("else".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits_strict = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id_strict),
+            content: Some("else".to_string()),
+            ..Default::default()
+        }];
 
         // 2. Test Strict Mode (strict_validation: true)
-        let res_strict = edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &env.pm).await;
+        let res_strict =
+            edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &env.pm)
+                .await;
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
-        assert!(err_msg.contains("Validation error"), "Expected syntax validation error, got: {}", err_msg);
+        assert!(
+            err_msg.contains("Validation error"),
+            "Expected syntax validation error, got: {}",
+            err_msg
+        );
 
         // Verify disk content was rolled back (i.e. remains unchanged)
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
@@ -1545,37 +1624,41 @@ fn main() {
         let target_id = find_line_id(&lines_view, "let a = 1;");
         assert!(!target_id.is_empty());
 
-        let edits = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id),
-                content: Some("    let a = 42;".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id),
+            content: Some("    let a = 42;".to_string()),
+            ..Default::default()
+        }];
 
         // 1. Permissive mode: should save anyway and return status "saved"
-        let res = edit_lines_with_validation(&repository, filepath_str, edits.clone(), false, &pm).await?;
+        let res = edit_lines_with_validation(&repository, filepath_str, edits.clone(), false, &pm)
+            .await?;
         let val: serde_json::Value = serde_json::from_str(&res)?;
         assert_eq!(val["status"], "saved");
-        assert!(val["message"].as_str().unwrap().contains("validation failed because"));
-        assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n    let a = 42;\n}\n");
+        assert!(val["message"]
+            .as_str()
+            .unwrap()
+            .contains("validation failed because"));
+        assert_eq!(
+            fs::read_to_string(&file_path)?,
+            "fn main() {\n    let a = 42;\n}\n"
+        );
 
         // 2. Strict mode: should roll back and return Err
         fs::write(&file_path, initial_content)?;
         let _metadata_strict = init_edit_session(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let target_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
-        let edits_strict = vec![
-            LineEdit {
-                op: EditOp::Replace,
-                target_id: Some(target_id_strict),
-                content: Some("    let a = 99;".to_string()),
-                ..Default::default()
-            }
-        ];
+        let edits_strict = vec![LineEdit {
+            op: EditOp::Replace,
+            target_id: Some(target_id_strict),
+            content: Some("    let a = 99;".to_string()),
+            ..Default::default()
+        }];
 
-        let res_strict = edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &pm).await;
+        let res_strict =
+            edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &pm).await;
         assert!(res_strict.is_err());
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
 

@@ -1,8 +1,8 @@
-use ast_editor::tools::session_db::{SqliteSessionRepository, EditOp};
-use ast_editor::tools::view;
-use ast_editor::tools::edit;
-use ast_editor::tools::ToolDispatcher;
 use ast_editor::parser::ParserManager;
+use ast_editor::tools::edit;
+use ast_editor::tools::session_db::{EditOp, SqliteSessionRepository};
+use ast_editor::tools::view;
+use ast_editor::tools::ToolDispatcher;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -50,10 +50,10 @@ fn create_test_parser_manager(tmp: &std::path::Path) -> ParserManager {
     let compiler_path = tmp.join("compiler");
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let wasm_dir = manifest_dir.join("resources").join("wasm");
-    
+
     let _ = fs::create_dir_all(&cache_dir);
     let _ = fs::create_dir_all(&compiler_path);
-    
+
     ParserManager::with_paths(cache_dir, compiler_path, wasm_dir).unwrap()
 }
 
@@ -70,7 +70,9 @@ async fn generate_readme() {
         let _ = fs::remove_dir_all(&temp_dir);
     }
     fs::create_dir_all(&temp_dir).unwrap();
-    let _guard = CleanupGuard { dir: temp_dir.clone() };
+    let _guard = CleanupGuard {
+        dir: temp_dir.clone(),
+    };
 
     let repo = SqliteSessionRepository;
     let pm = create_test_parser_manager(&temp_dir);
@@ -79,21 +81,13 @@ async fn generate_readme() {
     // Run create return_ids=false
     let file_default = temp_dir.join("create_default.rs");
     let content = "fn main() {\n    let x = 42;\n}\n";
-    let out_create_default = view::create_lines(
-        &repo,
-        file_default.to_str().unwrap(),
-        content,
-        Some(false),
-    ).unwrap();
+    let out_create_default =
+        view::create_lines(&repo, file_default.to_str().unwrap(), content, Some(false)).unwrap();
 
     // Run create return_ids=true
     let file_ids = temp_dir.join("create_ids.txt");
-    let out_create_ids = view::create_lines(
-        &repo,
-        file_ids.to_str().unwrap(),
-        content,
-        Some(true),
-    ).unwrap();
+    let out_create_ids =
+        view::create_lines(&repo, file_ids.to_str().unwrap(), content, Some(true)).unwrap();
 
     // Run view only_ids=None
     let out_view_default = view::view_lines(
@@ -104,7 +98,8 @@ async fn generate_readme() {
         None,
         None,
         None,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Run view only_ids=true
     let out_view_only_ids = view::view_lines(
@@ -115,7 +110,8 @@ async fn generate_readme() {
         Some(true),
         None,
         None,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Parse the returned line ID for `let x = 42;` (line 2)
     let val_create_ids: serde_json::Value = serde_json::from_str(&out_create_ids).unwrap();
@@ -146,27 +142,24 @@ async fn generate_readme() {
     ];
     // Preview the batch first, then apply it. The preview leaves the session
     // untouched, so the same IDs are still valid for the real call below.
-    let out_edit_dry_run = edit::edit_lines_dry_run(
-        &repo,
-        file_ids.to_str().unwrap(),
-        edits.clone(),
-        &pm,
-    ).await.unwrap();
+    let out_edit_dry_run =
+        edit::edit_lines_dry_run(&repo, file_ids.to_str().unwrap(), edits.clone(), &pm)
+            .await
+            .unwrap();
     let out_edit_dry_run = out_edit_dry_run.replace(file_ids.to_str().unwrap(), DOC_FILEPATH);
     // The preview id counts up with every run, so pin it or the generated
     // documentation differs on each invocation.
     let out_edit_dry_run = {
         let parsed: serde_json::Value = serde_json::from_str(&out_edit_dry_run).unwrap();
-        let minted = parsed["preview_id"].as_str().expect("a valid preview mints an id");
+        let minted = parsed["preview_id"]
+            .as_str()
+            .expect("a valid preview mints an id");
         out_edit_dry_run.replace(minted, DOC_PREVIEW_ID)
     };
 
-    let out_edit_compact = edit::edit_lines(
-        &repo,
-        file_ids.to_str().unwrap(),
-        edits,
-        &pm,
-    ).await.unwrap();
+    let out_edit_compact = edit::edit_lines(&repo, file_ids.to_str().unwrap(), edits, &pm)
+        .await
+        .unwrap();
 
     // Construct pretty-printed JSON inputs
     let create_input_default_val = serde_json::json!({
@@ -174,14 +167,20 @@ async fn generate_readme() {
         "content": content,
         "return_ids": false
     });
-    let fmt_create_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_input_default_val).unwrap());
+    let fmt_create_input_default = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&create_input_default_val).unwrap()
+    );
 
     let create_input_ids_val = serde_json::json!({
         "filepath": "/path/to/project/create_ids.rs",
         "content": content,
         "return_ids": true
     });
-    let fmt_create_input_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&create_input_ids_val).unwrap());
+    let fmt_create_input_ids = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&create_input_ids_val).unwrap()
+    );
 
     let view_input_default_val = serde_json::json!({
         "filepath": "/path/to/project/create_ids.rs",
@@ -189,7 +188,10 @@ async fn generate_readme() {
         "end_line": 3,
         "only_ids": false
     });
-    let fmt_view_input_default = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_input_default_val).unwrap());
+    let fmt_view_input_default = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&view_input_default_val).unwrap()
+    );
 
     let view_input_only_ids_val = serde_json::json!({
         "filepath": "/path/to/project/create_ids.rs",
@@ -197,7 +199,10 @@ async fn generate_readme() {
         "end_line": 3,
         "only_ids": true
     });
-    let fmt_view_input_only_ids = format!("```json\n{}\n```", serde_json::to_string_pretty(&view_input_only_ids_val).unwrap());
+    let fmt_view_input_only_ids = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&view_input_only_ids_val).unwrap()
+    );
 
     let edit_input_compact_val = serde_json::json!({
         "filepath": DOC_FILEPATH,
@@ -218,35 +223,53 @@ async fn generate_readme() {
             }
         ]
     });
-    let fmt_edit_input_compact = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_input_compact_val).unwrap());
+    let fmt_edit_input_compact = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&edit_input_compact_val).unwrap()
+    );
 
     let mut edit_input_dry_run_val = edit_input_compact_val.clone();
     edit_input_dry_run_val["dry_run"] = serde_json::Value::Bool(true);
-    let fmt_edit_input_dry_run = format!("```json\n{}\n```", serde_json::to_string_pretty(&edit_input_dry_run_val).unwrap());
+    let fmt_edit_input_dry_run = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(&edit_input_dry_run_val).unwrap()
+    );
 
     // Extract schemas
     let dispatcher = ToolDispatcher::new();
     let tools = dispatcher.list_tools();
 
-    let create_schema = tools.iter()
+    let create_schema = tools
+        .iter()
         .find(|t| t["name"] == "create")
         .and_then(|t| t.get("inputSchema"))
         .expect("create schema not found");
 
-    let view_schema = tools.iter()
+    let view_schema = tools
+        .iter()
         .find(|t| t["name"] == "view")
         .and_then(|t| t.get("inputSchema"))
         .expect("view schema not found");
 
-    let edit_schema = tools.iter()
+    let edit_schema = tools
+        .iter()
         .find(|t| t["name"] == "edit")
         .and_then(|t| t.get("inputSchema"))
         .expect("edit schema not found");
 
     // Format all to pretty-printed json inside markdown code blocks
-    let fmt_create_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(create_schema).unwrap());
-    let fmt_view_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(view_schema).unwrap());
-    let fmt_edit_schema = format!("```json\n{}\n```", serde_json::to_string_pretty(edit_schema).unwrap());
+    let fmt_create_schema = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(create_schema).unwrap()
+    );
+    let fmt_view_schema = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(view_schema).unwrap()
+    );
+    let fmt_edit_schema = format!(
+        "```json\n{}\n```",
+        serde_json::to_string_pretty(edit_schema).unwrap()
+    );
 
     // Format tool outputs to ensure they look perfect
     let fmt_create_default = format!("```json\n{}\n```", out_create_default);
@@ -256,10 +279,7 @@ async fn generate_readme() {
         out_view_default.lines_text.as_ref().unwrap(),
         out_view_default.metadata_json
     );
-    let fmt_view_only_ids = format!(
-        "```json\n{}\n```",
-        out_view_only_ids.metadata_json
-    );
+    let fmt_view_only_ids = format!("```json\n{}\n```", out_view_only_ids.metadata_json);
     let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
     let fmt_edit_dry_run = format!("```json\n{}\n```", out_edit_dry_run);
 
@@ -286,7 +306,8 @@ async fn generate_readme() {
     let templates_dir = manifest_dir.join("agent_skill").join("doc_templates");
     let render = |template: &std::path::Path, output: PathBuf| {
         let content = fs::read_to_string(template).unwrap();
-        let rendered = placeholders.iter()
+        let rendered = placeholders
+            .iter()
             .fold(content, |acc, (key, value)| acc.replace(key, value));
         assert!(
             !rendered.contains("{{"),
@@ -296,9 +317,15 @@ async fn generate_readme() {
         fs::write(output, rendered).unwrap();
     };
 
-    render(&templates_dir.join("README.tpl.md"), manifest_dir.join("README.md"));
+    render(
+        &templates_dir.join("README.tpl.md"),
+        manifest_dir.join("README.md"),
+    );
     render(
         &templates_dir.join("api_specification.tpl.md"),
-        manifest_dir.join("agent_skill").join("references").join("api_specification.md"),
+        manifest_dir
+            .join("agent_skill")
+            .join("references")
+            .join("api_specification.md"),
     );
 }

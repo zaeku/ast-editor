@@ -29,14 +29,20 @@ impl LegacyStore {
     /// dropped: line text cached in the database, four-character hashes, and a
     /// session recording a hash and mtime that still match the file.
     fn new(name: &str, content: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("ast-editor-legacy-{}-{}", std::process::id(), name));
+        let dir =
+            std::env::temp_dir().join(format!("ast-editor-legacy-{}-{}", std::process::id(), name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 
         let file = dir.join(name);
         fs::write(&file, content).unwrap();
-        let mtime = fs::metadata(&file).unwrap().modified().unwrap()
-            .duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let mtime = fs::metadata(&file)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let file_hash = {
             use sha2::{Digest, Sha256};
             format!("{:x}", Sha256::digest(content.as_bytes()))
@@ -61,7 +67,8 @@ impl LegacyStore {
                 sort_order REAL NOT NULL,
                 parent_context TEXT
              );",
-        ).unwrap();
+        )
+        .unwrap();
         db.execute(
             "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, 'legacy-session', ?2, ?3, ?3)",
             rusqlite::params![file.to_str().unwrap(), file_hash, mtime],
@@ -105,7 +112,10 @@ fn test_a_file_untouched_since_the_upgrade_still_reads() {
     // needing attention. If the migration leaves a session behind while
     // clearing its lines, the session reports zero lines and this reads empty.
     let meta = session_db::init_edit_session(path, false).unwrap();
-    assert_eq!(meta.total_lines, 3, "the upgraded store lost the file's lines");
+    assert_eq!(
+        meta.total_lines, 3,
+        "the upgraded store lost the file's lines"
+    );
 
     let repository = SqliteSessionRepository;
     let lines: Vec<String> = repository
@@ -127,17 +137,31 @@ fn test_the_upgrade_drops_cached_content_and_widens_the_hashes() {
 
     let db = store.db();
     let columns: Vec<String> = db
-        .prepare("SELECT name FROM pragma_table_info('lines')").unwrap()
-        .query_map([], |row| row.get(0)).unwrap()
-        .collect::<rusqlite::Result<_>>().unwrap();
-    assert!(!columns.contains(&"content".to_string()), "content survived the upgrade: {:?}", columns);
+        .prepare("SELECT name FROM pragma_table_info('lines')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(
+        !columns.contains(&"content".to_string()),
+        "content survived the upgrade: {:?}",
+        columns
+    );
 
     // The old rows carried four-character hashes. Nothing may be left at that
     // width, or reconciliation would align on 16 bits.
     let widths: Vec<usize> = db
-        .prepare("SELECT length(line_hash) FROM lines").unwrap()
-        .query_map([], |row| row.get::<_, usize>(0)).unwrap()
-        .collect::<rusqlite::Result<_>>().unwrap();
+        .prepare("SELECT length(line_hash) FROM lines")
+        .unwrap()
+        .query_map([], |row| row.get::<_, usize>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
     assert!(!widths.is_empty());
-    assert!(widths.iter().all(|w| *w == 16), "stored hashes were not widened: {:?}", widths);
+    assert!(
+        widths.iter().all(|w| *w == 16),
+        "stored hashes were not widened: {:?}",
+        widths
+    );
 }

@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::tools::session_db::{compute_line_hash, SessionRepository};
+use anyhow::Result;
 
 pub struct FormattedLinesResult {
     pub lines_text: Option<String>,
@@ -16,7 +16,6 @@ pub fn retrieve_and_format_lines(
     only_ids: bool,
     wrap_trigger_length: usize,
 ) -> Result<FormattedLinesResult> {
-
     let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
     let mut id_items = Vec::new();
     let mut text_lines = Vec::new();
@@ -191,7 +190,10 @@ pub fn format_definition_json(
         let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
         let line_id = format!("{:x}#{}", seq_id, line_hash);
         let content_escaped = serde_json::to_string(&content)?;
-        items.push(format!("[\"{}\", {}, {}]", line_id, current_idx, content_escaped));
+        items.push(format!(
+            "[\"{}\", {}, {}]",
+            line_id, current_idx, content_escaped
+        ));
     }
 
     let mut lines_json = String::new();
@@ -257,7 +259,11 @@ mod tests {
         assert_eq!(arr[3][1].as_u64().unwrap(), 4);
 
         let lines: Vec<&str> = res.ids_json.lines().collect();
-        assert!(lines.len() > 3, "Expected formatting to wrap into multiple lines: {}", res.ids_json);
+        assert!(
+            lines.len() > 3,
+            "Expected formatting to wrap into multiple lines: {}",
+            res.ids_json
+        );
         assert_eq!(lines[0], "[");
         assert!(lines[1].starts_with("  "));
         assert_eq!(*lines.last().unwrap(), "  ]");
@@ -363,7 +369,10 @@ mod tests {
 
         let res = retrieve_and_format_lines(&repository, session_id, 1, 50, false, 1000)?;
         assert_eq!(res.actual_end_line, 45);
-        assert_eq!(res.warning_msg.as_deref(), Some("Response truncated: cumulative response size limit (45,000 bytes) was reached."));
+        assert_eq!(
+            res.warning_msg.as_deref(),
+            Some("Response truncated: cumulative response size limit (45,000 bytes) was reached.")
+        );
 
         let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         assert_eq!(val.as_array().unwrap().len(), 45);
@@ -395,5 +404,4 @@ mod tests {
         let expected_no_wrap = "[\n  \"1#77cf\", \"2#bcb4\", \"3#c2b7\"\n]";
         assert_eq!(res_no_wrap, expected_no_wrap);
     }
-
 }

@@ -1,12 +1,12 @@
-use anyhow::{Result, Context, bail};
+use anyhow::{bail, Context, Result};
 use rusqlite::{Connection, OptionalExtension};
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
-use std::env;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::fs;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tree_sitter::{WasmStore, Parser};
+use tree_sitter::{Parser, WasmStore};
 
 pub fn get_db_path() -> Result<PathBuf> {
     let mut path = if let Some(dir) = env::var_os("AST_EDITOR_CACHE_DIR") {
@@ -29,11 +29,11 @@ pub fn get_db_path() -> Result<PathBuf> {
 pub(crate) fn get_db_connection() -> Result<Connection> {
     let db_path = get_db_path()?;
     let conn = Connection::open(db_path).context("Failed to open SQLite database")?;
-    
+
     // Set busy timeout to 5 seconds to prevent SQLITE_BUSY errors
     conn.busy_timeout(std::time::Duration::from_millis(5000))
         .context("Failed to set SQLite busy timeout")?;
-    
+
     // Configure high-performance memory pragmas and enable foreign keys
     conn.pragma_update(None, "journal_mode", "WAL")
         .context("Failed to configure WAL journal mode")?;
@@ -43,7 +43,7 @@ pub(crate) fn get_db_connection() -> Result<Connection> {
         .context("Failed to enable foreign keys")?;
     conn.execute("PRAGMA temp_store = MEMORY;", [])
         .context("Failed to configure temp_store MEMORY")?;
-    
+
     Ok(conn)
 }
 
@@ -52,7 +52,8 @@ fn create_tables(conn: &Connection) -> Result<()> {
     if auto_vacuum != 2 {
         conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
         // The mode change only takes effect once the file is rewritten.
-        conn.execute_batch("VACUUM;").context("Failed to switch the store to incremental vacuum")?;
+        conn.execute_batch("VACUUM;")
+            .context("Failed to switch the store to incremental vacuum")?;
     }
 
     conn.execute(
@@ -65,7 +66,8 @@ fn create_tables(conn: &Connection) -> Result<()> {
             next_line_id INTEGER NOT NULL DEFAULT 1
         );",
         [],
-    ).context("Failed to create sessions table")?;
+    )
+    .context("Failed to create sessions table")?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS lines (
@@ -79,14 +81,21 @@ fn create_tables(conn: &Connection) -> Result<()> {
             FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
         );",
         [],
-    ).context("Failed to create lines table")?;
-    
+    )
+    .context("Failed to create lines table")?;
+
     // Add indices for fast lookups
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_lines_session_id ON lines(session_id);", [])
-        .context("Failed to create index idx_lines_session_id")?;
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_lines_sort_order ON lines(sort_order);", [])
-        .context("Failed to create index idx_lines_sort_order")?;
-    
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lines_session_id ON lines(session_id);",
+        [],
+    )
+    .context("Failed to create index idx_lines_session_id")?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lines_sort_order ON lines(sort_order);",
+        [],
+    )
+    .context("Failed to create index idx_lines_sort_order")?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS previews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,22 +105,34 @@ fn create_tables(conn: &Connection) -> Result<()> {
             created_at INTEGER NOT NULL
         );",
         [],
-    ).context("Failed to create previews table")?;
+    )
+    .context("Failed to create previews table")?;
 
     // Add crlf column if not present
-    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN line_ending_crlf INTEGER DEFAULT 0;", []);
+    let _ = conn.execute(
+        "ALTER TABLE sessions ADD COLUMN line_ending_crlf INTEGER DEFAULT 0;",
+        [],
+    );
     // Add parent_context column to lines if not present
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN parent_context TEXT;", []);
     let _ = conn.execute("ALTER TABLE lines ADD COLUMN norm_hash TEXT;", []);
-    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN next_line_id INTEGER NOT NULL DEFAULT 1;", []);
+    let _ = conn.execute(
+        "ALTER TABLE sessions ADD COLUMN next_line_id INTEGER NOT NULL DEFAULT 1;",
+        [],
+    );
     // Content used to be cached here. Drop it, and with it every entry built
     // under the old schema: line_hash was four characters wide then. Clearing
     // the sessions is what clears the lines — dropping the line rows alone
     // would leave each session claiming a hash and a line count it no longer
     // has, and a file nobody had touched since would read as empty.
-    if conn.execute("ALTER TABLE lines DROP COLUMN content;", []).is_ok() {
-        conn.execute("DELETE FROM sessions;", []).context("Failed to clear the pre-index cache")?;
-        conn.execute("DELETE FROM lines;", []).context("Failed to clear the pre-index line cache")?;
+    if conn
+        .execute("ALTER TABLE lines DROP COLUMN content;", [])
+        .is_ok()
+    {
+        conn.execute("DELETE FROM sessions;", [])
+            .context("Failed to clear the pre-index cache")?;
+        conn.execute("DELETE FROM lines;", [])
+            .context("Failed to clear the pre-index line cache")?;
     }
 
     Ok(())
@@ -170,12 +191,15 @@ pub fn parse_line_id(id_str: &str) -> Result<(i64, String)> {
     if parts.len() != 2 {
         anyhow::bail!("Invalid Line ID format: {}", id_str);
     }
-    let seq = i64::from_str_radix(parts[0], 16)
-        .context("Failed to parse sequence ID hex")?;
+    let seq = i64::from_str_radix(parts[0], 16).context("Failed to parse sequence ID hex")?;
     Ok((seq, parts[1].to_string()))
 }
 
-pub fn resolve_line_id(db_conn: &rusqlite::Connection, session_id: &str, id_str: &str) -> Result<(i64, String)> {
+pub fn resolve_line_id(
+    db_conn: &rusqlite::Connection,
+    session_id: &str,
+    id_str: &str,
+) -> Result<(i64, String)> {
     if id_str.contains('#') {
         parse_line_id(id_str)
     } else {
@@ -191,7 +215,10 @@ pub fn resolve_line_id(db_conn: &rusqlite::Connection, session_id: &str, id_str:
             matches.push((seq, hash));
         }
         if matches.is_empty() {
-            anyhow::bail!("CHECKSUM_ERROR: Target line hash '{}' not found in session", id_str);
+            anyhow::bail!(
+                "CHECKSUM_ERROR: Target line hash '{}' not found in session",
+                id_str
+            );
         } else if matches.len() > 1 {
             anyhow::bail!("CHECKSUM_ERROR: Target line hash '{}' is ambiguous (matches multiple lines in session)", id_str);
         } else {
@@ -221,14 +248,21 @@ pub struct LineBuffer {
 /// behaviour edits have always had: a single trailing newline is dropped, and
 /// empty content still inserts one empty line.
 fn split_insert_content(content: &str) -> Vec<String> {
-    let mut parts: Vec<&str> = if content.is_empty() { vec![""] } else { content.split('\n').collect() };
+    let mut parts: Vec<&str> = if content.is_empty() {
+        vec![""]
+    } else {
+        content.split('\n').collect()
+    };
     if parts.last() == Some(&"") {
         parts.pop();
     }
     if parts.is_empty() {
         parts.push("");
     }
-    parts.iter().map(|line| line.strip_suffix('\r').unwrap_or(line).to_string()).collect()
+    parts
+        .iter()
+        .map(|line| line.strip_suffix('\r').unwrap_or(line).to_string())
+        .collect()
 }
 
 fn strip_line_ending(content: &str) -> String {
@@ -256,7 +290,12 @@ impl LineBuffer {
     }
 
     pub fn join(&self, line_ending: &str) -> String {
-        self.lines.iter().map(|l| l.content.as_str()).collect::<Vec<_>>().join(line_ending) + line_ending
+        self.lines
+            .iter()
+            .map(|l| l.content.as_str())
+            .collect::<Vec<_>>()
+            .join(line_ending)
+            + line_ending
     }
 
     /// Resolve a target id to a position, verifying the caller's view of the
@@ -265,15 +304,26 @@ impl LineBuffer {
     fn position_of(&self, target_id: &str, role: &str, field: &str) -> Result<usize> {
         if target_id.contains('#') {
             let (seq, hash) = parse_line_id(target_id)?;
-            let idx = self.lines.iter().position(|l| l.seq == seq)
+            let idx = self
+                .lines
+                .iter()
+                .position(|l| l.seq == seq)
                 .with_context(|| format!("Target line not found for target_id={}", target_id))?;
             let actual = compute_line_hash(&self.lines[idx].content);
             if actual != hash {
-                bail!("CHECKSUM_ERROR: {} line hash mismatch for {}={}. Edit rejected.", role, field, target_id);
+                bail!(
+                    "CHECKSUM_ERROR: {} line hash mismatch for {}={}. Edit rejected.",
+                    role,
+                    field,
+                    target_id
+                );
             }
             Ok(idx)
         } else {
-            let matches: Vec<usize> = self.lines.iter().enumerate()
+            let matches: Vec<usize> = self
+                .lines
+                .iter()
+                .enumerate()
                 .filter(|(_, l)| compute_line_hash(&l.content) == target_id)
                 .map(|(idx, _)| idx)
                 .collect();
@@ -286,13 +336,24 @@ impl LineBuffer {
     }
 
     fn id_at(&self, idx: usize) -> String {
-        format!("{:x}#{}", self.lines[idx].seq, compute_line_hash(&self.lines[idx].content))
+        format!(
+            "{:x}#{}",
+            self.lines[idx].seq,
+            compute_line_hash(&self.lines[idx].content)
+        )
     }
 
     fn insert_at(&mut self, idx: usize, contents: Vec<String>, modified: &mut Vec<String>) {
         for (offset, content) in contents.into_iter().enumerate() {
             let seq = self.take_seq();
-            self.lines.insert(idx + offset, BufLine { seq, content, parent_context: None });
+            self.lines.insert(
+                idx + offset,
+                BufLine {
+                    seq,
+                    content,
+                    parent_context: None,
+                },
+            );
             modified.push(self.id_at(idx + offset));
         }
     }
@@ -307,32 +368,60 @@ impl LineBuffer {
                     let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
                     let no_target = edit.target_id.as_ref().map_or(true, |s| s.is_empty());
 
-                    let at = if edit.op == EditOp::Append || (edit.op == EditOp::InsertAfter && no_target) {
+                    let at = if edit.op == EditOp::Append
+                        || (edit.op == EditOp::InsertAfter && no_target)
+                    {
                         self.lines.len()
-                    } else if edit.op == EditOp::Prepend || (edit.op == EditOp::InsertBefore && no_target) {
+                    } else if edit.op == EditOp::Prepend
+                        || (edit.op == EditOp::InsertBefore && no_target)
+                    {
                         0
                     } else {
-                        let target_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                            .with_context(|| format!("CHECKSUM_ERROR: Missing target_id for {:?}", edit.op))?;
+                        let target_id = edit
+                            .target_id
+                            .as_ref()
+                            .filter(|s| !s.is_empty())
+                            .with_context(|| {
+                                format!("CHECKSUM_ERROR: Missing target_id for {:?}", edit.op)
+                            })?;
                         let idx = self.position_of(target_id, "Target", "target_id")?;
-                        if edit.op == EditOp::InsertAfter { idx + 1 } else { idx }
+                        if edit.op == EditOp::InsertAfter {
+                            idx + 1
+                        } else {
+                            idx
+                        }
                     };
 
                     self.insert_at(at, contents, &mut modified);
                 }
 
                 EditOp::Replace => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for replace op")?;
-                    let content = edit.content.as_ref().context("Missing content for replace op")?;
+                    let target_id = edit
+                        .target_id
+                        .as_ref()
+                        .context("Missing target_id for replace op")?;
+                    let content = edit
+                        .content
+                        .as_ref()
+                        .context("Missing content for replace op")?;
                     let idx = self.position_of(target_id, "Target", "target_id")?;
                     self.lines[idx].content = strip_line_ending(content);
                     modified.push(self.id_at(idx));
                 }
 
                 EditOp::ReplaceSubstring => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for replace_substring op")?;
-                    let pattern = edit.pattern.as_ref().context("Missing pattern for replace_substring op")?;
-                    let replacement = edit.replacement.as_ref().context("Missing replacement for replace_substring op")?;
+                    let target_id = edit
+                        .target_id
+                        .as_ref()
+                        .context("Missing target_id for replace_substring op")?;
+                    let pattern = edit
+                        .pattern
+                        .as_ref()
+                        .context("Missing pattern for replace_substring op")?;
+                    let replacement = edit
+                        .replacement
+                        .as_ref()
+                        .context("Missing replacement for replace_substring op")?;
                     let occurrence = edit.occurrence.unwrap_or(1);
                     if occurrence < 1 {
                         bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
@@ -356,22 +445,33 @@ impl LineBuffer {
                 }
 
                 EditOp::Delete => {
-                    let target_id = edit.target_id.as_ref().context("Missing target_id for delete op")?;
+                    let target_id = edit
+                        .target_id
+                        .as_ref()
+                        .context("Missing target_id for delete op")?;
                     let idx = self.position_of(target_id, "Target", "target_id")?;
                     self.lines.remove(idx);
 
                     // Report the line now nearest the hole, so the agent has a
                     // live id to anchor its next edit on.
                     if !self.lines.is_empty() {
-                        let neighbour = if idx < self.lines.len() { idx } else { self.lines.len() - 1 };
+                        let neighbour = if idx < self.lines.len() {
+                            idx
+                        } else {
+                            self.lines.len() - 1
+                        };
                         modified.push(self.id_at(neighbour));
                     }
                 }
 
                 EditOp::ReplaceRange => {
-                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
-                        .context("CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op")?;
-                    let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty())
+                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty()).context(
+                        "CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op",
+                    )?;
+                    let end_id = edit
+                        .end_target_id
+                        .as_ref()
+                        .filter(|s| !s.is_empty())
                         .context("CHECKSUM_ERROR: Missing end_target_id for replace_range op")?;
 
                     let start_idx = self.position_of(start_id, "Start", "target_id")?;
@@ -386,9 +486,16 @@ impl LineBuffer {
                 }
 
                 EditOp::Move => {
-                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty())
+                    let start_id = edit
+                        .target_id
+                        .as_ref()
+                        .filter(|s| !s.is_empty())
                         .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
-                    let end_id = edit.end_target_id.as_ref().filter(|s| !s.is_empty()).unwrap_or(start_id);
+                    let end_id = edit
+                        .end_target_id
+                        .as_ref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(start_id);
                     let move_pos = edit.move_position.unwrap_or(MovePosition::After);
 
                     let start_idx = self.position_of(start_id, "Start", "target_id")?;
@@ -421,7 +528,11 @@ impl LineBuffer {
                         (pos, Some(dest)) => {
                             // The drain shifted every position after the block.
                             let dest = if dest > end_idx { dest - moved } else { dest };
-                            if pos == MovePosition::Before { dest } else { dest + 1 }
+                            if pos == MovePosition::Before {
+                                dest
+                            } else {
+                                dest + 1
+                            }
                         }
                         (_, None) => unreachable!("before/after always resolve a destination"),
                     };
@@ -445,7 +556,8 @@ fn session_filepath(conn: &Connection, session_id: &str) -> Result<String> {
         "SELECT filepath FROM sessions WHERE session_id = ?1",
         [session_id],
         |row| row.get(0),
-    ).with_context(|| format!("No session found for session_id={}", session_id))
+    )
+    .with_context(|| format!("No session found for session_id={}", session_id))
 }
 
 /// Read a session's file and pair each line with the identity the index holds
@@ -466,7 +578,10 @@ fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<LineBuffer> {
         if parts.last() == Some(&"") {
             parts.pop();
         }
-        let disk: Vec<String> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect();
+        let disk: Vec<String> = parts
+            .iter()
+            .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
+            .collect();
 
         let index: Vec<(i64, Option<String>)> = {
             let mut stmt = conn.prepare(
@@ -488,17 +603,28 @@ fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<LineBuffer> {
             continue;
         }
 
-        let lines: Vec<BufLine> = disk.into_iter().zip(index)
-            .map(|(content, (seq, parent_context))| BufLine { seq, content, parent_context })
+        let lines: Vec<BufLine> = disk
+            .into_iter()
+            .zip(index)
+            .map(|(content, (seq, parent_context))| BufLine {
+                seq,
+                content,
+                parent_context,
+            })
             .collect();
 
-        let stored_next: i64 = conn.query_row(
-            "SELECT next_line_id FROM sessions WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        ).unwrap_or(1);
+        let stored_next: i64 = conn
+            .query_row(
+                "SELECT next_line_id FROM sessions WHERE session_id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(1);
         let highest_live = lines.iter().map(|line| line.seq).max().unwrap_or(0);
-        return Ok(LineBuffer::new(lines, std::cmp::max(stored_next, highest_live + 1)));
+        return Ok(LineBuffer::new(
+            lines,
+            std::cmp::max(stored_next, highest_live + 1),
+        ));
     }
 }
 
@@ -514,27 +640,21 @@ pub trait SessionRepository: Send + Sync {
     fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>>;
     /// Work out what a batch would produce, touching nothing. Returns the
     /// resulting buffer and the ids the batch would report.
-    fn plan_line_edits(&self, session_id: &str, edits: &[LineEdit]) -> Result<(LineBuffer, Vec<String>)>;
+    fn plan_line_edits(
+        &self,
+        session_id: &str,
+        edits: &[LineEdit],
+    ) -> Result<(LineBuffer, Vec<String>)>;
     /// Persist a planned buffer as the session's new index. Call only once the
     /// buffer's content has been accepted and written to disk.
     fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()>;
-    fn update_session_metadata(
-        &self,
-        session_id: &str,
-        file_hash: &str,
-        mtime: i64,
-    ) -> Result<()>;
+    fn update_session_metadata(&self, session_id: &str, file_hash: &str, mtime: i64) -> Result<()>;
     fn delete_session(&self, filepath: &str) -> Result<()>;
     fn get_session_mtime(&self, filepath: &str) -> Result<Option<i64>>;
     fn get_session_crlf(&self, session_id: &str) -> Result<bool>;
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>>;
     fn find_matching_lines(&self, session_id: &str, query: &str) -> Result<Vec<usize>>;
-    fn smart_resync(
-        &self,
-        filepath: &str,
-        session_id: &str,
-        target_ids: &[String],
-    ) -> Result<()>;
+    fn smart_resync(&self, filepath: &str, session_id: &str, target_ids: &[String]) -> Result<()>;
     fn create_preview(&self, filepath: &str, edits: &[LineEdit]) -> Result<String>;
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
 }
@@ -555,7 +675,7 @@ impl SessionRepository for SqliteSessionRepository {
         let total_lines: usize = conn.query_row(
             "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
             rusqlite::params![session_id],
-            |row| row.get(0)
+            |row| row.get(0),
         )?;
         Ok(total_lines)
     }
@@ -563,7 +683,10 @@ impl SessionRepository for SqliteSessionRepository {
     fn find_matching_lines(&self, session_id: &str, query: &str) -> Result<Vec<usize>> {
         let mut conn = get_db_connection()?;
         let buffer = load_buffer(&mut conn, session_id)?;
-        Ok(buffer.lines.iter().enumerate()
+        Ok(buffer
+            .lines
+            .iter()
+            .enumerate()
             .filter(|(_, line)| line.content.contains(query))
             .map(|(idx, _)| idx + 1)
             .collect())
@@ -574,7 +697,7 @@ impl SessionRepository for SqliteSessionRepository {
         let crlf: i32 = conn.query_row(
             "SELECT COALESCE(line_ending_crlf, 0) FROM sessions WHERE session_id = ?1",
             rusqlite::params![session_id],
-            |row| row.get(0)
+            |row| row.get(0),
         )?;
         Ok(crlf != 0)
     }
@@ -592,18 +715,33 @@ impl SessionRepository for SqliteSessionRepository {
         if from >= to {
             return Ok(Vec::new());
         }
-        Ok(buffer.lines[from..to].iter()
-            .map(|line| (line.seq, Some(compute_line_hash(&line.content)), line.content.clone()))
+        Ok(buffer.lines[from..to]
+            .iter()
+            .map(|line| {
+                (
+                    line.seq,
+                    Some(compute_line_hash(&line.content)),
+                    line.content.clone(),
+                )
+            })
             .collect())
     }
 
     fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>> {
         let mut conn = get_db_connection()?;
         let buffer = load_buffer(&mut conn, session_id)?;
-        Ok(buffer.lines.iter().find(|line| line.seq == sequence_id).map(|line| line.content.clone()))
+        Ok(buffer
+            .lines
+            .iter()
+            .find(|line| line.seq == sequence_id)
+            .map(|line| line.content.clone()))
     }
 
-    fn plan_line_edits(&self, session_id: &str, edits: &[LineEdit]) -> Result<(LineBuffer, Vec<String>)> {
+    fn plan_line_edits(
+        &self,
+        session_id: &str,
+        edits: &[LineEdit],
+    ) -> Result<(LineBuffer, Vec<String>)> {
         let mut conn = get_db_connection()?;
         let mut buffer = load_buffer(&mut conn, session_id)?;
         let modified_ids = buffer.apply(edits)?;
@@ -637,7 +775,10 @@ impl SessionRepository for SqliteSessionRepository {
         let conn = get_db_connection()?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
-        conn.execute("DELETE FROM previews WHERE created_at < ?1", [now - PREVIEW_TTL_SECONDS])?;
+        conn.execute(
+            "DELETE FROM previews WHERE created_at < ?1",
+            [now - PREVIEW_TTL_SECONDS],
+        )?;
 
         conn.execute(
             "INSERT INTO previews (filepath, file_hash, edits_json, created_at) VALUES (?1, ?2, ?3, ?4);",
@@ -648,16 +789,30 @@ impl SessionRepository for SqliteSessionRepository {
     }
 
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>> {
-        let rowid = preview_id.strip_prefix('p')
+        let rowid = preview_id
+            .strip_prefix('p')
             .and_then(|digits| i64::from_str_radix(digits, 16).ok())
-            .with_context(|| format!("Invalid preview id '{}'. Preview ids look like 'p1f'.", preview_id))?;
+            .with_context(|| {
+                format!(
+                    "Invalid preview id '{}'. Preview ids look like 'p1f'.",
+                    preview_id
+                )
+            })?;
 
         let conn = get_db_connection()?;
-        let row = conn.query_row(
-            "SELECT filepath, file_hash, edits_json FROM previews WHERE id = ?1",
-            [rowid],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
-        ).optional()?;
+        let row = conn
+            .query_row(
+                "SELECT filepath, file_hash, edits_json FROM previews WHERE id = ?1",
+                [rowid],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
 
         let (preview_path, file_hash, edits_json) = row.with_context(|| format!(
             "Preview '{}' is unknown, already applied, or expired. Run edit_lines with dry_run again to get a fresh preview.",
@@ -683,12 +838,7 @@ impl SessionRepository for SqliteSessionRepository {
         Ok(serde_json::from_str(&edits_json)?)
     }
 
-    fn update_session_metadata(
-        &self,
-        session_id: &str,
-        file_hash: &str,
-        mtime: i64,
-    ) -> Result<()> {
+    fn update_session_metadata(&self, session_id: &str, file_hash: &str, mtime: i64) -> Result<()> {
         let conn = get_db_connection()?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         conn.execute(
@@ -704,10 +854,7 @@ impl SessionRepository for SqliteSessionRepository {
             "DELETE FROM lines WHERE session_id IN (SELECT session_id FROM sessions WHERE filepath = ?1);",
             [filepath]
         )?;
-        conn.execute(
-            "DELETE FROM sessions WHERE filepath = ?1;",
-            [filepath]
-        )?;
+        conn.execute("DELETE FROM sessions WHERE filepath = ?1;", [filepath])?;
         Ok(())
     }
 
@@ -716,7 +863,7 @@ impl SessionRepository for SqliteSessionRepository {
         let res = conn.query_row(
             "SELECT mtime FROM sessions WHERE filepath = ?1",
             [filepath],
-            |row| row.get(0)
+            |row| row.get(0),
         );
         match res {
             Ok(mtime) => Ok(Some(mtime)),
@@ -739,12 +886,7 @@ impl SessionRepository for SqliteSessionRepository {
         }
     }
 
-    fn smart_resync(
-        &self,
-        filepath: &str,
-        session_id: &str,
-        target_ids: &[String],
-    ) -> Result<()> {
+    fn smart_resync(&self, filepath: &str, session_id: &str, target_ids: &[String]) -> Result<()> {
         let mut conn = get_db_connection()?;
         reconcile_index(&mut conn, session_id, filepath, target_ids).map(|_| ())
     }
@@ -772,8 +914,11 @@ fn reconcile_index(
         [session_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).optional()?;
-    let disk_mtime = std::path::Path::new(filepath).metadata()?.modified()?
-        .duration_since(UNIX_EPOCH)?.as_secs() as i64;
+    let disk_mtime = std::path::Path::new(filepath)
+        .metadata()?
+        .modified()?
+        .duration_since(UNIX_EPOCH)?
+        .as_secs() as i64;
     let disk_file_hash = compute_sha256(filepath)?;
 
     let mut targeted = Vec::new();
@@ -789,7 +934,10 @@ fn reconcile_index(
     if parts.last() == Some(&"") {
         parts.pop();
     }
-    let disk: Vec<&str> = parts.iter().map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let disk: Vec<&str> = parts
+        .iter()
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
     let disk_hashes: Vec<String> = disk.iter().map(|line| compute_stored_hash(line)).collect();
 
     // Nothing to reconcile if the file still looks the way the index last saw
@@ -797,7 +945,10 @@ fn reconcile_index(
     // a schema migration clears the line rows while leaving the session's hash
     // in place, and an index that is short must be rebuilt rather than trusted.
     if let Some((stored_hash, stored_mtime, line_count)) = &current {
-        if *stored_hash == disk_file_hash && *stored_mtime == disk_mtime && *line_count == disk.len() {
+        if *stored_hash == disk_file_hash
+            && *stored_mtime == disk_mtime
+            && *line_count == disk.len()
+        {
             return Ok(*line_count);
         }
     }
@@ -806,7 +957,9 @@ fn reconcile_index(
         let mut stmt = conn.prepare(
             "SELECT sequence_id, COALESCE(line_hash, ''), COALESCE(norm_hash, '') FROM lines WHERE session_id = ?1 ORDER BY sort_order"
         )?;
-        let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        let rows = stmt.query_map([session_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
     };
     let index_hashes: Vec<&str> = index.iter().map(|(_, hash, _)| hash.as_str()).collect();
@@ -816,7 +969,8 @@ fn reconcile_index(
     let mut retired: HashMap<&str, VecDeque<i64>> = HashMap::new();
     let mut respaced: HashMap<&str, VecDeque<i64>> = HashMap::new();
 
-    for op in similar::capture_diff_slices(similar::Algorithm::Patience, &index_hashes, &disk_refs) {
+    for op in similar::capture_diff_slices(similar::Algorithm::Patience, &index_hashes, &disk_refs)
+    {
         let (old_range, new_range) = (op.old_range(), op.new_range());
         match op.tag() {
             similar::DiffTag::Equal => {
@@ -826,8 +980,14 @@ fn reconcile_index(
             }
             similar::DiffTag::Delete | similar::DiffTag::Replace => {
                 for old_idx in old_range {
-                    retired.entry(index_hashes[old_idx]).or_default().push_back(index[old_idx].0);
-                    respaced.entry(index[old_idx].2.as_str()).or_default().push_back(index[old_idx].0);
+                    retired
+                        .entry(index_hashes[old_idx])
+                        .or_default()
+                        .push_back(index[old_idx].0);
+                    respaced
+                        .entry(index[old_idx].2.as_str())
+                        .or_default()
+                        .push_back(index[old_idx].0);
                 }
             }
             similar::DiffTag::Insert => {}
@@ -847,7 +1007,10 @@ fn reconcile_index(
 
     // Then the same pass ignoring whitespace, so a formatter respacing the
     // file leaves every line holding the id the agent already has.
-    let disk_norms: Vec<String> = disk.iter().map(|line| compute_normalized_hash(line)).collect();
+    let disk_norms: Vec<String> = disk
+        .iter()
+        .map(|line| compute_normalized_hash(line))
+        .collect();
     for (new_idx, slot) in assigned.iter_mut().enumerate() {
         if slot.is_none() {
             if let Some(queue) = respaced.get_mut(disk_norms[new_idx].as_str()) {
@@ -856,18 +1019,25 @@ fn reconcile_index(
         }
     }
 
-    let stored_next: i64 = conn.query_row(
-        "SELECT next_line_id FROM sessions WHERE session_id = ?1",
-        [session_id],
-        |row| row.get(0),
-    ).unwrap_or(1);
+    let stored_next: i64 = conn
+        .query_row(
+            "SELECT next_line_id FROM sessions WHERE session_id = ?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(1);
     let highest = index.iter().map(|(seq, _, _)| *seq).max().unwrap_or(0);
     let mut next_seq = std::cmp::max(stored_next, highest + 1);
-    let seqs: Vec<i64> = assigned.into_iter().map(|slot| slot.unwrap_or_else(|| {
-        let seq = next_seq;
-        next_seq += 1;
-        seq
-    })).collect();
+    let seqs: Vec<i64> = assigned
+        .into_iter()
+        .map(|slot| {
+            slot.unwrap_or_else(|| {
+                let seq = next_seq;
+                next_seq += 1;
+                seq
+            })
+        })
+        .collect();
 
     for (seq, hash) in &targeted {
         if !seqs.contains(seq) {
@@ -910,21 +1080,29 @@ fn reconcile_index(
 
 fn is_binary_file(path: &str) -> Result<bool> {
     use std::io::Read;
-    let mut file = fs::File::open(path).with_context(|| format!("Failed to open file for binary check: {}", path))?;
+    let mut file = fs::File::open(path)
+        .with_context(|| format!("Failed to open file for binary check: {}", path))?;
     let mut buffer = [0; 8192];
-    let bytes_read = file.read(&mut buffer).with_context(|| format!("Failed to read file for binary check: {}", path))?;
+    let bytes_read = file
+        .read(&mut buffer)
+        .with_context(|| format!("Failed to read file for binary check: {}", path))?;
     Ok(buffer[..bytes_read].contains(&0))
 }
 
 fn compute_sha256(path: &str) -> Result<String> {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     use std::io::Read;
-    let mut file = fs::File::open(path).with_context(|| format!("Failed to open file for SHA256 hashing: {}", path))?;
+    let mut file = fs::File::open(path)
+        .with_context(|| format!("Failed to open file for SHA256 hashing: {}", path))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0; 8192];
     loop {
-        let n = file.read(&mut buffer).with_context(|| format!("Failed to read file for SHA256 hashing: {}", path))?;
-        if n == 0 { break; }
+        let n = file
+            .read(&mut buffer)
+            .with_context(|| format!("Failed to read file for SHA256 hashing: {}", path))?;
+        if n == 0 {
+            break;
+        }
         hasher.update(&buffer[..n]);
     }
     Ok(format!("{:x}", hasher.finalize()))
@@ -938,10 +1116,32 @@ pub fn check_language_supported(path: &str) -> bool {
         .to_ascii_lowercase();
     matches!(
         ext.as_str(),
-        "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "rs" | "java" |
-        "cpp" | "cc" | "cxx" | "c" | "h" | "lua" | "html" | "htm" |
-        "json" | "yaml" | "yml" | "toml" | "swift" | "md" | "markdown" |
-        "sh" | "bash" | "zsh" | "ksh"
+        "py" | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "go"
+            | "rs"
+            | "java"
+            | "cpp"
+            | "cc"
+            | "cxx"
+            | "c"
+            | "h"
+            | "lua"
+            | "html"
+            | "htm"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "swift"
+            | "md"
+            | "markdown"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "ksh"
     )
 }
 
@@ -952,13 +1152,20 @@ const SESSION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
 
 fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-    conn.execute("DELETE FROM sessions WHERE last_accessed_at < ?1;", [now - SESSION_TTL_SECONDS])
-        .context("Failed to clean up stale sessions")?;
-    conn.execute("DELETE FROM previews WHERE created_at < ?1;", [now - PREVIEW_TTL_SECONDS])
-        .context("Failed to clean up expired previews")?;
+    conn.execute(
+        "DELETE FROM sessions WHERE last_accessed_at < ?1;",
+        [now - SESSION_TTL_SECONDS],
+    )
+    .context("Failed to clean up stale sessions")?;
+    conn.execute(
+        "DELETE FROM previews WHERE created_at < ?1;",
+        [now - PREVIEW_TTL_SECONDS],
+    )
+    .context("Failed to clean up expired previews")?;
     // Deleting rows only moves pages to the free list; this hands them back to
     // the filesystem.
-    conn.pragma_query_value(None, "incremental_vacuum", |_| Ok(())).ok();
+    conn.pragma_query_value(None, "incremental_vacuum", |_| Ok(()))
+        .ok();
     Ok(())
 }
 
@@ -984,17 +1191,23 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     }
 
     let file_hash = compute_sha256(filepath)?;
-    let mtime = path.metadata()?.modified()?
-        .duration_since(UNIX_EPOCH)?.as_secs() as i64;
+    let mtime = path
+        .metadata()?
+        .modified()?
+        .duration_since(UNIX_EPOCH)?
+        .as_secs() as i64;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
     // A session for this path, and whether the file still looks the way the
     // session last saw it.
-    let existing: Option<(String, bool)> = conn.query_row(
-        "SELECT session_id, file_hash = ?2 AND mtime = ?3 FROM sessions WHERE filepath = ?1",
-        rusqlite::params![filepath, file_hash, mtime],
-        |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
-    ).optional().context("Failed to query existing session")?;
+    let existing: Option<(String, bool)> = conn
+        .query_row(
+            "SELECT session_id, file_hash = ?2 AND mtime = ?3 FROM sessions WHERE filepath = ?1",
+            rusqlite::params![filepath, file_hash, mtime],
+            |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
+        )
+        .optional()
+        .context("Failed to query existing session")?;
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
@@ -1008,12 +1221,15 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
         // under us is reconciled here, not rebuilt, so the ids an agent is
         // holding survive whatever happened outside the tool.
         let total_lines = if unchanged {
-            conn.execute("UPDATE sessions SET last_accessed_at = ?1 WHERE session_id = ?2;", rusqlite::params![now, session_id])
-                .context("Failed to update last_accessed_at for reused session")?;
+            conn.execute(
+                "UPDATE sessions SET last_accessed_at = ?1 WHERE session_id = ?2;",
+                rusqlite::params![now, session_id],
+            )
+            .context("Failed to update last_accessed_at for reused session")?;
             conn.query_row(
                 "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
                 rusqlite::params![session_id],
-                |row| row.get(0)
+                |row| row.get(0),
             )?
         } else {
             reconcile_index(&mut conn, &session_id, filepath, &[])?
@@ -1029,20 +1245,28 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     }
 
     // Create a new session
-    use sha1::{Sha1, Digest};
-    let session_id = format!("{:x}", Sha1::digest(format!("{}-{}-{}", filepath, file_hash, now).as_bytes()));
-    
+    use sha1::{Digest, Sha1};
+    let session_id = format!(
+        "{:x}",
+        Sha1::digest(format!("{}-{}-{}", filepath, file_hash, now).as_bytes())
+    );
+
     // Read the file and populate rows
     let content = fs::read_to_string(filepath).context("Failed to read file content")?;
     let is_crlf = content.contains("\r\n");
     let crlf_val = if is_crlf { 1 } else { 0 };
-    
+
     // Begin transaction
-    let tx = conn.transaction().context("Failed to begin SQLite transaction")?;
+    let tx = conn
+        .transaction()
+        .context("Failed to begin SQLite transaction")?;
 
     // Clear any stale session for this filepath
-    tx.execute("DELETE FROM sessions WHERE filepath = ?1;", rusqlite::params![filepath])
-        .context("Failed to delete existing session for path")?;
+    tx.execute(
+        "DELETE FROM sessions WHERE filepath = ?1;",
+        rusqlite::params![filepath],
+    )
+    .context("Failed to delete existing session for path")?;
 
     tx.execute(
         "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at, line_ending_crlf) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
@@ -1061,14 +1285,21 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
         if parts.last() == Some(&"") {
             parts.pop();
         }
-        
+
         for (idx, line_content) in parts.iter().enumerate() {
             let seq = idx + 1;
             let sort_order = (seq as f64) * 1000.0;
             let trimmed_line = line_content.strip_suffix('\r').unwrap_or(line_content);
             let p_ctx = parent_contexts.get(idx).cloned().flatten();
-            stmt.execute(rusqlite::params![session_id, seq, compute_stored_hash(trimmed_line), compute_normalized_hash(trimmed_line), sort_order, p_ctx])
-                .context("Failed to insert line")?;
+            stmt.execute(rusqlite::params![
+                session_id,
+                seq,
+                compute_stored_hash(trimmed_line),
+                compute_normalized_hash(trimmed_line),
+                sort_order,
+                p_ctx
+            ])
+            .context("Failed to insert line")?;
             lines_count += 1;
         }
     }
@@ -1076,7 +1307,8 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
     tx.execute(
         "UPDATE sessions SET next_line_id = ?1 WHERE session_id = ?2",
         rusqlite::params![lines_count as i64 + 1, session_id],
-    ).context("Failed to seed the line id counter")?;
+    )
+    .context("Failed to seed the line id counter")?;
 
     tx.commit().context("Failed to commit SQLite transaction")?;
 
@@ -1094,7 +1326,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 /// rows before any sequence number is known, so this is the only key available
 /// there and needs enough width that a file's lines do not collide.
 pub fn compute_stored_hash(content: &str) -> String {
-    use sha1::{Sha1, Digest};
+    use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
     hasher.update(content.as_bytes());
     format!("{:x}", hasher.finalize())[..16].to_string()
@@ -1105,7 +1337,12 @@ pub fn compute_stored_hash(content: &str) -> String {
 /// enough: formatters add and remove spaces around operators and delimiters,
 /// not just at the margin.
 pub fn compute_normalized_hash(content: &str) -> String {
-    compute_stored_hash(&content.chars().filter(|c| !c.is_whitespace()).collect::<String>())
+    compute_stored_hash(
+        &content
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>(),
+    )
 }
 
 /// The hash surfaced to agents inside `{sequence_id:x}#{hash}`. It is a prefix
@@ -1121,14 +1358,18 @@ static WASM_ENGINE: once_cell::sync::Lazy<wasmtime::Engine> = once_cell::sync::L
     wasmtime::Engine::new(&config).expect("Failed to initialize Wasmtime engine")
 });
 
-static SYNCHRONOUS_LANGUAGES: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<String, tree_sitter::Language>>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+static SYNCHRONOUS_LANGUAGES: once_cell::sync::Lazy<
+    std::sync::Mutex<std::collections::HashMap<String, tree_sitter::Language>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 fn parse_code_sync(ext: &str, code: &str) -> Result<tree_sitter::Tree> {
     let wasm_dir = crate::config::get_wasm_dir();
     let wasm_file = crate::config::get_wasm_file(&wasm_dir, ext)?;
     let wasm_name = wasm_file.strip_suffix(".wasm").unwrap_or(&wasm_file);
-    let lang_symbol = wasm_name.strip_prefix("tree-sitter-").unwrap_or(wasm_name).replace("-", "_");
+    let lang_symbol = wasm_name
+        .strip_prefix("tree-sitter-")
+        .unwrap_or(wasm_name)
+        .replace("-", "_");
 
     let cached_lang = {
         let cache = SYNCHRONOUS_LANGUAGES.lock().unwrap();
@@ -1160,18 +1401,21 @@ fn parse_code_sync(ext: &str, code: &str) -> Result<tree_sitter::Tree> {
 
 fn get_context_name(node: tree_sitter::Node, code: &str) -> Option<String> {
     let kind = node.kind();
-    let name_opt = node.child_by_field_name("name")
-        .map(|n| {
-            let bytes = n.byte_range();
-            if bytes.end <= code.len() {
-                code[bytes].trim().to_string()
-            } else {
-                String::new()
-            }
-        });
+    let name_opt = node.child_by_field_name("name").map(|n| {
+        let bytes = n.byte_range();
+        if bytes.end <= code.len() {
+            code[bytes].trim().to_string()
+        } else {
+            String::new()
+        }
+    });
 
     match kind {
-        "function_definition" | "function_item" | "function_declaration" | "method_declaration" | "method_definition" => {
+        "function_definition"
+        | "function_item"
+        | "function_declaration"
+        | "method_declaration"
+        | "method_definition" => {
             let name = name_opt.unwrap_or_else(|| "anonymous".to_string());
             Some(format!("fn:{}", name))
         }
@@ -1207,7 +1451,7 @@ fn get_context_name(node: tree_sitter::Node, code: &str) -> Option<String> {
 pub fn compute_parent_contexts(filepath: &str, content: &str) -> Vec<Option<String>> {
     let line_count = content.split('\n').count();
     let mut contexts = vec![None; line_count];
-    
+
     let ext = std::path::Path::new(filepath)
         .extension()
         .and_then(|e| e.to_str())
@@ -1236,38 +1480,36 @@ pub fn compute_parent_contexts(filepath: &str, content: &str) -> Vec<Option<Stri
             tracing::error!("parse_code_sync failed: {:?}", e);
         }
         Ok(tree) => {
-        let mut visit_stack = vec![(tree.root_node(), None)];
-        while let Some((node, active_context)) = visit_stack.pop() {
-            let next_context = if let Some(name) = get_context_name(node, content) {
-                Some(name)
-            } else {
-                active_context
-            };
+            let mut visit_stack = vec![(tree.root_node(), None)];
+            while let Some((node, active_context)) = visit_stack.pop() {
+                let next_context = if let Some(name) = get_context_name(node, content) {
+                    Some(name)
+                } else {
+                    active_context
+                };
 
-            if let Some(ref ctx_name) = next_context {
-                let start_row = node.start_position().row;
-                let end_row = node.end_position().row;
-                for r in start_row..=end_row {
-                    if r < contexts.len() {
-                        contexts[r] = Some(ctx_name.clone());
+                if let Some(ref ctx_name) = next_context {
+                    let start_row = node.start_position().row;
+                    let end_row = node.end_position().row;
+                    for r in start_row..=end_row {
+                        if r < contexts.len() {
+                            contexts[r] = Some(ctx_name.clone());
+                        }
+                    }
+                }
+
+                let count = node.child_count();
+                for i in (0..count).rev() {
+                    if let Some(child) = node.child(i as u32) {
+                        visit_stack.push((child, next_context.clone()));
                     }
                 }
             }
-
-            let count = node.child_count();
-            for i in (0..count).rev() {
-                if let Some(child) = node.child(i as u32) {
-                    visit_stack.push((child, next_context.clone()));
-                }
-            }
-        }
         }
     }
-    
+
     contexts
 }
-
-
 
 #[cfg(test)]
 #[allow(clippy::await_holding_lock)]
@@ -1282,10 +1524,18 @@ mod tests {
         end_line: usize,
         only_ids: Option<bool>,
     ) -> Result<String> {
-        let res = crate::tools::view::view_lines(repository, filepath, Some(start_line), Some(end_line), only_ids, None, None)?;
+        let res = crate::tools::view::view_lines(
+            repository,
+            filepath,
+            Some(start_line),
+            Some(end_line),
+            only_ids,
+            None,
+            None,
+        )?;
         let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
         let ids = ids_val["ids"].as_array().unwrap();
-        
+
         let mut lines = Vec::new();
         if let Some(ref text) = res.lines_text {
             for line in text.lines() {
@@ -1310,7 +1560,7 @@ mod tests {
                 lines.push(serde_json::json!([id, n]));
             }
         }
-        
+
         let mut val = ids_val.clone();
         val["lines"] = serde_json::Value::Array(lines);
         let columns = if only_ids.unwrap_or(false) {
@@ -1326,20 +1576,22 @@ mod tests {
     fn test_create_tables_in_memory() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap();
         let conn = Connection::open_in_memory()?;
-        
+
         // Configure pragmas
         conn.execute("PRAGMA foreign_keys = ON;", [])
             .context("Failed to enable foreign keys in test database")?;
-        
+
         // Create tables
         create_tables(&conn)?;
 
         // Verify that tables exist by query
-        let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions';")?;
+        let mut stmt =
+            conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions';")?;
         let mut rows = stmt.query([])?;
         assert!(rows.next()?.is_some(), "sessions table should exist");
 
-        let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='lines';")?;
+        let mut stmt =
+            conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='lines';")?;
         let mut rows = stmt.query([])?;
         assert!(rows.next()?.is_some(), "lines table should exist");
 
@@ -1351,7 +1603,7 @@ mod tests {
         let _lock = DB_LOCK.lock().unwrap();
         let path = get_db_path()?;
         assert!(path.to_string_lossy().contains("sessions.db"));
-        
+
         let temp_dir = std::env::temp_dir().join("line-editor-test");
         assert!(path.starts_with(&temp_dir));
 
@@ -1369,15 +1621,15 @@ mod tests {
     fn test_is_binary_file() -> Result<()> {
         let temp_dir = std::env::temp_dir().join("line-editor-test-binary");
         fs::create_dir_all(&temp_dir)?;
-        
+
         let text_path = temp_dir.join("text.txt");
         fs::write(&text_path, "Hello world!")?;
         assert!(!is_binary_file(text_path.to_str().unwrap())?);
-        
+
         let binary_path = temp_dir.join("binary.bin");
         fs::write(&binary_path, b"Hello\x00world")?;
         assert!(is_binary_file(binary_path.to_str().unwrap())?);
-        
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -1409,10 +1661,13 @@ mod tests {
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("test.txt");
         fs::write(&file_path, "hello")?;
-        
+
         let hash = compute_sha256(file_path.to_str().unwrap())?;
-        assert_eq!(hash, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
-        
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -1422,33 +1677,33 @@ mod tests {
         let _lock = DB_LOCK.lock().unwrap();
         let conn = Connection::open_in_memory()?;
         create_tables(&conn)?;
-        
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         // Expressed against the window itself, so widening it does not quietly
         // turn this into a test of nothing.
         let stale_time = now - SESSION_TTL_SECONDS - 1;
         let fresh_time = now - SESSION_TTL_SECONDS / 2;
-        
+
         conn.execute(
             "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
             rusqlite::params!["stale.rs", "session_stale", "hash1", 100, stale_time],
         )?;
-        
+
         conn.execute(
             "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
             rusqlite::params!["fresh.rs", "session_fresh", "hash2", 100, fresh_time],
         )?;
-        
+
         cleanup_stale_sessions(&conn)?;
-        
+
         let mut stmt = conn.prepare("SELECT count(*) FROM sessions")?;
         let count: i64 = stmt.query_row([], |row| row.get(0))?;
         assert_eq!(count, 1);
-        
+
         let mut stmt = conn.prepare("SELECT filepath FROM sessions")?;
         let filepath: String = stmt.query_row([], |row| row.get(0))?;
         assert_eq!(filepath, "fresh.rs");
-        
+
         Ok(())
     }
 
@@ -1461,15 +1716,15 @@ mod tests {
         }
         let file_path = temp_dir.join("missing.rs");
         let filepath_str = file_path.to_str().unwrap();
-        
+
         let res = init_edit_session(filepath_str, false);
         assert!(res.is_err());
-        
+
         let metadata = init_edit_session(filepath_str, true)?;
         assert_eq!(metadata.total_lines, 0);
         assert!(metadata.is_supported);
         assert!(file_path.exists());
-        
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -1481,12 +1736,12 @@ mod tests {
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("binary.bin");
         fs::write(&file_path, b"Hello\x00world")?;
-        
+
         let res = init_edit_session(file_path.to_str().unwrap(), false);
         assert!(res.is_err());
         let err_msg = format!("{:?}", res.err().unwrap());
         assert!(err_msg.contains("BINARY_FILE_ERROR"));
-        
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -1498,12 +1753,12 @@ mod tests {
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("unsupported.txt");
         fs::write(&file_path, "Hello\nworld")?;
-        
+
         let metadata = init_edit_session(file_path.to_str().unwrap(), false)?;
         assert_eq!(metadata.total_lines, 2);
         assert!(!metadata.is_supported);
         assert!(metadata.warning_message.is_some());
-        
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -1516,17 +1771,17 @@ mod tests {
         let file_path = temp_dir.join("code.rs");
         fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
         let filepath_str = file_path.to_str().unwrap();
-        
+
         let metadata1 = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata1.total_lines, 3);
         assert!(metadata1.is_supported);
         assert!(metadata1.warning_message.is_none());
-        
+
         let metadata2 = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata1.session_id, metadata2.session_id);
         assert_eq!(metadata1.file_hash, metadata2.file_hash);
         assert_eq!(metadata1.mtime, metadata2.mtime);
-        
+
         let repository = SqliteSessionRepository;
         let ids_before: Vec<i64> = repository
             .fetch_lines_range(&metadata1.session_id, 1, metadata1.total_lines)?
@@ -1534,7 +1789,10 @@ mod tests {
             .map(|(seq, _, _)| seq)
             .collect();
 
-        fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n    // extra line\n}\n")?;
+        fs::write(
+            &file_path,
+            "fn main() {\n    println!(\"Hello!\");\n    // extra line\n}\n",
+        )?;
         let metadata3 = init_edit_session(filepath_str, false)?;
         // The session is reconciled rather than rebuilt, so it keeps its
         // identity and the lines that survived keep their sequence numbers.
@@ -1547,10 +1805,20 @@ mod tests {
             .into_iter()
             .map(|(seq, _, _)| seq)
             .collect();
-        assert_eq!(&ids_after[..2], &ids_before[..2], "unchanged lines lost their ids");
-        assert_eq!(ids_after[3], ids_before[2], "the moved closing brace lost its id");
-        assert!(!ids_before.contains(&ids_after[2]), "the inserted line reused an id");
-        
+        assert_eq!(
+            &ids_after[..2],
+            &ids_before[..2],
+            "unchanged lines lost their ids"
+        );
+        assert_eq!(
+            ids_after[3], ids_before[2],
+            "the moved closing brace lost its id"
+        );
+        assert!(
+            !ids_before.contains(&ids_after[2]),
+            "the inserted line reused an id"
+        );
+
         // The store holds no text, so content is checked through the buffer
         // the repository serves from disk.
         let lines: Vec<String> = repository
@@ -1558,13 +1826,16 @@ mod tests {
             .into_iter()
             .map(|(_, _, content)| content)
             .collect();
-        assert_eq!(lines, vec![
-            "fn main() {".to_string(),
-            "    println!(\"Hello!\");".to_string(),
-            "    // extra line".to_string(),
-            "}".to_string(),
-        ]);
-        
+        assert_eq!(
+            lines,
+            vec![
+                "fn main() {".to_string(),
+                "    println!(\"Hello!\");".to_string(),
+                "    // extra line".to_string(),
+                "}".to_string(),
+            ]
+        );
+
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
     }
@@ -1600,12 +1871,12 @@ mod tests {
 
         // 2. View all lines (1 to 3)
         let output = view_lines_old_compat(&repository, filepath_str, 1, 3, None)?;
-        
+
         // Verify structure
         let val: serde_json::Value = serde_json::from_str(&output)?;
         let lines = val["lines"].as_array().unwrap();
         assert_eq!(lines.len(), 3);
-        
+
         let line0 = lines[0].as_array().unwrap();
         let line1 = lines[1].as_array().unwrap();
         let line2 = lines[2].as_array().unwrap();
@@ -1626,8 +1897,26 @@ mod tests {
         assert!(sub_line0[0].as_str().unwrap().starts_with("2#"));
 
         // 4. Test bounds validation
-        assert!(crate::tools::view::view_lines(&repository, filepath_str, Some(0), Some(3), None, None, None).is_err());
-        assert!(crate::tools::view::view_lines(&repository, filepath_str, Some(3), Some(1), None, None, None).is_err());
+        assert!(crate::tools::view::view_lines(
+            &repository,
+            filepath_str,
+            Some(0),
+            Some(3),
+            None,
+            None,
+            None
+        )
+        .is_err());
+        assert!(crate::tools::view::view_lines(
+            &repository,
+            filepath_str,
+            Some(3),
+            Some(1),
+            None,
+            None,
+            None
+        )
+        .is_err());
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
@@ -1649,11 +1938,14 @@ mod tests {
 
         // Call view_lines directly without calling init_edit_session
         let output = view_lines_old_compat(&repository, filepath_str, 1, 3, None)?;
-        
+
         let val: serde_json::Value = serde_json::from_str(&output)?;
         let lines = val["lines"].as_array().unwrap();
         assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0].as_array().unwrap()[2].as_str().unwrap(), "fn main() {");
+        assert_eq!(
+            lines[0].as_array().unwrap()[2].as_str().unwrap(),
+            "fn main() {"
+        );
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())

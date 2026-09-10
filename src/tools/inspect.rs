@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use std::fs;
-use std::path::Path;
-use anyhow::{Result, Context, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tree_sitter::{Query, QueryCursor, StreamingIterator};
+use std::fs;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
+use std::sync::Arc;
+use tree_sitter::{Query, QueryCursor, StreamingIterator};
 
 use crate::parser::ParserManager;
 use crate::tools::session_db::{SessionRepository, SqliteSessionRepository};
@@ -85,7 +85,11 @@ fn line_id_at(
     line: usize,
 ) -> Option<String> {
     let session_id = session_id.as_ref()?;
-    let row = repository.fetch_lines_range(session_id, line, line).ok()?.into_iter().next()?;
+    let row = repository
+        .fetch_lines_range(session_id, line, line)
+        .ok()?
+        .into_iter()
+        .next()?;
     let (seq, hash, _) = row;
     Some(format!("{:x}#{}", seq, hash?))
 }
@@ -105,46 +109,64 @@ pub struct InspectDefinition {
 /// has no such template.
 fn template_query(lang: &str, template: &str) -> Option<String> {
     match (lang, template) {
-            // Rust
-            ("rust", "functions") => Some("(function_item) @function".to_string()),
-            ("rust", "classes") => Some("(struct_item) @class".to_string()),
-            ("rust", "imports") => Some("(use_declaration) @import".to_string()),
-            ("rust", "traits") => Some("(trait_item) @trait".to_string()),
-            ("rust", "impls") => Some("(impl_item) @impl".to_string()),
+        // Rust
+        ("rust", "functions") => Some("(function_item) @function".to_string()),
+        ("rust", "classes") => Some("(struct_item) @class".to_string()),
+        ("rust", "imports") => Some("(use_declaration) @import".to_string()),
+        ("rust", "traits") => Some("(trait_item) @trait".to_string()),
+        ("rust", "impls") => Some("(impl_item) @impl".to_string()),
 
-            // Python
-            ("python", "functions") => Some("(function_definition) @function".to_string()),
-            ("python", "classes") => Some("(class_definition) @class".to_string()),
-            ("python", "imports") => Some("(import_statement) @import".to_string()),
+        // Python
+        ("python", "functions") => Some("(function_definition) @function".to_string()),
+        ("python", "classes") => Some("(class_definition) @class".to_string()),
+        ("python", "imports") => Some("(import_statement) @import".to_string()),
 
-            // Go
-            ("go", "functions") => Some("[(function_declaration) (method_declaration)] @function".to_string()),
-            ("go", "classes") => Some("(type_declaration) @class".to_string()),
-            ("go", "imports") => Some("(import_declaration) @import".to_string()),
-            ("go", "interfaces") => Some("(type_declaration (type_spec type: (interface_type))) @interface".to_string()),
-            ("go", "structs") => Some("(type_declaration (type_spec type: (struct_type))) @struct".to_string()),
-
-            // JavaScript / TypeScript / TSX
-            ("javascript" | "typescript" | "tsx", "functions") => Some("[(function_declaration) (arrow_function) (method_definition)] @function".to_string()),
-            ("javascript" | "typescript" | "tsx", "classes") => Some("(class_declaration) @class".to_string()),
-            ("javascript" | "typescript" | "tsx", "imports") => Some("(import_statement) @import".to_string()),
-
-            // Java
-            ("java", "functions") => Some("(method_declaration) @function".to_string()),
-            ("java", "classes") => Some("[(class_declaration) (interface_declaration)] @class".to_string()),
-            ("java", "imports") => Some("(import_declaration) @import".to_string()),
-
-            // C / C++
-            ("c" | "cpp", "functions") => Some("(function_definition) @function".to_string()),
-            ("c" | "cpp", "classes") => Some("[(struct_specifier) (class_specifier)] @class".to_string()),
-            ("c" | "cpp", "imports") => Some("(preproc_include) @import".to_string()),
-            ("c" | "cpp", "macros") => Some("[(preproc_def) (preproc_function_def)] @macro".to_string()),
-
-            // Bash
-            ("bash", "functions") => Some("(function_definition) @function".to_string()),
-
-            _ => None,
+        // Go
+        ("go", "functions") => {
+            Some("[(function_declaration) (method_declaration)] @function".to_string())
         }
+        ("go", "classes") => Some("(type_declaration) @class".to_string()),
+        ("go", "imports") => Some("(import_declaration) @import".to_string()),
+        ("go", "interfaces") => {
+            Some("(type_declaration (type_spec type: (interface_type))) @interface".to_string())
+        }
+        ("go", "structs") => {
+            Some("(type_declaration (type_spec type: (struct_type))) @struct".to_string())
+        }
+
+        // JavaScript / TypeScript / TSX
+        ("javascript" | "typescript" | "tsx", "functions") => Some(
+            "[(function_declaration) (arrow_function) (method_definition)] @function".to_string(),
+        ),
+        ("javascript" | "typescript" | "tsx", "classes") => {
+            Some("(class_declaration) @class".to_string())
+        }
+        ("javascript" | "typescript" | "tsx", "imports") => {
+            Some("(import_statement) @import".to_string())
+        }
+
+        // Java
+        ("java", "functions") => Some("(method_declaration) @function".to_string()),
+        ("java", "classes") => {
+            Some("[(class_declaration) (interface_declaration)] @class".to_string())
+        }
+        ("java", "imports") => Some("(import_declaration) @import".to_string()),
+
+        // C / C++
+        ("c" | "cpp", "functions") => Some("(function_definition) @function".to_string()),
+        ("c" | "cpp", "classes") => {
+            Some("[(struct_specifier) (class_specifier)] @class".to_string())
+        }
+        ("c" | "cpp", "imports") => Some("(preproc_include) @import".to_string()),
+        ("c" | "cpp", "macros") => {
+            Some("[(preproc_def) (preproc_function_def)] @macro".to_string())
+        }
+
+        // Bash
+        ("bash", "functions") => Some("(function_definition) @function".to_string()),
+
+        _ => None,
+    }
 }
 
 /// The file's top-level definitions, using whichever templates the language
@@ -161,8 +183,12 @@ fn outline_of(
     let mut entries = Vec::new();
 
     for template in ["classes", "functions"] {
-        let Some(query_str) = template_query(lang_name, template) else { continue };
-        let Ok(query) = Query::new(language, &query_str) else { continue };
+        let Some(query_str) = template_query(lang_name, template) else {
+            continue;
+        };
+        let Ok(query) = Query::new(language, &query_str) else {
+            continue;
+        };
 
         let mut cursor = QueryCursor::new();
         let mut found = cursor.matches(&query, root, code.as_bytes());
@@ -224,7 +250,10 @@ struct OutlineReport {
 
 /// The file's shape, which is what `outline` answers with: the definitions it
 /// declares, each carrying the line ids `edit` takes.
-pub(crate) async fn outline_report(filepath: &str, parser_manager: &Arc<ParserManager>) -> Result<String> {
+pub(crate) async fn outline_report(
+    filepath: &str,
+    parser_manager: &Arc<ParserManager>,
+) -> Result<String> {
     let file_path = Path::new(filepath);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
@@ -235,7 +264,10 @@ pub(crate) async fn outline_report(filepath: &str, parser_manager: &Arc<ParserMa
     let lang_name = language_name(ext)?;
 
     let repository = SqliteSessionRepository;
-    let session_id_opt = repository.init_session(filepath, false).ok().map(|meta| meta.session_id);
+    let session_id_opt = repository
+        .init_session(filepath, false)
+        .ok()
+        .map(|meta| meta.session_id);
 
     // Markdown is read by comrak, not by a grammar, so its headings are the
     // outline. The markdown path already finds them; they come back as
@@ -249,10 +281,17 @@ pub(crate) async fn outline_report(filepath: &str, parser_manager: &Arc<ParserMa
             code_format: None,
             output_file: None,
         };
-        let found: Value = serde_json::from_str(
-            &run_markdown_inspect(&code, &args, &repository, &session_id_opt)?
-        )?;
-        let headings = found["matches"].as_array().cloned().unwrap_or_default().iter()
+        let found: Value = serde_json::from_str(&run_markdown_inspect(
+            &code,
+            &args,
+            &repository,
+            &session_id_opt,
+        )?)?;
+        let headings = found["matches"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
             .map(|m| OutlineEntry {
                 kind: "heading".to_string(),
                 signature: m["text"].as_str().unwrap_or("").to_string(),
@@ -273,7 +312,9 @@ pub(crate) async fn outline_report(filepath: &str, parser_manager: &Arc<ParserMa
         return Ok(serde_json::to_string_pretty(&report)?);
     }
 
-    let (tree, language) = parser_manager.parse_code(ext, &code).await
+    let (tree, language) = parser_manager
+        .parse_code(ext, &code)
+        .await
         .context("Failed to parse code via ParserManager delegation")?;
     let root_node = tree.root_node();
 
@@ -283,7 +324,14 @@ pub(crate) async fn outline_report(filepath: &str, parser_manager: &Arc<ParserMa
         language: lang_name.to_string(),
         has_syntax_errors: root_node.has_error(),
         total_lines: code.lines().count(),
-        outline: outline_of(&language, root_node, &code, &repository, &session_id_opt, lang_name),
+        outline: outline_of(
+            &language,
+            root_node,
+            &code,
+            &repository,
+            &session_id_opt,
+            lang_name,
+        ),
     };
     Ok(serde_json::to_string_pretty(&report)?)
 }
@@ -296,10 +344,8 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
 
     let code = fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {:?}", file_path))?;
-    
-    let ext = file_path.extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     let lang_name = language_name(ext)?;
 
@@ -319,7 +365,10 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
             session_id_opt = Some(meta.session_id);
         }
         Err(e) => {
-            tracing::warn!("Failed to initialize edit session for inspect pre-caching: {:?}", e);
+            tracing::warn!(
+                "Failed to initialize edit session for inspect pre-caching: {:?}",
+                e
+            );
         }
     }
 
@@ -328,7 +377,9 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     }
 
     // 1. Delegated parsing via sticky session cache in ParserManager
-    let (tree, language) = parser_manager.parse_code(ext, &code).await
+    let (tree, language) = parser_manager
+        .parse_code(ext, &code)
+        .await
         .context("Failed to parse code via ParserManager delegation")?;
 
     let root_node = tree.root_node();
@@ -342,7 +393,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     if has_syntax_errors {
         hint = Some("Warning: Syntax errors detected in source file. Tree-sitter query matching might be incomplete or fail to find some symbols due to structural errors.".to_string());
     }
-    
+
     // What to search for: an explicit query, a named template, or — when
     // neither was given — nothing. The last case is reported as such rather
     // than as a search that found no matches.
@@ -366,16 +417,17 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
             Ok(query) => {
                 let mut cursor = QueryCursor::new();
                 let mut matches_iter = cursor.matches(&query, root_node, code.as_bytes());
-                
+
                 while let Some(m) = matches_iter.next() {
                     for capture in m.captures {
                         let node = capture.node;
-                        let capture_name = query.capture_names()[capture.index as usize].to_string();
-                        
+                        let capture_name =
+                            query.capture_names()[capture.index as usize].to_string();
+
                         let start_position = node.start_position();
                         let end_position = node.end_position();
                         let node_text = node.utf8_text(code.as_bytes()).unwrap_or("").to_string();
-                        
+
                         // Generate a structural definition block
                         let definition = if capture_name == "function" || capture_name == "class" {
                             let mut text_val = "".to_string();
@@ -384,12 +436,20 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
 
                             if args.include_code.unwrap_or(true) {
                                 if let Some(ref session_id) = session_id_opt {
-                                    match format_definition_table(&repository, session_id, start_line, end_line) {
+                                    match format_definition_table(
+                                        &repository,
+                                        session_id,
+                                        start_line,
+                                        end_line,
+                                    ) {
                                         Ok(table_text) => {
                                             text_val = table_text;
                                         }
                                         Err(e) => {
-                                            tracing::warn!("Failed to format definition table: {:?}", e);
+                                            tracing::warn!(
+                                                "Failed to format definition table: {:?}",
+                                                e
+                                            );
                                             text_val = node_text.clone();
                                         }
                                     }
@@ -397,7 +457,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                                     text_val = node_text.clone();
                                 }
                             }
-                            
+
                             let mut hasher = std::collections::hash_map::DefaultHasher::new();
                             node_text.hash(&mut hasher);
                             let block_hash = format!("{:x}", hasher.finish());
@@ -434,7 +494,10 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
             }
             Err(e) => {
                 status = "error".to_string();
-                hint = Some(format!("Invalid Tree-sitter query S-expression: {}. Error: {:?}", q_str, e));
+                hint = Some(format!(
+                    "Invalid Tree-sitter query S-expression: {}. Error: {:?}",
+                    q_str, e
+                ));
             }
         }
     }
@@ -602,7 +665,8 @@ pub fn run_markdown_inspect(
 
     if let Some(ref template) = args.template {
         match template.as_str() {
-            "headings" | "headers" | "codeblocks" | "code_blocks" | "links" | "tables" | "lists" => {}
+            "headings" | "headers" | "codeblocks" | "code_blocks" | "links" | "tables"
+            | "lists" => {}
             _ => {
                 status = "warning".to_string();
                 hint = Some(format!(
@@ -715,13 +779,10 @@ fn collect_markdown_matches<'a>(
     matches: &mut Vec<InspectMatch>,
 ) {
     let data = node.data.borrow();
-    
+
     // Extract variant name from Debug representation of NodeValue
     let debug_str = format!("{:?}", data.value);
-    let kind = debug_str
-        .split(['(', '{', ' '])
-        .next()
-        .unwrap_or("Unknown");
+    let kind = debug_str.split(['(', '{', ' ']).next().unwrap_or("Unknown");
 
     let mut is_match = false;
     if let Some(ref template) = args.template {
@@ -752,7 +813,8 @@ fn collect_markdown_matches<'a>(
             _ => {}
         }
     } else if let Some(ref q) = args.query {
-        let term_filtered: String = q.chars()
+        let term_filtered: String = q
+            .chars()
             .filter(|c| c.is_alphabetic() || *c == '_')
             .collect();
         let query_normalized = term_filtered.to_lowercase().replace('_', "");
@@ -772,7 +834,8 @@ fn collect_markdown_matches<'a>(
         let node_text = extract_text(code, start_line, start_column, end_line, end_column);
 
         // Generate a structural definition block
-        let is_def_node = kind == "Heading" || kind == "CodeBlock" || kind == "Table" || kind == "List";
+        let is_def_node =
+            kind == "Heading" || kind == "CodeBlock" || kind == "Table" || kind == "List";
         let definition = if is_def_node && args.include_code.unwrap_or(true) {
             let text_val = if let Some(ref session_id) = session_id_opt {
                 match format_definition_table(repository, session_id, start_line, end_line) {
@@ -836,7 +899,7 @@ fn extract_text(
     if start_line == 0 || start_line > lines.len() {
         return String::new();
     }
-    
+
     let end_line = std::cmp::min(end_line, lines.len());
     if end_line < start_line {
         return String::new();
@@ -855,7 +918,7 @@ fn extract_text(
         } else {
             line_content.len()
         };
-        
+
         let slice = safe_byte_slice(line_content, start_col, end_col);
         result.push(slice);
     }
@@ -913,7 +976,8 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val =
+            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Heading""#));
         assert!(text.contains(r##""text": "# Heading 1"##));
@@ -927,7 +991,8 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val =
+            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "CodeBlock""#));
         assert!(text.contains("fn main()"));
@@ -941,7 +1006,8 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val =
+            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Link""#));
         assert!(text.contains(r#""capture_name": "Image""#));
@@ -955,7 +1021,8 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val =
+            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Table""#));
 
@@ -968,7 +1035,8 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val =
+            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "List""#));
 
@@ -981,7 +1049,8 @@ fn main() {}
             code_format: None,
             output_file: None,
         };
-        let res_val = run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val =
+            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Paragraph""#));
     }
@@ -992,14 +1061,22 @@ fn main() {}
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("resources").join("wasm");
-        let pm = Arc::new(ParserManager::with_paths(
-            temp_dir.join("cache"),
-            temp_dir.join("compiler"),
-            wasm_dir,
-        ).unwrap());
+        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("resources")
+            .join("wasm");
+        let pm = Arc::new(
+            ParserManager::with_paths(temp_dir.join("cache"), temp_dir.join("compiler"), wasm_dir)
+                .unwrap(),
+        );
 
-        async fn test_one(pm: &Arc<ParserManager>, temp_dir: &std::path::Path, filename: &str, code: &str, template: &str, expected_contains: &str) {
+        async fn test_one(
+            pm: &Arc<ParserManager>,
+            temp_dir: &std::path::Path,
+            filename: &str,
+            code: &str,
+            template: &str,
+            expected_contains: &str,
+        ) {
             let file_path = temp_dir.join(filename);
             std::fs::write(&file_path, code).unwrap();
             let args = InspectArgs {
@@ -1023,29 +1100,117 @@ fn main() {}
         }
 
         // 1. Rust
-        test_one(&pm, &temp_dir, "test.rs", "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}", "functions", "my_rust_func").await;
-        test_one(&pm, &temp_dir, "test.rs", "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}", "classes", "MyRustStruct").await;
-        test_one(&pm, &temp_dir, "test.rs", "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}", "traits", "MyRustTrait").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.rs",
+            "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}",
+            "functions",
+            "my_rust_func",
+        )
+        .await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.rs",
+            "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}",
+            "classes",
+            "MyRustStruct",
+        )
+        .await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.rs",
+            "fn my_rust_func() {}\nstruct MyRustStruct {}\ntrait MyRustTrait {}",
+            "traits",
+            "MyRustTrait",
+        )
+        .await;
 
         // 2. Python
-        test_one(&pm, &temp_dir, "test.py", "def my_py_func():\n    pass\nclass MyPyClass:\n    pass", "functions", "my_py_func").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.py",
+            "def my_py_func():\n    pass\nclass MyPyClass:\n    pass",
+            "functions",
+            "my_py_func",
+        )
+        .await;
 
         // 3. Go
-        test_one(&pm, &temp_dir, "test.go", "package main\nfunc myGoFunc() {}\ntype MyGoStruct struct {}", "functions", "myGoFunc").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.go",
+            "package main\nfunc myGoFunc() {}\ntype MyGoStruct struct {}",
+            "functions",
+            "myGoFunc",
+        )
+        .await;
 
         // 4. JS/TS/TSX
-        test_one(&pm, &temp_dir, "test.ts", "function myTsFunc() {}\nclass MyTsClass {}", "functions", "myTsFunc").await;
-        test_one(&pm, &temp_dir, "test.tsx", "const MyComponent = () => { return <div />; };", "functions", "MyComponent").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.ts",
+            "function myTsFunc() {}\nclass MyTsClass {}",
+            "functions",
+            "myTsFunc",
+        )
+        .await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.tsx",
+            "const MyComponent = () => { return <div />; };",
+            "functions",
+            "MyComponent",
+        )
+        .await;
 
         // 5. Java
-        test_one(&pm, &temp_dir, "test.java", "class MyClass {\n    public void myJavaMethod() {}\n}", "functions", "myJavaMethod").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.java",
+            "class MyClass {\n    public void myJavaMethod() {}\n}",
+            "functions",
+            "myJavaMethod",
+        )
+        .await;
 
         // 6. C/C++
-        test_one(&pm, &temp_dir, "test.cpp", "int myCppFunc() { return 0; }\n#define MY_MACRO 42", "functions", "myCppFunc").await;
-        test_one(&pm, &temp_dir, "test.cpp", "int myCppFunc() { return 0; }\n#define MY_MACRO 42", "macros", "MY_MACRO").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.cpp",
+            "int myCppFunc() { return 0; }\n#define MY_MACRO 42",
+            "functions",
+            "myCppFunc",
+        )
+        .await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.cpp",
+            "int myCppFunc() { return 0; }\n#define MY_MACRO 42",
+            "macros",
+            "MY_MACRO",
+        )
+        .await;
 
         // 7. Bash
-        test_one(&pm, &temp_dir, "test.sh", "my_bash_func() {\n  echo 'hello'\n}", "functions", "my_bash_func").await;
+        test_one(
+            &pm,
+            &temp_dir,
+            "test.sh",
+            "my_bash_func() {\n  echo 'hello'\n}",
+            "functions",
+            "my_bash_func",
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -1055,12 +1220,13 @@ fn main() {}
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("resources").join("wasm");
-        let pm = Arc::new(ParserManager::with_paths(
-            temp_dir.join("cache"),
-            temp_dir.join("compiler"),
-            wasm_dir,
-        ).unwrap());
+        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("resources")
+            .join("wasm");
+        let pm = Arc::new(
+            ParserManager::with_paths(temp_dir.join("cache"), temp_dir.join("compiler"), wasm_dir)
+                .unwrap(),
+        );
 
         let file_path = temp_dir.join("test.nix");
         std::fs::write(&file_path, "{ x = 1; }").unwrap();
@@ -1086,5 +1252,4 @@ fn main() {}
         let text2 = run_inspect(args_filepath, &pm).await.unwrap();
         assert!(text2.contains("x"));
     }
-
 }

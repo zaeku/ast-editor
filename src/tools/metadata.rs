@@ -13,7 +13,6 @@ static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
     serde_json::from_str(json_str).unwrap_or_default()
 });
 
-
 #[derive(Deserialize)]
 pub struct ToolConfig {
     pub only_ids_wrap_trigger_length: usize,
@@ -67,7 +66,6 @@ mod tests {
         let outline_tip = get_tool_tip("outline");
         assert!(outline_tip.contains("Tip:"));
     }
-
 
     #[test]
     fn test_config_retrieval() {

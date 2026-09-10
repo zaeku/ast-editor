@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use wasmtime::{Engine, Config, Cache};
+use anyhow::{bail, Context, Result};
 use tokio::sync::Mutex as TokioMutex;
-use anyhow::{Context, Result, bail};
-use tree_sitter::{WasmStore, Parser, Language};
+use tree_sitter::{Language, Parser, WasmStore};
+use wasmtime::{Cache, Config, Engine};
 
 use crate::config;
 
@@ -23,9 +23,8 @@ impl ParserManager {
         if let Ok(cache) = Cache::from_file(None) {
             config.cache(Some(cache));
         }
-        let engine = Engine::new(&config)
-            .context("Failed to initialize Wasmtime engine")?;
-        
+        let engine = Engine::new(&config).context("Failed to initialize Wasmtime engine")?;
+
         Ok(Self {
             engine,
             wasm_dir: config::get_wasm_dir(),
@@ -43,7 +42,11 @@ impl ParserManager {
     }
 
     /// Custom paths constructor for testing
-    pub fn with_paths(_cache_dir: PathBuf, _compiler_path: PathBuf, wasm_dir: PathBuf) -> Result<Self> {
+    pub fn with_paths(
+        _cache_dir: PathBuf,
+        _compiler_path: PathBuf,
+        wasm_dir: PathBuf,
+    ) -> Result<Self> {
         let mut config = Config::new();
         if let Ok(cache) = Cache::from_file(None) {
             config.cache(Some(cache));
@@ -61,23 +64,23 @@ impl ParserManager {
     pub async fn parse_code(&self, ext: &str, code: &str) -> Result<(tree_sitter::Tree, Language)> {
         let wasm_file = config::get_wasm_file(&self.wasm_dir, ext)
             .with_context(|| format!("Unsupported file extension: {}", ext))?;
-        
+
         let wasm_name = wasm_file.strip_suffix(".wasm").unwrap_or(&wasm_file);
-        
+
         let mut session_lock = self.active_session.lock().await;
-        
+
         // 1. Cache Hit: Reuse active Parser session
         if let Some((ref active_name, ref mut parser, ref lang)) = *session_lock {
             if active_name == wasm_name {
-                let tree = parser.parse(code, None)
+                let tree = parser
+                    .parse(code, None)
                     .context("Failed to parse code in cached session")?;
                 return Ok((tree, lang.clone()));
             }
         }
-        
+
         // 2. Cache Miss: Fresh load and compilation
-        let mut wasm_store = WasmStore::new(&self.engine)
-            .context("Failed to create WasmStore")?;
+        let mut wasm_store = WasmStore::new(&self.engine).context("Failed to create WasmStore")?;
 
         // Load WASM bytes
         let wasm_bytes = {
@@ -89,37 +92,46 @@ impl ParserManager {
                 if !raw_wasm_path.exists() {
                     bail!("Raw Wasm file not found for {}", wasm_name);
                 }
-                let bytes = fs::read(&raw_wasm_path)
-                    .with_context(|| format!("Failed to read raw wasm module at {:?}", raw_wasm_path))?;
+                let bytes = fs::read(&raw_wasm_path).with_context(|| {
+                    format!("Failed to read raw wasm module at {:?}", raw_wasm_path)
+                })?;
                 cache.insert(wasm_name.to_string(), bytes.clone());
                 bytes
             }
         };
-        
-        let lang_symbol = wasm_name.strip_prefix("tree-sitter-").unwrap_or(wasm_name).replace("-", "_");
-        let language = wasm_store.load_language(&lang_symbol, &wasm_bytes)
+
+        let lang_symbol = wasm_name
+            .strip_prefix("tree-sitter-")
+            .unwrap_or(wasm_name)
+            .replace("-", "_");
+        let language = wasm_store
+            .load_language(&lang_symbol, &wasm_bytes)
             .context("Failed to load language into WasmStore")?;
-            
+
         let mut parser = Parser::new();
-        parser.set_wasm_store(wasm_store)
+        parser
+            .set_wasm_store(wasm_store)
             .context("Failed to set WasmStore on Parser")?;
-            
-        parser.set_language(&language)
+
+        parser
+            .set_language(&language)
             .context("Failed to set language on Parser")?;
 
-        let _tree = parser.parse(code, None)
+        let _tree = parser
+            .parse(code, None)
             .context("Failed to parse code after fresh instantiation")?;
-            
+
         // Store session
         *session_lock = Some((wasm_name.to_string(), parser, language.clone()));
-        
+
         // Fetch reference from session
         if let Some((_, ref mut parser, ref lang)) = *session_lock {
-            let tree = parser.parse(code, None)
+            let tree = parser
+                .parse(code, None)
                 .context("Re-parsing inside session storage failed")?;
             return Ok((tree, lang.clone()));
         }
-        
+
         bail!("Failed to store parser session")
     }
 }
@@ -135,7 +147,8 @@ mod tests {
 
     impl TempTestFixture {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("tree_sitter_inspector_parser_tests_{}", name));
+            let dir =
+                std::env::temp_dir().join(format!("tree_sitter_inspector_parser_tests_{}", name));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
             Self { dir }
@@ -167,13 +180,17 @@ mod tests {
         let pm = ParserManager::with_paths(
             fixture.dir.join("cache"),
             fixture.dir.join("compiler"),
-            wasm_dir
-        ).unwrap();
+            wasm_dir,
+        )
+        .unwrap();
 
         // Calling parse_code with missing wasm file should return error cleanly
         let res = pm.parse_code("rs", "fn main() {}").await;
         assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("Raw Wasm file not found"));
+        assert!(res
+            .unwrap_err()
+            .to_string()
+            .contains("Raw Wasm file not found"));
     }
 
     #[tokio::test]

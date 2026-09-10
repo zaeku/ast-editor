@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
-use std::env;
-use std::collections::HashMap;
-use std::fs;
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use anyhow::{Result, Context, bail};
+use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LanguageConfig {
@@ -15,7 +15,7 @@ pub struct LanguageConfig {
 /// If file is missing or invalid, throws a descriptive suggestion error.
 fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
     let config_path = wasm_dir.join("languages.json");
-    
+
     if !config_path.exists() {
         bail!(
             "Configuration file 'languages.json' is missing.\n\
@@ -40,12 +40,13 @@ fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
             map.insert(ext, cfg.wasm_file.clone());
         }
     }
-    
+
     Ok(map)
 }
 
-static LANGUAGES_MAP_CACHE: once_cell::sync::Lazy<std::sync::Mutex<HashMap<PathBuf, HashMap<String, String>>>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+static LANGUAGES_MAP_CACHE: once_cell::sync::Lazy<
+    std::sync::Mutex<HashMap<PathBuf, HashMap<String, String>>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
 /// The languages the grammar directory actually provides, and whether each
 /// one's wasm file is present. Reported by `--version`, where a missing
@@ -57,8 +58,10 @@ pub fn describe_languages(wasm_dir: &Path) -> Result<Vec<(String, bool)>> {
         .into_iter()
         .map(|wasm_file| {
             let name = wasm_file
-                .strip_suffix(".wasm").unwrap_or(wasm_file)
-                .strip_prefix("tree-sitter-").unwrap_or(wasm_file)
+                .strip_suffix(".wasm")
+                .unwrap_or(wasm_file)
+                .strip_prefix("tree-sitter-")
+                .unwrap_or(wasm_file)
                 .to_string();
             (name, wasm_dir.join(wasm_file).is_file())
         })
@@ -101,8 +104,6 @@ pub fn clear_langs_map_for_testing() {
         cache.clear();
     }
 }
-
-
 
 /// Returns the path to the WebAssembly grammar files directory (resources/wasm).
 pub fn get_wasm_dir() -> PathBuf {

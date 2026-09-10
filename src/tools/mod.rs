@@ -1,15 +1,15 @@
+pub mod edit;
+pub mod formatter;
 pub mod inspect;
+pub mod metadata;
 pub mod outline;
+pub mod script;
 pub mod session_db;
 pub mod view;
-pub mod edit;
-pub mod metadata;
-pub mod formatter;
-pub mod script;
 
+use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::sync::Arc;
-use anyhow::{Result, bail, Context};
 
 use crate::parser::ParserManager;
 
@@ -216,13 +216,18 @@ impl ToolDispatcher {
                     },
                     "required": ["filepath", "content"]
                 }
-            })
+            }),
         ]
     }
 
     /// Invokes the appropriate tool based on name and deserialized arguments.
     /// Run one tool and return the text it prints.
-    pub async fn call_tool(&self, name: &str, arguments: Value, parser_manager: &Arc<ParserManager>) -> Result<String> {
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: Value,
+        parser_manager: &Arc<ParserManager>,
+    ) -> Result<String> {
         match name {
             "inspect" => {
                 let args = serde_json::from_value(arguments)?;
@@ -233,15 +238,38 @@ impl ToolDispatcher {
                 outline::run_outline(args, parser_manager).await
             }
             "view" => {
-                let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
-                let start_line = arguments.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
-                let end_line = arguments.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+                let filepath = arguments
+                    .get("filepath")
+                    .and_then(|v| v.as_str())
+                    .context("Missing filepath")?;
+                let start_line = arguments
+                    .get("start_line")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                let end_line = arguments
+                    .get("end_line")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
                 let only_ids = arguments.get("only_ids").and_then(|v| v.as_bool());
-                let query = arguments.get("query").and_then(|v| v.as_str()).map(|s| s.to_string());
-                let context_lines = arguments.get("context_lines").and_then(|v| v.as_u64()).map(|v| v as usize);
+                let query = arguments
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let context_lines = arguments
+                    .get("context_lines")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
                 let repository = session_db::SqliteSessionRepository;
-                let res = view::view_lines(&repository, filepath, start_line, end_line, only_ids, query, context_lines)?;
-                
+                let res = view::view_lines(
+                    &repository,
+                    filepath,
+                    start_line,
+                    end_line,
+                    only_ids,
+                    query,
+                    context_lines,
+                )?;
+
                 let mut blocks = Vec::new();
                 if let Some(code) = res.lines_text {
                     let ext = std::path::Path::new(filepath)
@@ -270,27 +298,59 @@ impl ToolDispatcher {
                 Ok(blocks.join("\n"))
             }
             "edit" => {
-                let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
-                let strict_validation = arguments.get("strict_validation").and_then(|v| v.as_bool()).unwrap_or(false);
-                let dry_run = arguments.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(false);
+                let filepath = arguments
+                    .get("filepath")
+                    .and_then(|v| v.as_str())
+                    .context("Missing filepath")?;
+                let strict_validation = arguments
+                    .get("strict_validation")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let dry_run = arguments
+                    .get("dry_run")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let repository = session_db::SqliteSessionRepository;
 
-                let text = if let Some(preview_id) = arguments.get("apply").and_then(|v| v.as_str()) {
-                    edit::apply_preview(&repository, filepath, preview_id, strict_validation, parser_manager).await?
+                let text = if let Some(preview_id) = arguments.get("apply").and_then(|v| v.as_str())
+                {
+                    edit::apply_preview(
+                        &repository,
+                        filepath,
+                        preview_id,
+                        strict_validation,
+                        parser_manager,
+                    )
+                    .await?
                 } else {
                     let edits_val = arguments.get("edits").context("Missing edits array")?;
-                    let edits: Vec<session_db::LineEdit> = serde_json::from_value(edits_val.clone())?;
+                    let edits: Vec<session_db::LineEdit> =
+                        serde_json::from_value(edits_val.clone())?;
                     if dry_run {
-                        edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager).await?
+                        edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager)
+                            .await?
                     } else {
-                        edit::edit_lines_with_validation(&repository, filepath, edits, strict_validation, parser_manager).await?
+                        edit::edit_lines_with_validation(
+                            &repository,
+                            filepath,
+                            edits,
+                            strict_validation,
+                            parser_manager,
+                        )
+                        .await?
                     }
                 };
                 Ok(text)
             }
             "create" => {
-                let filepath = arguments.get("filepath").and_then(|v| v.as_str()).context("Missing filepath")?;
-                let content = arguments.get("content").and_then(|v| v.as_str()).context("Missing content")?;
+                let filepath = arguments
+                    .get("filepath")
+                    .and_then(|v| v.as_str())
+                    .context("Missing filepath")?;
+                let content = arguments
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .context("Missing content")?;
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
                 let repository = session_db::SqliteSessionRepository;
                 let text = view::create_lines(&repository, filepath, content, return_ids)?;
@@ -302,4 +362,3 @@ impl ToolDispatcher {
 }
 
 pub static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-

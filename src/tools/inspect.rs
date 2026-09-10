@@ -30,7 +30,11 @@ pub struct Inspected {
 
 #[derive(Debug, Serialize)]
 pub struct InspectResult {
-    pub status: String,
+    /// Absent when the search ran and answered. A name here means something
+    /// else happened: a template the language does not have, or a query the
+    /// grammar refused.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
     pub filepath: String,
     pub language: String,
     pub has_syntax_errors: bool,
@@ -236,7 +240,6 @@ pub(crate) fn language_name(ext: &str) -> Result<&'static str> {
 
 #[derive(Debug, Serialize)]
 struct OutlineReport {
-    status: &'static str,
     filepath: String,
     language: String,
     has_syntax_errors: bool,
@@ -296,7 +299,6 @@ pub(crate) async fn outline_report(
             })
             .collect();
         let report = OutlineReport {
-            status: "success",
             filepath: filepath.to_string(),
             language: lang_name.to_string(),
             has_syntax_errors: false,
@@ -313,7 +315,6 @@ pub(crate) async fn outline_report(
     let root_node = tree.root_node();
 
     let report = OutlineReport {
-        status: "success",
         filepath: filepath.to_string(),
         language: lang_name.to_string(),
         has_syntax_errors: root_node.has_error(),
@@ -388,7 +389,7 @@ pub async fn run_inspect(
     // 3. Perform Query matching if requested
     let mut matches = Vec::new();
     let mut blocks: Vec<String> = Vec::new();
-    let mut status = "success".to_string();
+    let mut status: Option<String> = None;
     let mut hint = None;
 
     if has_syntax_errors {
@@ -405,7 +406,7 @@ pub async fn run_inspect(
     };
 
     if let (Some(ref template), None) = (&args.template, &query_str) {
-        status = "warning".to_string();
+        status = Some("warning".to_string());
         hint = Some(format!(
             "Template '{}' is not supported for language '{}'. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp, swift), traits, impls (rust), interfaces, structs (go), macros (c, cpp), functions (bash).",
             template,
@@ -484,7 +485,7 @@ pub async fn run_inspect(
                 }
             }
             Err(e) => {
-                status = "error".to_string();
+                status = Some("error".to_string());
                 hint = Some(format!(
                     "Invalid Tree-sitter query S-expression: {}. Error: {:?}",
                     q_str, e
@@ -494,7 +495,7 @@ pub async fn run_inspect(
     }
 
     let result = InspectResult {
-        status: status.clone(),
+        status,
         filepath: args.filepath,
         language: lang_name.to_string(),
         has_syntax_errors,
@@ -547,7 +548,7 @@ pub fn run_markdown_inspect(
 
     collect_markdown_matches(root, code, args, repository, session_id_opt, &mut matches);
 
-    let mut status = "success".to_string();
+    let mut status: Option<String> = None;
     let mut hint = None;
 
     if let Some(ref template) = args.template {
@@ -555,7 +556,7 @@ pub fn run_markdown_inspect(
             "headings" | "headers" | "codeblocks" | "code_blocks" | "links" | "tables"
             | "lists" => {}
             _ => {
-                status = "warning".to_string();
+                status = Some("warning".to_string());
                 hint = Some(format!(
                     "Template '{}' is not supported for language 'markdown'. Supported templates: headings, headers, codeblocks, code_blocks, links, tables, lists.",
                     template
@@ -565,7 +566,7 @@ pub fn run_markdown_inspect(
     }
 
     let result = InspectResult {
-        status: status.clone(),
+        status,
         query: None,
         filepath: args.filepath.clone(),
         language: "markdown".to_string(),

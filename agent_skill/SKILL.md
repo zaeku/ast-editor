@@ -64,7 +64,11 @@ Within one batch, do not target a line an earlier directive changed. The id
 carries that line's content hash, so it no longer matches and `edit` refuses
 the whole batch.
 
-Failures go to stderr with a non-zero exit status.
+Failures go to stderr with a non-zero exit status, so a response says nothing
+about having succeeded. A field appears when it has something to say: a
+`status` names a state that is not plain success, such as an `edit` `saved`
+past a validation it failed, and a `message` or a `warnings` array carries
+what was worth saying.
 
 **A response is a sequence of fenced blocks**, named by what they hold: the
 file's own language for code, `diff` for a diff, `json` for the data. So code

@@ -48,7 +48,6 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ##### Output
 ```json
 {
-  "status": "success",
   "total_bytes": 30,
   "total_lines": 3
 }
@@ -70,7 +69,6 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
   "ids": [
     "1#77cf", "2#bcb4", "3#c2b7"
   ],
-  "status": "success",
   "total_bytes": 30,
   "total_lines": 3
 }
@@ -301,7 +299,6 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ##### Output
 ```json
 {
-  "status": "success",
   "modified_ids": [
     "4#b7a3", "2#9639", "4#b7a3"
   ]
@@ -364,7 +361,6 @@ the diff and syntax result no longer describe the outcome, so preview again.
 ```json
 {
   "preview_id": "p1f",
-  "status": "preview",
   "syntax_valid": true
 }
 ```

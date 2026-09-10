@@ -320,12 +320,10 @@ pub async fn edit_lines_dry_run(
 
     let output = match validate_syntax(filepath, &preview_content, parser_manager).await {
         SyntaxValidationResult::Success => serde_json::json!({
-            "status": "preview",
             "syntax_valid": true,
             "preview_id": repository.create_preview(filepath, &edits)?,
         }),
         SyntaxValidationResult::Warnings(warnings) => serde_json::json!({
-            "status": "preview",
             "syntax_valid": true,
             "warnings": warnings,
             "preview_id": repository.create_preview(filepath, &edits)?,
@@ -339,13 +337,11 @@ pub async fn edit_lines_dry_run(
                 .map(|(message, context)| serde_json::json!({ "message": message, "context": context }))
                 .collect();
             serde_json::json!({
-                "status": "preview",
                 "syntax_valid": false,
                 "diagnostics": diagnostics,
             })
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => serde_json::json!({
-            "status": "preview",
             "syntax_valid": serde_json::Value::Null,
             "message": format!("validation could not run: {}", reason),
         }),
@@ -528,14 +524,11 @@ pub async fn edit_lines_with_validation(
     let output = if let Some(warns) = warnings {
         let warns_json = serde_json::to_string(&warns)?;
         format!(
-            "{{\n  \"status\": \"success\",\n  \"modified_ids\": {},\n  \"warnings\": {}\n}}",
+            "{{\n  \"modified_ids\": {},\n  \"warnings\": {}\n}}",
             indented_ids, warns_json
         )
     } else {
-        format!(
-            "{{\n  \"status\": \"success\",\n  \"modified_ids\": {}\n}}",
-            indented_ids
-        )
+        format!("{{\n  \"modified_ids\": {}\n}}", indented_ids)
     };
     Ok(output)
 }
@@ -700,7 +693,7 @@ mod tests {
         }];
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         let (seq, _) = parse_line_id(&target_id)?;
         let expected_prefix = format!("{:x}#", seq);
@@ -727,7 +720,7 @@ mod tests {
         }];
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -781,7 +774,7 @@ mod tests {
         }];
 
         let res = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(res.contains("success"));
+        assert!(res.contains("modified_ids"), "{}", res);
 
         // Verify disk content includes both the external change and our new edit!
         let content = fs::read_to_string(&file_path)?;
@@ -919,7 +912,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n}\n");
@@ -959,7 +952,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
 
@@ -993,7 +986,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\n");
@@ -1023,7 +1016,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
@@ -1084,7 +1077,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
@@ -1125,7 +1118,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
@@ -1170,7 +1163,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
@@ -1204,7 +1197,7 @@ mod tests {
 
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
-        assert_eq!(res["status"], "success");
+        assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_ids"].as_array().unwrap();
         assert!(!modified.is_empty());
 
@@ -1254,7 +1247,7 @@ mod tests {
         }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(result.contains("success"));
+        assert!(result.contains("modified_ids"), "{}", result);
 
         // Verify that the file content was updated on disk
         let disk_content = fs::read_to_string(&file_path)?;
@@ -1294,7 +1287,11 @@ mod tests {
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
 
         // The edit should succeed (status success) but return warnings!
-        assert!(result.contains("\"status\": \"success\""));
+        assert!(
+            !result.contains("\"status\""),
+            "success is the exit code: {}",
+            result
+        );
         assert!(result.contains("\"warnings\":"));
         assert!(result.contains("Header hierarchy mismatch"));
         assert!(result.contains("Possible malformed link syntax"));
@@ -1339,7 +1336,11 @@ mod tests {
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
 
         // The edit should succeed (status success) but return HTML warnings!
-        assert!(result.contains("\"status\": \"success\""));
+        assert!(
+            !result.contains("\"status\""),
+            "success is the exit code: {}",
+            result
+        );
         assert!(result.contains("\"warnings\":"));
         assert!(result.contains("HTML syntax warning"));
 
@@ -1462,7 +1463,11 @@ fn main() {
         }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(result.contains("\"status\": \"success\""));
+        assert!(
+            !result.contains("\"status\""),
+            "success is the exit code: {}",
+            result
+        );
         assert!(result.contains("Unclosed fenced code block"));
 
         let disk_content = fs::read_to_string(&file_path)?;
@@ -1498,7 +1503,7 @@ fn main() {
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
 
         let val: serde_json::Value = serde_json::from_str(&result)?;
-        assert_eq!(val["status"], "success");
+        assert!(val["status"].is_null(), "success is the exit code: {}", val);
         let modified_ids = val["modified_ids"].as_array().unwrap();
         assert_eq!(modified_ids.len(), 1);
         let new_id = modified_ids[0].as_str().unwrap();
@@ -1506,10 +1511,7 @@ fn main() {
         let (new_seq, _) = crate::tools::session_db::parse_line_id(new_id)?;
         assert_eq!(old_seq, new_seq);
 
-        let expected_json = format!(
-            "{{\n  \"status\": \"success\",\n  \"modified_ids\": [\n    \"{}\"\n  ]\n}}",
-            new_id
-        );
+        let expected_json = format!("{{\n  \"modified_ids\": [\n    \"{}\"\n  ]\n}}", new_id);
         assert_eq!(result, expected_json);
 
         fs::remove_dir_all(&env.dir)?;

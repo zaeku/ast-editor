@@ -338,7 +338,7 @@ pub fn create_lines(
                 );
                 let indented_ids = formatted_ids.replace("\n", "\n  ");
                 format!(
-                    "{{\n  \"ids\": {},{}\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
+                    "{{\n  \"ids\": {},{}\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
                     indented_ids,
                     warning_field(&message)?,
                     total_bytes,
@@ -346,7 +346,7 @@ pub fn create_lines(
                 )
             } else {
                 format!(
-                    "{{{}\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
+                    "{{{}\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
                     warning_field(&message)?,
                     total_bytes,
                     total_lines
@@ -464,7 +464,7 @@ mod tests {
         let output = create_lines(&repository, filepath_str, content, Some(true))?;
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
-        assert_eq!(val["status"], "success");
+        assert!(val["status"].is_null(), "success is the exit code: {}", val);
         assert!(
             val["message"].is_null(),
             "nothing was wrong, so nothing is said"
@@ -504,7 +504,7 @@ mod tests {
         let output = create_lines(&repository, filepath_str, content, Some(false))?;
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
-        assert_eq!(val["status"], "success");
+        assert!(val["status"].is_null(), "success is the exit code: {}", val);
         assert!(
             val["message"].is_null(),
             "nothing was wrong, so nothing is said"

@@ -155,6 +155,11 @@ fn template_query(lang: &str, template: &str) -> Option<String> {
         // Bash
         ("bash", "functions") => Some("(function_definition) @function".to_string()),
 
+        // Swift
+        ("swift", "functions") => Some("(function_declaration) @function".to_string()),
+        ("swift", "classes") => Some("(class_declaration) @class".to_string()),
+        ("swift", "imports") => Some("(import_declaration) @import".to_string()),
+
         _ => None,
     }
 }
@@ -223,6 +228,7 @@ pub(crate) fn language_name(ext: &str) -> Result<&'static str> {
         "yaml" | "yml" => "yaml",
         "md" | "markdown" => "markdown",
         "sh" | "bash" | "zsh" | "ksh" => "bash",
+        "swift" => "swift",
         "nix" => "nix",
         _ => bail!("Unsupported extension: {}", ext),
     })
@@ -401,7 +407,7 @@ pub async fn run_inspect(
     if let (Some(ref template), None) = (&args.template, &query_str) {
         status = "warning".to_string();
         hint = Some(format!(
-            "Template '{}' is not supported for language '{}'. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp), traits, impls (rust), interfaces, structs (go), macros (c, cpp), functions (bash).",
+            "Template '{}' is not supported for language '{}'. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp, swift), traits, impls (rust), interfaces, structs (go), macros (c, cpp), functions (bash).",
             template,
             lang_name
         ));

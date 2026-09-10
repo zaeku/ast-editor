@@ -91,7 +91,7 @@ impl ToolDispatcher {
                         "template": {
                             "type": "string",
                             "enum": ["functions", "classes", "imports", "headings", "headers", "codeblocks", "code_blocks", "links", "tables", "lists", "traits", "impls", "structs", "interfaces", "macros"],
-                            "description": "Predefined query template to run. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp); traits, impls (rust); interfaces, structs (go); macros (c, cpp); functions (bash); headings, headers, codeblocks, code_blocks, links, tables, lists (markdown)."
+                            "description": "Predefined query template to run. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp, swift); traits, impls (rust); interfaces, structs (go); macros (c, cpp); functions (bash); headings, headers, codeblocks, code_blocks, links, tables, lists (markdown)."
                         },
                         "include_code": {
                             "type": "boolean",

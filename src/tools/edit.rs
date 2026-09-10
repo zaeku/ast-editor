@@ -282,12 +282,20 @@ fn resync_if_stale(
 /// same way a real commit is, and the session is then restored to its previous
 /// state. No line IDs are minted: the caller obtains those from a real
 /// `edit` call.
+/// What a dry run has to say: the diff to read, and the report to act on.
+/// They are separate because a diff inside a JSON string is a diff nobody can
+/// read.
+pub struct DryRun {
+    pub diff: String,
+    pub report: String,
+}
+
 pub async fn edit_lines_dry_run(
     repository: &impl SessionRepository,
     filepath: &str,
     edits: Vec<LineEdit>,
     parser_manager: &crate::parser::ParserManager,
-) -> Result<String> {
+) -> Result<DryRun> {
     resync_if_stale(repository, filepath, &edits)?;
 
     let meta = repository.init_session(filepath, false)?;
@@ -314,13 +322,11 @@ pub async fn edit_lines_dry_run(
         SyntaxValidationResult::Success => serde_json::json!({
             "status": "preview",
             "syntax_valid": true,
-            "diff": diff,
             "preview_id": repository.create_preview(filepath, &edits)?,
         }),
         SyntaxValidationResult::Warnings(warnings) => serde_json::json!({
             "status": "preview",
             "syntax_valid": true,
-            "diff": diff,
             "warnings": warnings,
             "preview_id": repository.create_preview(filepath, &edits)?,
         }),
@@ -335,19 +341,20 @@ pub async fn edit_lines_dry_run(
             serde_json::json!({
                 "status": "preview",
                 "syntax_valid": false,
-                "diff": diff,
                 "diagnostics": diagnostics,
             })
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => serde_json::json!({
             "status": "preview",
             "syntax_valid": serde_json::Value::Null,
-            "diff": diff,
             "message": format!("validation could not run: {}", reason),
         }),
     };
 
-    Ok(serde_json::to_string_pretty(&output)?)
+    Ok(DryRun {
+        diff,
+        report: serde_json::to_string_pretty(&output)?,
+    })
 }
 
 /// Apply the edit batch a previous dry run validated, addressed by its preview

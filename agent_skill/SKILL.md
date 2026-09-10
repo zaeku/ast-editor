@@ -161,10 +161,11 @@ means the search found nothing, never that nothing was asked for.
    validates also returns a short `preview_id`; pass it back as `apply` with
    the same `filepath` to commit that exact batch without resending `edits`:
 
-   ```bash
-   ID=$(ast-editor edit src/config.rs --dry-run < edits.txt | jq -r .preview_id)
+   ````bash
+   ID=$(ast-editor edit src/config.rs --dry-run < edits.txt |
+        awk '/^```json$/{f=1;next} /^```/{f=0} f' | jq -r .preview_id)
    ast-editor edit src/config.rs --apply "$ID"
-   ```
+   ````
 
 5. **Graceful Degradation** — Markdown, text, and configuration files are
    written with warnings rather than rejected, and edits still apply when no

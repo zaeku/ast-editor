@@ -148,11 +148,17 @@ async fn generate_readme() {
         edit::edit_lines_dry_run(&repo, file_ids.to_str().unwrap(), edits.clone(), &pm)
             .await
             .unwrap();
-    let out_edit_dry_run = out_edit_dry_run.replace(file_ids.to_str().unwrap(), DOC_FILEPATH);
+    let out_edit_dry_run_report = out_edit_dry_run.report.clone();
+    let out_edit_dry_run = format!(
+        "{}\n{}",
+        ast_editor::tools::fenced("diff", out_edit_dry_run.diff.trim_end()),
+        ast_editor::tools::fenced("json", &out_edit_dry_run.report)
+    )
+    .replace(file_ids.to_str().unwrap(), DOC_FILEPATH);
     // The preview id counts up with every run, so pin it or the generated
     // documentation differs on each invocation.
     let out_edit_dry_run = {
-        let parsed: serde_json::Value = serde_json::from_str(&out_edit_dry_run).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out_edit_dry_run_report).unwrap();
         let minted = parsed["preview_id"]
             .as_str()
             .expect("a valid preview mints an id");

@@ -82,11 +82,14 @@ EOF
 `end_id`, so finding a line by content or by structure already yields the IDs
 that edit it — no line numbers, and no `grep` pass first.
 
-A tool prints what it has to say on stdout, so it pipes:
+A tool prints what it has to say on stdout as fenced blocks — the file's own
+language for code, `diff` for a diff, `json` for the data — so code arrives
+unescaped and the data still pipes:
 
-```bash
-ast-editor edit src/main.rs --dry-run < edits.txt | jq -r .preview_id
-```
+````bash
+ast-editor edit src/main.rs --dry-run < edits.txt |
+  awk '/^```json$/{f=1;next} /^```/{f=0} f' | jq -r .preview_id
+````
 
 Failures print to stderr and exit non-zero. Because the options *are* the tool
 schema, there is no second interface to keep in step with it.

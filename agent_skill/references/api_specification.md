@@ -351,10 +351,21 @@ the diff and syntax result no longer describe the outcome, so preview again.
 
 ##### Output
 ```json
+```diff
+--- /path/to/project/create_ids.rs
++++ /path/to/project/create_ids.rs
+@@ -1,3 +1,3 @@
+ fn main() {
+-    let x = 42;
+-}
++    let x = 100;
++    let y = 200;
+```
+```json
 {
-  "diff": "--- /path/to/project/create_ids.rs\n+++ /path/to/project/create_ids.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-    let x = 42;\n-}\n+    let x = 100;\n+    let y = 200;\n",
   "preview_id": "p1f",
   "status": "preview",
   "syntax_valid": true
 }
+```
 ```

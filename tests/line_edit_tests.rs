@@ -762,11 +762,11 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     let res = edit::edit_lines_dry_run(&repository, file.path_str(), valid_edits.clone(), &pm)
         .await
         .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     assert_eq!(preview["status"], "preview");
     assert_eq!(preview["syntax_valid"], true);
     assert!(preview["modified_ids"].is_null());
-    let diff = preview["diff"].as_str().unwrap();
+    let diff = &res.diff;
     assert!(
         diff.contains("-    let a = 1;"),
         "diff missing removal: {}",
@@ -799,7 +799,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     let res = edit::edit_lines_dry_run(&repository, file.path_str(), broken_edits, &pm)
         .await
         .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     assert_eq!(preview["syntax_valid"], false);
     assert!(!preview["diagnostics"].as_array().unwrap().is_empty());
     assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
@@ -844,7 +844,7 @@ async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
     let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     assert_eq!(preview["syntax_valid"], true);
     assert!(!preview["warnings"].as_array().unwrap().is_empty());
     assert_eq!(
@@ -929,7 +929,7 @@ async fn test_preview_id_applies_the_validated_batch() {
     let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     let preview_id = preview["preview_id"].as_str().unwrap().to_string();
     assert!(
         preview_id.starts_with('p'),
@@ -985,7 +985,7 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
     let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     let preview_id = preview["preview_id"].as_str().unwrap().to_string();
 
     // Addressed at the wrong file.
@@ -1030,7 +1030,7 @@ async fn test_failed_dry_run_mints_no_preview_id() {
     let res = edit::edit_lines_dry_run(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
-    let preview: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     assert_eq!(preview["syntax_valid"], false);
     assert!(preview["preview_id"].is_null());
 }

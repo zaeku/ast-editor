@@ -358,18 +358,25 @@ impl ToolDispatcher {
                     let edits: Vec<session_db::LineEdit> =
                         serde_json::from_value(edits_val.clone())?;
                     if dry_run {
-                        edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager)
-                            .await?
-                    } else {
-                        edit::edit_lines_with_validation(
-                            &repository,
-                            filepath,
-                            edits,
-                            strict_validation,
-                            parser_manager,
-                        )
-                        .await?
+                        // The diff is the point of a dry run, so it is a block
+                        // to read rather than a string to unescape.
+                        let preview =
+                            edit::edit_lines_dry_run(&repository, filepath, edits, parser_manager)
+                                .await?;
+                        return Ok(format!(
+                            "{}\n{}",
+                            fenced("diff", preview.diff.trim_end()),
+                            fenced("json", &preview.report)
+                        ));
                     }
+                    edit::edit_lines_with_validation(
+                        &repository,
+                        filepath,
+                        edits,
+                        strict_validation,
+                        parser_manager,
+                    )
+                    .await?
                 };
                 Ok(fenced("json", &text))
             }

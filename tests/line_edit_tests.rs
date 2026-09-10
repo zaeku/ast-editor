@@ -1433,14 +1433,12 @@ async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value
             query: None,
             template: template.map(str::to_string),
             include_code: Some(false),
-            code_format: None,
-            output_file: None,
         },
         &std::sync::Arc::new(create_test_parser_manager()),
     )
     .await
     .unwrap();
-    serde_json::from_str(&res).unwrap()
+    serde_json::from_str(&res.report).unwrap()
 }
 
 #[tokio::test]
@@ -1496,8 +1494,6 @@ async fn test_inspect_refuses_to_search_for_nothing_and_names_the_outline() {
             query: None,
             template: None,
             include_code: Some(false),
-            code_format: None,
-            output_file: None,
         },
         &std::sync::Arc::new(create_test_parser_manager()),
     )

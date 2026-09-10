@@ -32,6 +32,30 @@ pub fn fenced(language: &str, body: &str) -> String {
     format!("{}{}\n{}\n{}", fence, language, body, fence)
 }
 
+/// What a block of this file's lines is called on its fence.
+pub fn fence_language(filepath: &str) -> &'static str {
+    let ext = std::path::Path::new(filepath)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        "rs" => "rust",
+        "py" => "python",
+        "js" => "javascript",
+        "ts" => "typescript",
+        "tsx" => "tsx",
+        "jsx" => "jsx",
+        "go" => "go",
+        "json" => "json",
+        "toml" => "toml",
+        "yaml" | "yml" => "yaml",
+        "html" => "html",
+        "md" => "markdown",
+        "sh" => "bash",
+        _ => "text",
+    }
+}
+
 pub struct ToolDispatcher;
 
 impl ToolDispatcher {
@@ -72,11 +96,6 @@ impl ToolDispatcher {
                         "include_code": {
                             "type": "boolean",
                             "description": "Whether to include the source code of the enclosing definition (default: true)"
-                        },
-                        "code_format": {
-                            "type": "string",
-                            "enum": ["lines", "raw"],
-                            "description": "Format of the returned code (default: 'lines')"
                         },
                         "output_file": {
                             "type": "boolean",
@@ -254,11 +273,16 @@ impl ToolDispatcher {
     ) -> Result<String> {
         match name {
             "inspect" => {
-                let args = serde_json::from_value(arguments)?;
-                Ok(fenced(
-                    "json",
-                    &inspect::run_inspect(args, parser_manager).await?,
-                ))
+                let args: inspect::InspectArgs = serde_json::from_value(arguments)?;
+                let language = fence_language(&args.filepath);
+                let answer = inspect::run_inspect(args, parser_manager).await?;
+                let mut blocks: Vec<String> = answer
+                    .blocks
+                    .iter()
+                    .map(|block| fenced(language, block))
+                    .collect();
+                blocks.push(fenced("json", &answer.report));
+                Ok(blocks.join("\n"))
             }
             "outline" => {
                 let args: outline::OutlineArgs = serde_json::from_value(arguments)?;
@@ -303,27 +327,7 @@ impl ToolDispatcher {
 
                 let mut blocks = Vec::new();
                 if let Some(code) = res.lines_text {
-                    let ext = std::path::Path::new(filepath)
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .unwrap_or("");
-                    let lang = match ext {
-                        "rs" => "rust",
-                        "py" => "python",
-                        "js" => "javascript",
-                        "ts" => "typescript",
-                        "tsx" => "tsx",
-                        "jsx" => "jsx",
-                        "go" => "go",
-                        "json" => "json",
-                        "toml" => "toml",
-                        "yaml" | "yml" => "yaml",
-                        "html" => "html",
-                        "md" => "markdown",
-                        "sh" => "bash",
-                        _ => "text",
-                    };
-                    blocks.push(fenced(lang, &code));
+                    blocks.push(fenced(fence_language(filepath), &code));
                 }
                 blocks.push(fenced("json", &res.metadata_json));
                 Ok(blocks.join("\n"))

@@ -16,8 +16,16 @@ pub struct InspectArgs {
     pub query: Option<String>,
     pub template: Option<String>,
     pub include_code: Option<bool>,
-    pub code_format: Option<String>,
-    pub output_file: Option<bool>,
+}
+
+/// What `inspect` has to say: the code of each definition it matched, ready
+/// to print as its own block, and the report naming what was found. The code
+/// is kept out of the report because code inside a JSON string is code
+/// nobody can read and nothing can copy.
+#[derive(Debug)]
+pub struct Inspected {
+    pub blocks: Vec<String>,
+    pub report: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,18 +39,6 @@ pub struct InspectResult {
     pub query: Option<String>,
     pub match_count: usize,
     pub matches: Vec<InspectMatch>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hint: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct InspectSummary {
-    pub status: String,
-    pub filepath: String,
-    pub language: String,
-    pub has_syntax_errors: bool,
-    pub match_count: usize,
-    pub saved_to_file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -95,11 +91,8 @@ fn line_id_at(
 pub struct InspectDefinition {
     pub r#type: String,
     pub start_line: usize,
-    pub start_column: usize,
     pub end_line: usize,
-    pub end_column: usize,
     pub block_hash: String,
-    pub text: String,
 }
 
 /// The s-expression a named template stands for, or None when the language
@@ -275,8 +268,6 @@ pub(crate) async fn outline_report(
             query: None,
             template: Some("headings".to_string()),
             include_code: Some(false),
-            code_format: None,
-            output_file: None,
         };
         let found: Value = serde_json::from_str(&run_markdown_inspect(
             &code,
@@ -333,7 +324,10 @@ pub(crate) async fn outline_report(
     Ok(serde_json::to_string_pretty(&report)?)
 }
 
-pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
+pub async fn run_inspect(
+    args: InspectArgs,
+    parser_manager: &Arc<ParserManager>,
+) -> Result<Inspected> {
     let file_path = Path::new(&args.filepath);
     if !file_path.exists() {
         bail!("File not found: {:?}", file_path);
@@ -370,7 +364,10 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
     }
 
     if lang_name == "markdown" {
-        return run_markdown_inspect(&code, &args, &repository, &session_id_opt);
+        return Ok(Inspected {
+            blocks: Vec::new(),
+            report: run_markdown_inspect(&code, &args, &repository, &session_id_opt)?,
+        });
     }
 
     // 1. Delegated parsing via sticky session cache in ParserManager
@@ -384,6 +381,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
 
     // 3. Perform Query matching if requested
     let mut matches = Vec::new();
+    let mut blocks: Vec<String> = Vec::new();
     let mut status = "success".to_string();
     let mut hint = None;
 
@@ -425,34 +423,26 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                         let end_position = node.end_position();
                         let node_text = node.utf8_text(code.as_bytes()).unwrap_or("").to_string();
 
-                        // Generate a structural definition block
+                        // A definition's code becomes a block of its own,
+                        // read as `view` reads lines.
                         let definition = if capture_name == "function" || capture_name == "class" {
-                            let mut text_val = "".to_string();
                             let start_line = start_position.row + 1;
                             let end_line = end_position.row + 1;
 
                             if args.include_code.unwrap_or(true) {
-                                if let Some(ref session_id) = session_id_opt {
-                                    match format_definition_table(
+                                blocks.push(match session_id_opt {
+                                    Some(ref session_id) => definition_lines(
                                         &repository,
                                         session_id,
                                         start_line,
                                         end_line,
-                                    ) {
-                                        Ok(table_text) => {
-                                            text_val = table_text;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "Failed to format definition table: {:?}",
-                                                e
-                                            );
-                                            text_val = node_text.clone();
-                                        }
-                                    }
-                                } else {
-                                    text_val = node_text.clone();
-                                }
+                                    )
+                                    .unwrap_or_else(|err| {
+                                        tracing::warn!("Failed to read the definition: {:?}", err);
+                                        node_text.clone()
+                                    }),
+                                    None => node_text.clone(),
+                                });
                             }
 
                             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -462,11 +452,8 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                             Some(InspectDefinition {
                                 r#type: node.kind().to_string(),
                                 start_line,
-                                start_column: start_position.column + 1,
                                 end_line,
-                                end_column: end_position.column + 1,
                                 block_hash,
-                                text: text_val,
                             })
                         } else {
                             None
@@ -480,7 +467,11 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                             end_line,
                             start_id: line_id_at(&repository, &session_id_opt, start_line),
                             end_id: line_id_at(&repository, &session_id_opt, end_line),
-                            text: node_text,
+                            text: if definition.is_some() {
+                                node_text.lines().next().unwrap_or("").to_string()
+                            } else {
+                                node_text
+                            },
                             definition,
                         });
                     }
@@ -496,34 +487,6 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         }
     }
 
-    // Handle output_file option if specified
-    let mut saved_to_file = None;
-    if args.output_file.unwrap_or(false) {
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
-                let outputs_dir = parent.join("outputs");
-                if !outputs_dir.exists() {
-                    let _ = fs::create_dir_all(&outputs_dir);
-                }
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                args.filepath.hash(&mut hasher);
-                let hash_val = format!("{:x}", hasher.finish());
-                let filename = format!(
-                    "inspect_output_{}_{}.json",
-                    now,
-                    &hash_val[..std::cmp::min(8, hash_val.len())]
-                );
-                let file_path = outputs_dir.join(filename);
-                let target_path_str = file_path.to_string_lossy().to_string();
-                saved_to_file = Some(target_path_str);
-            }
-        }
-    }
-
     let result = InspectResult {
         status: status.clone(),
         filepath: args.filepath,
@@ -535,76 +498,29 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         hint: hint.clone(),
     };
 
-    let pretty_json = serde_json::to_string_pretty(&result)?;
-
-    if let Some(ref path_str) = saved_to_file {
-        let _ = fs::write(path_str, &pretty_json);
-    }
-
-    // Probabilistic Stateless Garbage Collector (1% trigger rate)
-    let is_gc_turn = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_micros() % 100 == 0)
-        .unwrap_or(false);
-
-    if is_gc_turn {
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
-                let outputs_dir = parent.join("outputs");
-                if outputs_dir.exists() {
-                    tokio::spawn(run_gc(outputs_dir));
-                }
-            }
-        }
-    }
-
-    let returned_text = if let Some(ref path_str) = saved_to_file {
-        let summary = InspectSummary {
-            status: status.clone(),
-            filepath: result.filepath.clone(),
-            language: result.language.clone(),
-            has_syntax_errors: result.has_syntax_errors,
-            match_count: result.match_count,
-            saved_to_file: path_str.clone(),
-            hint: Some(
-                "The full query result has been saved to the file specified in 'saved_to_file'."
-                    .to_string(),
-            ),
-        };
-        serde_json::to_string_pretty(&summary)?
-    } else {
-        pretty_json
-    };
-
-    Ok(returned_text)
+    Ok(Inspected {
+        blocks,
+        report: serde_json::to_string_pretty(&result)?,
+    })
 }
 
-pub(crate) async fn run_gc(outputs_dir: std::path::PathBuf) {
-    if let Ok(mut entries) = tokio::fs::read_dir(outputs_dir).await {
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            if let Ok(metadata) = entry.metadata().await {
-                if metadata.is_file() {
-                    if let Ok(modified) = metadata.modified() {
-                        if let Ok(elapsed) = modified.elapsed() {
-                            // Deletes files older than 12 hours (43200 seconds)
-                            if elapsed.as_secs() > 43200 {
-                                let _ = tokio::fs::remove_file(entry.path()).await;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn format_definition_table(
+/// The lines of a definition, rendered the way `view` renders them, so a
+/// block read here and a block read there are the same thing.
+fn definition_lines(
     repository: &impl crate::tools::session_db::SessionRepository,
     session_id: &str,
     start_line: usize,
     end_line: usize,
 ) -> Result<String> {
-    crate::tools::formatter::format_definition_json(repository, session_id, start_line, end_line)
+    let formatted = crate::tools::formatter::retrieve_and_format_lines(
+        repository,
+        session_id,
+        start_line,
+        end_line,
+        false,
+        crate::tools::metadata::get_config().only_ids_wrap_trigger_length,
+    )?;
+    Ok(formatted.lines_text.unwrap_or_default())
 }
 
 pub fn run_markdown_inspect(
@@ -642,34 +558,6 @@ pub fn run_markdown_inspect(
         }
     }
 
-    // Handle output_file option if specified
-    let mut saved_to_file = None;
-    if args.output_file.unwrap_or(false) {
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
-                let outputs_dir = parent.join("outputs");
-                if !outputs_dir.exists() {
-                    let _ = fs::create_dir_all(&outputs_dir);
-                }
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                args.filepath.hash(&mut hasher);
-                let hash_val = format!("{:x}", hasher.finish());
-                let filename = format!(
-                    "inspect_output_{}_{}.json",
-                    now,
-                    &hash_val[..std::cmp::min(8, hash_val.len())]
-                );
-                let file_path = outputs_dir.join(filename);
-                let target_path_str = file_path.to_string_lossy().to_string();
-                saved_to_file = Some(target_path_str);
-            }
-        }
-    }
-
     let result = InspectResult {
         status: status.clone(),
         query: None,
@@ -681,50 +569,7 @@ pub fn run_markdown_inspect(
         hint: hint.clone(),
     };
 
-    let pretty_json = serde_json::to_string_pretty(&result)?;
-
-    if let Some(ref path_str) = saved_to_file {
-        let _ = fs::write(path_str, &pretty_json);
-    }
-
-    // Probabilistic Stateless Garbage Collector (1% trigger rate)
-    let is_gc_turn = std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_micros() % 100 == 0)
-        .unwrap_or(false);
-
-    if is_gc_turn {
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            if let Ok(exe_path) = std::env::current_exe() {
-                if let Some(parent) = exe_path.parent().and_then(|p| p.parent()) {
-                    let outputs_dir = parent.join("outputs");
-                    if outputs_dir.exists() {
-                        handle.spawn(run_gc(outputs_dir));
-                    }
-                }
-            }
-        }
-    }
-
-    let returned_text = if let Some(ref path_str) = saved_to_file {
-        let summary = InspectSummary {
-            status: status.clone(),
-            filepath: result.filepath.clone(),
-            language: result.language.clone(),
-            has_syntax_errors: result.has_syntax_errors,
-            match_count: result.match_count,
-            saved_to_file: path_str.clone(),
-            hint: Some(
-                "The full query result has been saved to the file specified in 'saved_to_file'."
-                    .to_string(),
-            ),
-        };
-        serde_json::to_string_pretty(&summary)?
-    } else {
-        pretty_json
-    };
-
-    Ok(returned_text)
+    serde_json::to_string_pretty(&result).map_err(anyhow::Error::from)
 }
 
 fn collect_markdown_matches<'a>(
@@ -793,19 +638,7 @@ fn collect_markdown_matches<'a>(
         // Generate a structural definition block
         let is_def_node =
             kind == "Heading" || kind == "CodeBlock" || kind == "Table" || kind == "List";
-        let definition = if is_def_node && args.include_code.unwrap_or(true) {
-            let text_val = if let Some(ref session_id) = session_id_opt {
-                match format_definition_table(repository, session_id, start_line, end_line) {
-                    Ok(table_text) => table_text,
-                    Err(e) => {
-                        tracing::warn!("Failed to format definition table: {:?}", e);
-                        node_text.clone()
-                    }
-                }
-            } else {
-                node_text.clone()
-            };
-
+        let definition = if is_def_node {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             node_text.hash(&mut hasher);
             let block_hash = format!("{:x}", hasher.finish());
@@ -813,11 +646,8 @@ fn collect_markdown_matches<'a>(
             Some(InspectDefinition {
                 r#type: kind.to_string(),
                 start_line,
-                start_column,
                 end_line,
-                end_column,
                 block_hash,
-                text: text_val,
             })
         } else {
             None
@@ -927,8 +757,6 @@ fn main() {}
             query: None,
             template: Some("headings".to_string()),
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
         let res_val =
             run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
@@ -942,8 +770,6 @@ fn main() {}
             query: None,
             template: Some("code_blocks".to_string()),
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
         let res_val =
             run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
@@ -957,8 +783,6 @@ fn main() {}
             query: None,
             template: Some("links".to_string()),
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
         let res_val =
             run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
@@ -972,8 +796,6 @@ fn main() {}
             query: None,
             template: Some("tables".to_string()),
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
         let res_val =
             run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
@@ -986,8 +808,6 @@ fn main() {}
             query: None,
             template: Some("lists".to_string()),
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
         let res_val =
             run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
@@ -1000,8 +820,6 @@ fn main() {}
             query: Some("paragraph".to_string()),
             template: None,
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
         let res_val =
             run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
@@ -1040,10 +858,11 @@ fn main() {}
                 query: None,
                 template: Some(template.to_string()),
                 include_code: Some(true),
-                code_format: None,
-                output_file: None,
             };
-            let res_val = run_inspect(args, pm).await.unwrap();
+            // A definition's code is a block now, and the report names what
+            // was found, so a template is proved by the two together.
+            let answer = run_inspect(args, pm).await.unwrap();
+            let res_val = format!("{}\n{}", answer.blocks.join("\n"), answer.report);
             let text = &res_val;
             assert!(
                 text.contains(expected_contains),
@@ -1195,10 +1014,8 @@ fn main() {}
             query: Some("(binding attrpath: (attrpath (identifier) @attr))".to_string()),
             template: None,
             include_code: Some(true),
-            code_format: None,
-            output_file: None,
         };
-        let text1 = run_inspect(args_file, &pm).await.unwrap();
+        let text1 = run_inspect(args_file, &pm).await.unwrap().report;
         assert!(text1.contains("x"));
 
         // 2. Test using 'filepath' alias field (deserialized manually in code or via serde)
@@ -1207,7 +1024,7 @@ fn main() {}
             "query": "(binding attrpath: (attrpath (identifier) @attr))"
         });
         let args_filepath: InspectArgs = serde_json::from_value(json_input).unwrap();
-        let text2 = run_inspect(args_filepath, &pm).await.unwrap();
+        let text2 = run_inspect(args_filepath, &pm).await.unwrap().report;
         assert!(text2.contains("x"));
     }
 }

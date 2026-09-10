@@ -1534,26 +1534,20 @@ mod tests {
             None,
         )?;
         let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
-        let ids = ids_val["ids"].as_array().unwrap();
 
         let mut lines = Vec::new();
         if let Some(ref text) = res.lines_text {
-            for line in text.lines() {
-                let colon_idx = line.find(':').unwrap();
-                let n: usize = line[..colon_idx].parse().unwrap();
-                let content = &line[colon_idx + 2..];
-                let mut matched_id = String::new();
-                for id_entry in ids {
-                    let id_arr = id_entry.as_array().unwrap();
-                    if id_arr[1].as_u64().unwrap() as usize == n {
-                        matched_id = id_arr[0].as_str().unwrap().to_string();
-                        break;
-                    }
-                }
-                lines.push(serde_json::json!([matched_id, n, content]));
+            for row in text.lines() {
+                let (head, content) = row.split_once(": ").unwrap();
+                let (id, n) = head.split_once('|').unwrap();
+                lines.push(serde_json::json!([
+                    id,
+                    n.parse::<usize>().unwrap(),
+                    content
+                ]));
             }
         } else {
-            for id_entry in ids {
+            for id_entry in ids_val["ids"].as_array().unwrap() {
                 let id_arr = id_entry.as_array().unwrap();
                 let id = id_arr[0].as_str().unwrap();
                 let n = id_arr[1].as_u64().unwrap() as usize;
@@ -1574,7 +1568,7 @@ mod tests {
 
     #[test]
     fn test_create_tables_in_memory() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let conn = Connection::open_in_memory()?;
 
         // Configure pragmas
@@ -1600,7 +1594,7 @@ mod tests {
 
     #[test]
     fn test_get_db_path() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let path = get_db_path()?;
         assert!(path.to_string_lossy().contains("sessions.db"));
 
@@ -1674,7 +1668,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_stale_sessions() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let conn = Connection::open_in_memory()?;
         create_tables(&conn)?;
 
@@ -1709,7 +1703,7 @@ mod tests {
 
     #[test]
     fn test_init_edit_session_nonexistent_file() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-init-nonexistent");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -1731,7 +1725,7 @@ mod tests {
 
     #[test]
     fn test_init_edit_session_binary_file() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-init-binary");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("binary.bin");
@@ -1748,7 +1742,7 @@ mod tests {
 
     #[test]
     fn test_init_edit_session_unsupported_language() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-init-unsupported");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("unsupported.txt");
@@ -1765,7 +1759,7 @@ mod tests {
 
     #[test]
     fn test_init_edit_session_lifecycle() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-init-lifecycle");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("code.rs");
@@ -1853,7 +1847,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_view_lines() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-view");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -1924,7 +1918,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_view_lines_jit_initialization() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-jit-view");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;

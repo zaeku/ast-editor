@@ -50,7 +50,7 @@ skill document calls the command by name.
 ## 🚀 How to Call It
 
 One tool, one call. A tool is named by any unambiguous prefix, so the `_lines`
-and `_ast` suffixes can be left off (`view` is `view`):
+and `_ast` suffixes can be left off (`ins` is `inspect`):
 
 ```bash
 ast-editor view src/main.rs --query "fn main"
@@ -127,7 +127,7 @@ To prevent this, `create` intentionally blocks overwriting (`FILE_ALREADY_EXISTS
 We do not rename `create` to `write_lines` because the word "write" suggests overwriting or rewriting existing content, whereas `create` is explicitly designed as a one-time creation/initialization operation.
 
 ### 2. `view`
-Retrieves a range of lines for any text file along with their persistent line IDs.
+Retrieves a range of lines for any text file along with their persistent line IDs. Each line is printed as `<id>|<line>: <text>`; a line too long for one row is broken at a fixed character count onto `│:` and `└:` rows that join back to it exactly.
 *   **Capping**: Range length is capped at 800 lines max per call.
 *   **Capacity Limit**: Cumulative returned text is capped at 45,000 bytes.
 *   **Truncation**: Lines exceeding 2048 characters are truncated in the view and given a `#TRUNC` ID suffix.

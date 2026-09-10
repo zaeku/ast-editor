@@ -57,7 +57,6 @@ fn view_range(
         None,
     )?;
     let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
-    let ids = ids_val["ids"].as_array().unwrap();
 
     let mut lines = Vec::new();
     if let Some(ref text) = res.lines_text {
@@ -66,35 +65,27 @@ fn view_range(
         let mut current_content = String::new();
         let mut has_pending = false;
 
-        for line in text.lines() {
-            let colon_idx = line.find(':').unwrap();
-            let prefix = line[..colon_idx].trim();
-            let content = &line[colon_idx + 2..];
-
-            if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
-                if has_pending {
-                    lines.push(serde_json::json!([current_id, current_n, current_content]));
-                }
-                current_n = prefix.parse::<usize>().unwrap();
-                current_content = content.to_string();
-                current_id = String::new();
-                for id_entry in ids {
-                    let id_arr = id_entry.as_array().unwrap();
-                    if id_arr[1].as_u64().unwrap() as usize == current_n {
-                        current_id = id_arr[0].as_str().unwrap().to_string();
-                        break;
+        for row in text.lines() {
+            let (head, content) = row.split_once(": ").unwrap();
+            match head.trim().split_once('|') {
+                // A line names itself; anything else is its continuation.
+                Some((id, number)) => {
+                    if has_pending {
+                        lines.push(serde_json::json!([current_id, current_n, current_content]));
                     }
+                    current_id = id.to_string();
+                    current_n = number.parse::<usize>().unwrap();
+                    current_content = content.to_string();
+                    has_pending = true;
                 }
-                has_pending = true;
-            } else {
-                current_content.push_str(content);
+                None => current_content.push_str(content),
             }
         }
         if has_pending {
             lines.push(serde_json::json!([current_id, current_n, current_content]));
         }
     } else {
-        for id_entry in ids {
+        for id_entry in ids_val["ids"].as_array().unwrap() {
             let id_arr = id_entry.as_array().unwrap();
             let id = id_arr[0].as_str().unwrap();
             let n = id_arr[1].as_u64().unwrap() as usize;
@@ -683,9 +674,11 @@ async fn test_integration_view_lines_capacity_cap() {
     let view_res = view_range(&repository, file.path_str(), 1, 50, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
 
+    // 44 of the 1000-character lines, not 45: the id each line carries is
+    // part of the response and counts against the same budget.
     let returned_lines = val["lines"].as_array().unwrap();
-    assert_eq!(returned_lines.len(), 45);
-    assert_eq!(val["showing_end"].as_u64().unwrap(), 45);
+    assert_eq!(returned_lines.len(), 44);
+    assert_eq!(val["showing_end"].as_u64().unwrap(), 44);
 
     let warning_msg = val["message"].as_str().unwrap();
     assert!(warning_msg.contains("cumulative response size limit"));

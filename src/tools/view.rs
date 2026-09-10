@@ -60,7 +60,7 @@ pub fn view_lines(
             let config = crate::tools::metadata::get_config();
             let msg = serde_json::to_string(&config.error_no_query_match.replace("{}", q))?;
             let metadata_json = format!(
-                "{{\n  \"enclosing_contexts\": [],\n  \"ids\": [],\n  \"showing_start\": 1,\n  \"showing_end\": 0,\n  \"total_lines\": {},\n  \"total_bytes\": {},\n  \"message\": {}\n}}",
+                "{{\n  \"enclosing_contexts\": [],\n  \"showing_start\": 1,\n  \"showing_end\": 0,\n  \"total_lines\": {},\n  \"total_bytes\": {},\n  \"message\": {}\n}}",
                 total_lines,
                 std::path::Path::new(filepath).metadata()?.len(),
                 msg
@@ -208,7 +208,9 @@ pub fn view_lines(
         "  \"enclosing_contexts\": {}",
         serde_json::to_string(&enclosing_list)?
     ));
-    parts.push(format!("  \"ids\": {}", serde_json::to_value(&all_ids)?));
+    if only_ids_bool {
+        parts.push(format!("  \"ids\": {}", serde_json::to_value(&all_ids)?));
+    }
     if let Some(msg) = message {
         parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
     }
@@ -378,7 +380,6 @@ mod tests {
             None,
         )?;
         let ids_val: serde_json::Value = serde_json::from_str(&res.metadata_json)?;
-        let ids = ids_val["ids"].as_array().unwrap();
 
         let mut lines = Vec::new();
         if let Some(ref text) = res.lines_text {
@@ -387,35 +388,30 @@ mod tests {
             let mut current_content = String::new();
             let mut has_pending = false;
 
-            for line in text.lines() {
-                let colon_idx = line.find(':').unwrap();
-                let prefix = line[..colon_idx].trim();
-                let content = &line[colon_idx + 2..];
+            for row in text.lines() {
+                let colon_idx = row.find(':').unwrap();
+                let head = row[..colon_idx].trim();
+                let content = &row[colon_idx + 2..];
 
-                if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
-                    if has_pending {
-                        lines.push(serde_json::json!([current_id, current_n, current_content]));
-                    }
-                    current_n = prefix.parse::<usize>().unwrap();
-                    current_content = content.to_string();
-                    current_id = String::new();
-                    for id_entry in ids {
-                        let id_arr = id_entry.as_array().unwrap();
-                        if id_arr[1].as_u64().unwrap() as usize == current_n {
-                            current_id = id_arr[0].as_str().unwrap().to_string();
-                            break;
+                match head.split_once('|') {
+                    // A line names itself; anything else is its continuation.
+                    Some((id, number)) => {
+                        if has_pending {
+                            lines.push(serde_json::json!([current_id, current_n, current_content]));
                         }
+                        current_id = id.to_string();
+                        current_n = number.parse::<usize>().unwrap();
+                        current_content = content.to_string();
+                        has_pending = true;
                     }
-                    has_pending = true;
-                } else {
-                    current_content.push_str(content);
+                    None => current_content.push_str(content),
                 }
             }
             if has_pending {
                 lines.push(serde_json::json!([current_id, current_n, current_content]));
             }
         } else {
-            for id_entry in ids {
+            for id_entry in ids_val["ids"].as_array().unwrap() {
                 let id_arr = id_entry.as_array().unwrap();
                 let id = id_arr[0].as_str().unwrap();
                 let n = id_arr[1].as_u64().unwrap() as usize;
@@ -436,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_create_lines_success() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-create-success");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -476,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_create_lines_return_ids_false() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-create-return-ids-false");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -509,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_create_lines_already_exists() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-create-exists");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -540,7 +536,7 @@ mod tests {
 
     #[test]
     fn test_create_lines_db_failure_rollback() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-create-rollback");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -567,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_view_lines_capping() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-capping");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -613,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_view_lines_truncation() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-truncation");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -661,7 +657,7 @@ mod tests {
 
     #[test]
     fn test_view_lines_capacity() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-capacity");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -684,10 +680,10 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(&output)?;
 
         let lines_array = val["lines"].as_array().unwrap();
-        // Since limit is 45,000 bytes, we should stop before exceeding 45,000 bytes.
-        // 45 lines * 1000 chars = 45,000 chars.
-        assert_eq!(lines_array.len(), 45);
-        assert_eq!(val["showing_end"], 45);
+        // 44 lines of 1000 characters, rather than 45: the id each line
+        // carries counts against the same 45,000 bytes.
+        assert_eq!(lines_array.len(), 44);
+        assert_eq!(val["showing_end"], 44);
         assert!(val["message"]
             .as_str()
             .unwrap()
@@ -707,7 +703,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enclosing_contexts_and_query_filtering() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-contexts-query");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -777,7 +773,7 @@ fn helper_func() {
 
     #[tokio::test]
     async fn test_markdown_parent_contexts() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-markdown-contexts");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;

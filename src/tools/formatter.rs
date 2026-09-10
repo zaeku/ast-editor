@@ -1,6 +1,16 @@
 use crate::tools::session_db::{compute_line_hash, SessionRepository};
 use anyhow::Result;
 
+/// Where a line is broken for display. The break is at a fixed count of
+/// characters, never at a space, so the rows of one line concatenate back to
+/// exactly what the file holds. Wide enough that ordinary code is one row and
+/// a search across the output is not split by it.
+const WRAP_WIDTH: usize = 300;
+
+/// What the caps count, which is not what a row is: lowering the display width
+/// must not make a response run out of budget ten times sooner.
+const SEGMENT_LENGTH: usize = 2048;
+
 pub struct FormattedLinesResult {
     pub lines_text: Option<String>,
     pub ids_json: String,
@@ -30,12 +40,11 @@ pub fn retrieve_and_format_lines(
         let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
         let line_id = format!("{:x}#{}", seq_id, line_hash);
 
-        // Split into segments of 2048 characters
         let chars: Vec<char> = content.chars().collect();
         let mut segments = Vec::new();
         let mut start = 0;
         while start < chars.len() {
-            let end = std::cmp::min(start + 2048, chars.len());
+            let end = std::cmp::min(start + SEGMENT_LENGTH, chars.len());
             let segment: String = chars[start..end].iter().collect();
             segments.push(segment);
             start = end;
@@ -55,10 +64,8 @@ pub fn retrieve_and_format_lines(
             break;
         }
 
-        let mut line_len = 0;
-        if only_ids {
-            line_len = line_id.len() + 10;
-        } else {
+        let mut line_len = line_id.len() + 10;
+        if !only_ids {
             for seg in segments.iter().take(segments_to_add) {
                 line_len += seg.len();
             }
@@ -73,14 +80,26 @@ pub fn retrieve_and_format_lines(
 
         id_items.push(format!("[\"{}\", {}]", line_id, current_idx));
         if !only_ids {
-            let indent = " ".repeat(current_idx.to_string().len().saturating_sub(1));
-            for (seg_idx, seg) in segments.iter().take(segments_to_add).enumerate() {
-                if seg_idx == 0 {
-                    text_lines.push(format!("{}: {}", current_idx, seg));
-                } else if seg_idx == segments_to_add - 1 {
-                    text_lines.push(format!("{}└: {}", indent, seg));
+            // The id is on the line it names, so reading one costs no
+            // cross-reference against a table further down the response.
+            let prefix = format!("{}|{}: ", line_id, current_idx);
+            let indent = " ".repeat(prefix.len().saturating_sub(3));
+            let kept = &chars[..std::cmp::min(chars.len(), segments_to_add * SEGMENT_LENGTH)];
+            let rows: Vec<String> = if kept.is_empty() {
+                vec![String::new()]
+            } else {
+                kept.chunks(WRAP_WIDTH)
+                    .map(|row| row.iter().collect())
+                    .collect()
+            };
+            let last = rows.len() - 1;
+            for (row_idx, row) in rows.iter().enumerate() {
+                if row_idx == 0 {
+                    text_lines.push(format!("{}{}", prefix, row));
+                } else if row_idx == last {
+                    text_lines.push(format!("{}└: {}", indent, row));
                 } else {
-                    text_lines.push(format!("{}│: {}", indent, seg));
+                    text_lines.push(format!("{}│: {}", indent, row));
                 }
             }
         }
@@ -230,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_retrieve_and_format_lines_only_ids() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-ids");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -281,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_retrieve_and_format_lines_full() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-full");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -301,7 +320,10 @@ mod tests {
         assert_eq!(res.actual_end_line, 2);
         assert!(res.warning_msg.is_none());
 
-        assert_eq!(res.lines_text.as_ref().unwrap(), "1: line 1\n2: line 2");
+        let rows: Vec<&str> = res.lines_text.as_ref().unwrap().lines().collect();
+        assert!(rows[0].starts_with("1#"), "{}", rows[0]);
+        assert!(rows[0].ends_with("|1: line 1"), "{}", rows[0]);
+        assert!(rows[1].ends_with("|2: line 2"), "{}", rows[1]);
 
         let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         let arr = val.as_array().unwrap();
@@ -314,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_retrieve_and_format_lines_truncation() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-trunc");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -332,8 +354,17 @@ mod tests {
 
         let res = retrieve_and_format_lines(&repository, session_id, 1, 1, false, 1000)?;
         let text = res.lines_text.as_ref().unwrap();
-        assert!(text.contains("1: "));
+        assert!(text.contains("|1: "));
+        assert!(text.contains("│: "));
         assert!(text.contains("└: "));
+
+        // The rows of one line join back to exactly the line, because the
+        // break is at a fixed count of characters and adds nothing.
+        let rejoined: String = text
+            .lines()
+            .map(|row| row.split_once(": ").unwrap().1)
+            .collect();
+        assert_eq!(rejoined, long_line);
 
         let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
         let arr = val.as_array().unwrap();
@@ -347,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_retrieve_and_format_lines_capacity() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-cap");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
@@ -367,15 +398,17 @@ mod tests {
         let meta = repository.init_session(filepath_str, false)?;
         let session_id = &meta.session_id;
 
+        // 44, not 45: the id each line carries is part of the response, so it
+        // is counted against the 45,000 bytes.
         let res = retrieve_and_format_lines(&repository, session_id, 1, 50, false, 1000)?;
-        assert_eq!(res.actual_end_line, 45);
+        assert_eq!(res.actual_end_line, 44);
         assert_eq!(
             res.warning_msg.as_deref(),
             Some("Response truncated: cumulative response size limit (45,000 bytes) was reached.")
         );
 
         let val: serde_json::Value = serde_json::from_str(&res.ids_json)?;
-        assert_eq!(val.as_array().unwrap().len(), 45);
+        assert_eq!(val.as_array().unwrap().len(), 44);
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())

@@ -81,7 +81,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ---
 
 ## 2. `view`
-Retrieves a range of lines for any text file along with their persistent unique Line IDs.
+Retrieves a range of lines for any text file along with their persistent unique Line IDs. Each line is printed as `<id>|<line>: <text>`; a line too long for one row is broken at a fixed character count onto `│:` and `└:` rows that join back to it exactly.
 
 ### Parameters (JSON Schema)
 ```json
@@ -134,15 +134,14 @@ Retrieves a range of lines for any text file along with their persistent unique 
 
 ##### Output
 ```rust
-1: fn main() {
-2:     let x = 42;
-3: }
+1#77cf|1: fn main() {
+2#bcb4|2:     let x = 42;
+3#c2b7|3: }
 ```
 
 ```json
 {
   "enclosing_contexts": [],
-  "ids": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
   "showing_end": 3,
   "showing_start": 1,
   "tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",

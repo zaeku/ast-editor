@@ -29,7 +29,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ---
 
 ## 2. `view`
-Retrieves a range of lines for any text file along with their persistent unique Line IDs.
+Retrieves a range of lines for any text file along with their persistent unique Line IDs. Each line is printed as `<id>|<line>: <text>`; a line too long for one row is broken at a fixed character count onto `│:` and `└:` rows that join back to it exactly.
 
 ### Parameters (JSON Schema)
 {{view_schema}}

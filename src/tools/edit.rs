@@ -630,22 +630,18 @@ mod tests {
         }
     }
 
+    /// The id of the line whose text matches, read off the line that carries it.
     fn find_line_id(view_res: &crate::tools::view::ViewLinesOutput, pattern: &str) -> String {
         let lines_text = view_res.lines_text.as_ref().unwrap();
-        let ids_val: serde_json::Value = serde_json::from_str(&view_res.metadata_json).unwrap();
-        let ids = ids_val["ids"].as_array().unwrap();
-
-        for line in lines_text.lines() {
-            if line.contains(pattern) {
-                let colon_idx = line.find(':').unwrap();
-                let line_num: usize = line[..colon_idx].parse().unwrap();
-                for id_entry in ids {
-                    let id_arr = id_entry.as_array().unwrap();
-                    let n = id_arr[1].as_u64().unwrap() as usize;
-                    if n == line_num {
-                        return id_arr[0].as_str().unwrap().to_string();
-                    }
+        let mut current = String::new();
+        for row in lines_text.lines() {
+            if let Some((head, _)) = row.split_once(": ") {
+                if let Some((id, _)) = head.split_once('|') {
+                    current = id.to_string();
                 }
+            }
+            if row.contains(pattern) {
+                return current;
             }
         }
         String::new()
@@ -671,7 +667,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_line_edits_insert_update_delete() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("basic_ops");
         let repository = SqliteSessionRepository;
 
@@ -755,7 +751,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrency_smart_resync() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("concurrency");
         let repository = SqliteSessionRepository;
 
@@ -789,7 +785,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_checksum_error() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("checksum");
         let repository = SqliteSessionRepository;
 
@@ -820,7 +816,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_syntax_validation_error_rolls_back() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("syntax_error");
         let repository = SqliteSessionRepository;
 
@@ -895,7 +891,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_into_empty_file() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("empty_file");
         let repository = SqliteSessionRepository;
 
@@ -925,7 +921,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_validation_and_deletion_preview() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("case_insensitive_and_delete");
         let repository = SqliteSessionRepository;
 
@@ -969,7 +965,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_operation_empty_file() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap();
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("append_empty");
         let repository = SqliteSessionRepository;
 

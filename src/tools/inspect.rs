@@ -1056,7 +1056,9 @@ fn main() {}
     }
     #[tokio::test]
     async fn test_inspect_templates_all_languages() {
-        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
+        let _lock = crate::tools::TEST_DB_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("test_inspect_templates_all_languages");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -1215,7 +1217,9 @@ fn main() {}
 
     #[tokio::test]
     async fn test_inspect_nix_custom_query() {
-        let _lock = crate::tools::TEST_DB_LOCK.lock().unwrap();
+        let _lock = crate::tools::TEST_DB_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         let temp_dir = std::env::temp_dir().join("test_inspect_nix_custom_query");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();

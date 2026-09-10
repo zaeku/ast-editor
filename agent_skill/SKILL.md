@@ -21,9 +21,8 @@ ast-editor inspect src/config.rs --template functions
 ast-editor --help
 ```
 
-A tool is named by any unambiguous prefix, so on the command line the `_lines`
-and `_ast` suffixes can be left off: `view` is `view`, `inspect` is
-`inspect`.
+A tool is named by any unambiguous prefix, so `ins` is `inspect` and `cr` is
+`create`.
 
 The options are the schema: every parameter `ast-editor skill api` lists can be
 passed as `--kebab-case`, and a switch takes `--flag`, `--flag false` or
@@ -81,6 +80,12 @@ is the first thing to check when a file will not parse.
 
 You never need a line number, and never need `grep` first. Three ways in, all
 returning the line IDs `edit` takes.
+
+`view` puts the id on the line it names — `<id>|<line>: <text>` — so nothing
+has to be cross-referenced against a table. A line too long to print in one
+row is broken at a fixed count of characters onto `│:` and `└:` rows; they
+join back to exactly what the file holds, since the break adds and removes
+nothing. `--only-ids` answers with ids and line numbers as JSON instead.
 
 **By file** — `outline` lists what the file declares, which is the first look
 at one you have not read:

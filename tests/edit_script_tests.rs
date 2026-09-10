@@ -42,6 +42,20 @@ fn edit(test: &str, file: &std::path::Path, flags: &[&str], script: &str) -> std
     child.wait_with_output().unwrap()
 }
 
+/// The block a response fences as `json`, which is how a caller reads the
+/// data half of one.
+fn json_block(stdout: &[u8]) -> serde_json::Value {
+    let text = String::from_utf8_lossy(stdout);
+    let body = text
+        .lines()
+        .skip_while(|line| *line != "```json")
+        .skip(1)
+        .take_while(|line| !line.starts_with("```"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::from_str(&body).unwrap_or_else(|err| panic!("{}\n  in: {}", err, text))
+}
+
 /// The ids of a file's lines, in order.
 fn ids(test: &str, file: &std::path::Path) -> Vec<String> {
     let out = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
@@ -52,8 +66,7 @@ fn ids(test: &str, file: &std::path::Path) -> Vec<String> {
         .env("AST_EDITOR_CACHE_DIR", store_for(test))
         .output()
         .unwrap();
-    let meta: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let meta = json_block(&out.stdout);
     meta["ids"]
         .as_array()
         .unwrap()
@@ -194,8 +207,7 @@ fn test_a_dry_run_yields_a_preview_the_json_form_applies() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let preview: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let preview = json_block(&out.stdout);
     assert_eq!(preview["syntax_valid"], true);
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),

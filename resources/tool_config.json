@@ -1,11 +1,9 @@
 {
   "only_ids_wrap_trigger_length": 1000,
-  "view_response_tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",
   "warning_cumulative_limit": "Response truncated: cumulative response size limit (45,000 bytes) was reached.",
   "warning_line_cap": "Output truncated to 800 lines max.",
   "error_no_query_match": "No lines matched query: '{}'",
   "warning_line_limit_exceeded": "Line count limit (800 lines max) exceeded. Output capped at 800 lines.",
-  "status_file_created": "File successfully created and line editing session initialized.",
   "warning_header_hierarchy": "Header hierarchy mismatch at line {}: found H{} after H{} without H{}",
   "warning_malformed_link": "Possible malformed link syntax at line {}: unclosed parenthesis or bracket in link",
   "warning_html_syntax": "HTML syntax warning: AST contains error or missing nodes.\n{}"

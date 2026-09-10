@@ -135,14 +135,7 @@ async fn dump_tree(filepath: &str, parser_manager: &Arc<ParserManager>) -> Resul
         max_depth, root_kind, line_range_end
     );
 
-    let tip = crate::tools::metadata::get_tool_tip("outline");
-    let final_text = if !tip.is_empty() {
-        format!("{}{}\n{}", header, formatted_tree, tip)
-    } else {
-        format!("{}{}", header, formatted_tree)
-    };
-
-    Ok(final_text)
+    Ok(format!("{}{}", header, formatted_tree))
 }
 
 fn format_comrak_node<'a>(

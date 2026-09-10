@@ -61,8 +61,22 @@ carries that line's content hash, so it no longer matches and the batch is
 refused.
 
 The arguments are exactly the tool schema, so anything `ast-editor skill api`
-describes works here unchanged. Output goes to stdout with no wrapper and pipes normally; failures
-go to stderr with a non-zero exit status.
+describes works here unchanged. Failures go to stderr with a non-zero exit
+status.
+
+**A response is a sequence of fenced blocks**, named by what they hold: the
+file's own language for code, `diff` for a diff, `json` for the data. So code
+arrives unescaped and the data is still machine-readable:
+
+````bash
+ast-editor view src/config.rs | awk '/^```json$/{f=1;next} /^```/{f=0} f' | jq .ids
+````
+
+A fence is longer than any run of backticks that starts a line inside it — the
+rule the edit script reads — and no line of the json can begin with one, so a
+json block is always fenced with exactly three and the pattern above is exact.
+A code block holding a markdown file is not: match a run of three or more
+there, or take everything between the first fence and the last.
 
 Tools: `outline`, `inspect`, `view`, `edit`, `create` — file, block, line,
 change, new file.

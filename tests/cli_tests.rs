@@ -24,6 +24,21 @@ fn scratch(name: &str, content: &str) -> std::path::PathBuf {
     path
 }
 
+/// The data half of a response. A caller reads it the way the skill document
+/// says to: the block fenced as `json`, which for a json block is always
+/// exactly three backticks.
+fn json_block(stdout: &[u8]) -> serde_json::Value {
+    let text = String::from_utf8_lossy(stdout);
+    let body = text
+        .lines()
+        .skip_while(|line| *line != "```json")
+        .skip(1)
+        .take_while(|line| !line.starts_with("```"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::from_str(&body).unwrap_or_else(|err| panic!("{}\n  in: {}", err, text))
+}
+
 #[test]
 fn test_help_lists_the_tools() {
     let out = ast_editor("help", &["--help"]);
@@ -70,8 +85,7 @@ fn test_an_edit_reaches_the_file() {
         "{}",
         String::from_utf8_lossy(&ids.stderr)
     );
-    let meta: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&ids.stdout)).unwrap();
+    let meta = json_block(&ids.stdout);
     let target = meta["ids"][1][0].as_str().unwrap().to_string();
 
     let edit = ast_editor(
@@ -181,8 +195,7 @@ fn test_a_relative_path_is_taken_from_the_working_directory() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let meta: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
+    let meta = json_block(&out.stdout);
     assert_eq!(meta["total_lines"], 1);
 }
 
@@ -235,8 +248,7 @@ fn test_the_json_form_a_program_would_send_still_works() {
         "{}",
         String::from_utf8_lossy(&flagged.stderr)
     );
-    let meta: serde_json::Value =
-        serde_json::from_str(&String::from_utf8_lossy(&flagged.stdout)).unwrap();
+    let meta = json_block(&flagged.stdout);
     assert!(
         meta["ids"].is_array(),
         "{}",

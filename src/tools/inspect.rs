@@ -49,12 +49,9 @@ pub struct InspectSummary {
 
 #[derive(Debug, Serialize)]
 pub struct InspectMatch {
-    pub pattern_index: usize,
     pub capture_name: String,
     pub start_line: usize,
-    pub start_column: usize,
     pub end_line: usize,
-    pub end_column: usize,
     /// The line ids `edit` targets, so a match found by structure can be
     /// edited without a second call to locate it by number.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -478,12 +475,9 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                         let start_line = start_position.row + 1;
                         let end_line = end_position.row + 1;
                         matches.push(InspectMatch {
-                            pattern_index: m.pattern_index,
                             capture_name,
                             start_line,
-                            start_column: start_position.column + 1,
                             end_line,
-                            end_column: end_position.column + 1,
                             start_id: line_id_at(&repository, &session_id_opt, start_line),
                             end_id: line_id_at(&repository, &session_id_opt, end_line),
                             text: node_text,
@@ -500,25 +494,6 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
                 ));
             }
         }
-    }
-
-    // Footnote JIT tips recommending edit_lines or view_lines
-    let mut jit_footnote = None;
-    if !matches.is_empty() {
-        let footnote = if args.include_code.unwrap_or(true) {
-            "Tip: You can apply edits to this file using the 'edit' tool with the line IDs shown in the definition block."
-        } else {
-            "Tip: You can view line IDs for this file using the 'view' tool."
-        };
-        jit_footnote = Some(footnote.to_string());
-    }
-
-    let mut final_hint = hint;
-    if let Some(footnote) = jit_footnote {
-        final_hint = match final_hint {
-            Some(h) => Some(format!("{}\n\n{}", h, footnote)),
-            None => Some(footnote),
-        };
     }
 
     // Handle output_file option if specified
@@ -557,7 +532,7 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
         query: query_str.clone(),
         match_count: matches.len(),
         matches,
-        hint: final_hint.clone(),
+        hint: hint.clone(),
     };
 
     let pretty_json = serde_json::to_string_pretty(&result)?;
@@ -591,10 +566,10 @@ pub async fn run_inspect(args: InspectArgs, parser_manager: &Arc<ParserManager>)
             has_syntax_errors: result.has_syntax_errors,
             match_count: result.match_count,
             saved_to_file: path_str.clone(),
-            hint: Some(format!(
-                "The full query result has been saved to the file specified in 'saved_to_file'. You can analyze it using jq, jc, or ripgrep.{}",
-                final_hint.as_ref().map(|h| format!("\n\n{}", h)).unwrap_or_default()
-            )),
+            hint: Some(
+                "The full query result has been saved to the file specified in 'saved_to_file'."
+                    .to_string(),
+            ),
         };
         serde_json::to_string_pretty(&summary)?
     } else {
@@ -653,16 +628,6 @@ pub fn run_markdown_inspect(
     let mut status = "success".to_string();
     let mut hint = None;
 
-    let mut jit_footnote = None;
-    if !matches.is_empty() {
-        let footnote = if args.include_code.unwrap_or(true) {
-            "Tip: You can apply edits to this file using the 'edit' tool with the line IDs shown in the definition block."
-        } else {
-            "Tip: You can view line IDs for this file using the 'view' tool."
-        };
-        jit_footnote = Some(footnote.to_string());
-    }
-
     if let Some(ref template) = args.template {
         match template.as_str() {
             "headings" | "headers" | "codeblocks" | "code_blocks" | "links" | "tables"
@@ -675,14 +640,6 @@ pub fn run_markdown_inspect(
                 ));
             }
         }
-    }
-
-    let mut final_hint = hint;
-    if let Some(footnote) = jit_footnote {
-        final_hint = match final_hint {
-            Some(h) => Some(format!("{}\n\n{}", h, footnote)),
-            None => Some(footnote),
-        };
     }
 
     // Handle output_file option if specified
@@ -721,7 +678,7 @@ pub fn run_markdown_inspect(
         has_syntax_errors: false,
         match_count: matches.len(),
         matches,
-        hint: final_hint.clone(),
+        hint: hint.clone(),
     };
 
     let pretty_json = serde_json::to_string_pretty(&result)?;
@@ -757,10 +714,10 @@ pub fn run_markdown_inspect(
             has_syntax_errors: result.has_syntax_errors,
             match_count: result.match_count,
             saved_to_file: path_str.clone(),
-            hint: Some(format!(
-                "The full query result has been saved to the file specified in 'saved_to_file'. You can analyze it using jq, jc, or ripgrep.{}",
-                final_hint.as_ref().map(|h| format!("\n\n{}", h)).unwrap_or_default()
-            )),
+            hint: Some(
+                "The full query result has been saved to the file specified in 'saved_to_file'."
+                    .to_string(),
+            ),
         };
         serde_json::to_string_pretty(&summary)?
     } else {
@@ -867,12 +824,9 @@ fn collect_markdown_matches<'a>(
         };
 
         matches.push(InspectMatch {
-            pattern_index: 0,
             capture_name: kind.to_string(),
             start_line,
-            start_column,
             end_line,
-            end_column,
             start_id: line_id_at(repository, session_id_opt, start_line),
             end_id: line_id_at(repository, session_id_opt, end_line),
             text: node_text,

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 #[derive(Deserialize)]
 struct ToolMeta {
     description: String,
-    tip: Option<String>,
 }
 
 static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
@@ -16,12 +15,10 @@ static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
 #[derive(Deserialize)]
 pub struct ToolConfig {
     pub only_ids_wrap_trigger_length: usize,
-    pub view_response_tip: String,
     pub warning_cumulative_limit: String,
     pub warning_line_cap: String,
     pub error_no_query_match: String,
     pub warning_line_limit_exceeded: String,
-    pub status_file_created: String,
     pub warning_header_hierarchy: String,
     pub warning_malformed_link: String,
     pub warning_html_syntax: String,
@@ -43,13 +40,6 @@ pub fn get_tool_description(name: &str) -> String {
         .unwrap_or_default()
 }
 
-pub fn get_tool_tip(name: &str) -> String {
-    METADATA
-        .get(name)
-        .and_then(|meta| meta.tip.clone())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,15 +52,12 @@ mod tests {
 
         let edit_desc = get_tool_description("edit");
         assert!(edit_desc.contains("Apply edits"));
-
-        let outline_tip = get_tool_tip("outline");
-        assert!(outline_tip.contains("Tip:"));
     }
 
     #[test]
     fn test_config_retrieval() {
         let config = get_config();
         assert_eq!(config.only_ids_wrap_trigger_length, 1000);
-        assert!(config.view_response_tip.contains("edit"));
+        assert!(config.warning_line_cap.contains("800"));
     }
 }

@@ -165,7 +165,10 @@ async fn test_view_lines_lazy_hashing() {
     let line0 = lines[0].as_array().unwrap();
     assert!(line0[0].as_str().unwrap().starts_with("1#"));
     assert_eq!(line0[2].as_str().unwrap(), "fn main() {");
-    assert!(val["tip"].as_str().unwrap().contains("edit"));
+    assert!(
+        val["tip"].is_null(),
+        "a response does not re-teach the tool"
+    );
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
     assert_eq!(val["showing_start"].as_u64().unwrap(), 1);
     assert_eq!(val["showing_end"].as_u64().unwrap(), 3);

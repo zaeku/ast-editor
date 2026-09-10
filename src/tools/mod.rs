@@ -13,6 +13,25 @@ use std::sync::Arc;
 
 use crate::parser::ParserManager;
 
+/// One block of a response, fenced and named by what it holds, so a reader —
+/// or an `awk` one-liner — can tell the code from the data without knowing
+/// which tool answered.
+///
+/// The fence is longer than any run of backticks that *starts a line* inside
+/// it, the same rule the edit script reads, and only those can be mistaken
+/// for a fence. Bounding it that way is what keeps the length predictable: no
+/// line of pretty-printed JSON can begin with a backtick, so a `json` block
+/// is always fenced with exactly three and `^```json$` matches it exactly.
+pub fn fenced(language: &str, body: &str) -> String {
+    let longest = body
+        .lines()
+        .map(|line| line.len() - line.trim_start_matches('`').len())
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(std::cmp::max(3, longest + 1));
+    format!("{}{}\n{}\n{}", fence, language, body, fence)
+}
+
 pub struct ToolDispatcher;
 
 impl ToolDispatcher {
@@ -236,11 +255,16 @@ impl ToolDispatcher {
         match name {
             "inspect" => {
                 let args = serde_json::from_value(arguments)?;
-                inspect::run_inspect(args, parser_manager).await
+                Ok(fenced(
+                    "json",
+                    &inspect::run_inspect(args, parser_manager).await?,
+                ))
             }
             "outline" => {
-                let args = serde_json::from_value(arguments)?;
-                outline::run_outline(args, parser_manager).await
+                let args: outline::OutlineArgs = serde_json::from_value(arguments)?;
+                let sexp = args.sexp.unwrap_or(false);
+                let text = outline::run_outline(args, parser_manager).await?;
+                Ok(fenced(if sexp { "text" } else { "json" }, &text))
             }
             "view" => {
                 let filepath = arguments
@@ -299,9 +323,9 @@ impl ToolDispatcher {
                         "sh" => "bash",
                         _ => "text",
                     };
-                    blocks.push(format!("```{}\n{}\n```", lang, code));
+                    blocks.push(fenced(lang, &code));
                 }
-                blocks.push(res.metadata_json);
+                blocks.push(fenced("json", &res.metadata_json));
                 Ok(blocks.join("\n"))
             }
             "edit" => {
@@ -347,7 +371,7 @@ impl ToolDispatcher {
                         .await?
                     }
                 };
-                Ok(text)
+                Ok(fenced("json", &text))
             }
             "create" => {
                 let filepath = arguments
@@ -361,7 +385,7 @@ impl ToolDispatcher {
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
                 let repository = session_db::SqliteSessionRepository;
                 let text = view::create_lines(&repository, filepath, content, return_ids)?;
-                Ok(text)
+                Ok(fenced("json", &text))
             }
             _ => bail!("Unknown tool: {}", name),
         }
@@ -369,3 +393,22 @@ impl ToolDispatcher {
 }
 
 pub static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+mod tests {
+    use super::fenced;
+
+    #[test]
+    fn test_a_fence_outgrows_the_backticks_a_line_starts_with() {
+        assert_eq!(fenced("json", "{}"), "```json\n{}\n```");
+
+        // A json block is always three: no line of pretty-printed json can
+        // begin with a backtick, so `^```json$` is an exact match for one.
+        assert!(fenced("json", "{\n  \"tip\": \"write ``` to fence\"\n}").starts_with("```json\n"));
+
+        // A markdown file read raw can, and then the fence has to be longer.
+        let wrapped = fenced("markdown", "text\n```rust\nfn a() {}\n```");
+        assert!(wrapped.starts_with("````markdown\n"), "{}", wrapped);
+        assert!(wrapped.ends_with("\n````"), "{}", wrapped);
+    }
+}

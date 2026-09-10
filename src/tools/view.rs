@@ -235,10 +235,6 @@ pub fn view_lines(
         "  \"showing_start\": {}",
         actual_start.unwrap_or(1)
     ));
-    parts.push(format!(
-        "  \"tip\": {}",
-        serde_json::to_string(&config.view_response_tip)?
-    ));
     parts.push(format!("  \"total_bytes\": {}", total_bytes));
     parts.push(format!("  \"total_lines\": {}", total_lines));
 
@@ -319,14 +315,7 @@ pub fn create_lines(
                 warning_parts.push(cap_msg.as_str());
             }
 
-            let mut message = config.status_file_created.clone();
-            if !warning_parts.is_empty() {
-                message = format!(
-                    "{} Truncation details: {}",
-                    message,
-                    warning_parts.join("; ")
-                );
-            }
+            let message = warning_parts.join("; ");
 
             let output = if return_ids_bool {
                 let ids: Vec<String> = items_opt
@@ -349,16 +338,16 @@ pub fn create_lines(
                 );
                 let indented_ids = formatted_ids.replace("\n", "\n  ");
                 format!(
-                    "{{\n  \"ids\": {},\n  \"message\": {},\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
+                    "{{\n  \"ids\": {},{}\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
                     indented_ids,
-                    serde_json::to_string(&message)?,
+                    warning_field(&message)?,
                     total_bytes,
                     total_lines
                 )
             } else {
                 format!(
-                    "{{\n  \"message\": {},\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
-                    serde_json::to_string(&message)?,
+                    "{{{}\n  \"status\": \"success\",\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
+                    warning_field(&message)?,
                     total_bytes,
                     total_lines
                 )
@@ -370,6 +359,18 @@ pub fn create_lines(
             Err(err)
         }
     }
+}
+
+/// A response carries a message when there is something to say about it —
+/// what a call did on its way to succeeding is not news.
+fn warning_field(message: &str) -> Result<String> {
+    if message.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!(
+        "\n  \"message\": {},",
+        serde_json::to_string(message)?
+    ))
 }
 
 #[cfg(test)]
@@ -464,9 +465,9 @@ mod tests {
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");
-        assert_eq!(
-            val["message"],
-            "File successfully created and line editing session initialized."
+        assert!(
+            val["message"].is_null(),
+            "nothing was wrong, so nothing is said"
         );
         assert!(val["columns"].is_null());
         assert!(val["lines"].is_null());
@@ -504,9 +505,9 @@ mod tests {
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
         assert_eq!(val["status"], "success");
-        assert_eq!(
-            val["message"],
-            "File successfully created and line editing session initialized."
+        assert!(
+            val["message"].is_null(),
+            "nothing was wrong, so nothing is said"
         );
         assert!(val["ids"].is_null());
         assert_eq!(val["total_lines"].as_u64().unwrap(), 3);

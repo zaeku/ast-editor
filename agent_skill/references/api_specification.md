@@ -48,7 +48,6 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ##### Output
 ```json
 {
-  "message": "File successfully created and line editing session initialized.",
   "status": "success",
   "total_bytes": 30,
   "total_lines": 3
@@ -71,7 +70,6 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
   "ids": [
     "1#77cf", "2#bcb4", "3#c2b7"
   ],
-  "message": "File successfully created and line editing session initialized.",
   "status": "success",
   "total_bytes": 30,
   "total_lines": 3
@@ -149,7 +147,6 @@ Retrieves a range of lines for any text file along with their persistent unique 
   "enclosing_contexts": [],
   "showing_end": 3,
   "showing_start": 1,
-  "tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",
   "total_bytes": 30,
   "total_lines": 3
 }
@@ -173,7 +170,6 @@ Retrieves a range of lines for any text file along with their persistent unique 
   "ids": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
   "showing_end": 3,
   "showing_start": 1,
-  "tip": "Edit these lines by calling 'edit' with the line IDs (e.g. 1a#f8c9) shown above.",
   "total_bytes": 30,
   "total_lines": 3
 }

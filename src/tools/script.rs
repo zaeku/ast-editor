@@ -96,7 +96,11 @@ fn directive_to_edit(
 ) -> Result<LineEdit> {
     let op_name = *words.first().unwrap_or(&"");
     let args = &words[1.min(words.len())..];
-    let content = payload.as_ref().map(|body| body.join("\n"));
+    // Line-terminated, so that a payload of no lines and a payload of one empty
+    // line do not arrive as the same string (D-01M280Y0JPPWBG).
+    let content = payload
+        .as_ref()
+        .map(|body| body.iter().map(|line| format!("{line}\n")).collect());
 
     let takes_payload = matches!(
         op_name,

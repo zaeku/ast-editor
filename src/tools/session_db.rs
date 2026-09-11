@@ -260,20 +260,17 @@ pub struct LineBuffer {
     next_seq: i64,
 }
 
-/// Split an op's `content` field into the lines it should insert, matching the
-/// behaviour edits have always had: a single trailing newline is dropped, and
-/// empty content still inserts one empty line.
+/// The lines an op's `content` field carries. Content is line-terminated text
+/// (D-01M280Y0JPPWBG): empty content is no lines at all, "\n" is one empty
+/// line, and a trailing newline terminates the last line rather than starting
+/// another.
 fn split_insert_content(content: &str) -> Vec<String> {
-    let mut parts: Vec<&str> = if content.is_empty() {
-        vec![""]
-    } else {
-        content.split('\n').collect()
-    };
+    if content.is_empty() {
+        return Vec::new();
+    }
+    let mut parts: Vec<&str> = content.split('\n').collect();
     if parts.last() == Some(&"") {
         parts.pop();
-    }
-    if parts.is_empty() {
-        parts.push("");
     }
     parts
         .iter()
@@ -421,8 +418,14 @@ impl LineBuffer {
                         .as_ref()
                         .context("Missing content for replace op")?;
                     let idx = self.position_of(target_id, "Target", "target_id")?;
-                    self.lines[idx].content = strip_line_ending(content);
-                    modified.push(self.id_at(idx));
+                    // No lines is no lines: replacing a line with nothing takes
+                    // it out, the way replace_range takes out a span.
+                    if content.is_empty() {
+                        self.lines.remove(idx);
+                    } else {
+                        self.lines[idx].content = strip_line_ending(content);
+                        modified.push(self.id_at(idx));
+                    }
                 }
 
                 EditOp::ReplaceSubstring => {

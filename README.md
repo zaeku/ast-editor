@@ -300,7 +300,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
       "items": {
         "properties": {
           "content": {
-            "description": "The new content to insert or replace with. Omitted/ignored for delete, move.",
+            "description": "The new content to insert or replace with, as line-terminated text: \"\" is no lines at all, \"\\n\" is one empty line, and a trailing newline ends the last line rather than starting another. Omitted/ignored for delete, move.",
             "type": "string"
           },
           "dest_target_id": {

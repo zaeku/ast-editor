@@ -259,3 +259,38 @@ fn test_a_batch_that_fails_validation_writes_none_of_itself() {
         "part of the batch was written"
     );
 }
+
+/// A payload is the lines it has: none writes nothing, one empty line writes
+/// one empty line. The two used to arrive at the engine as the same string.
+#[test]
+fn an_empty_payload_writes_nothing() {
+    let file = scratch("emptypayload", "subject.txt", "one\ntwo\nthree\n");
+    let held = ids("emptypayload", &file);
+    let removed = edit(
+        "emptypayload",
+        &file,
+        &[],
+        &format!("replace_range {} {} ```\n```\n", held[0], held[1]),
+    );
+    assert!(
+        removed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "three\n");
+
+    let blank = scratch("blankpayload", "subject.txt", "one\ntwo\nthree\n");
+    let held = ids("blankpayload", &blank);
+    let kept = edit(
+        "blankpayload",
+        &blank,
+        &[],
+        &format!("replace_range {} {} ```\n\n```\n", held[0], held[1]),
+    );
+    assert!(
+        kept.status.success(),
+        "{}",
+        String::from_utf8_lossy(&kept.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&blank).unwrap(), "\nthree\n");
+}

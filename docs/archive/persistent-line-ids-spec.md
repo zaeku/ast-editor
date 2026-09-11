@@ -16,8 +16,8 @@ Split out of [the original design](../archive/2026-07-12-persistent-line-ids-and
 Git-checkpoint compaction, semantic-path targeting, the entity layer, and the
 content-addressed storage rewrite are out of scope: what might still become
 work is in [the backlog](../backlog.md), and what was reasoned out of existence
-is in [discarded](../discarded.md). Do not start this before
-[dry-run preview](dry-run-preview-spec.md), which ships on the current model.
+is in [discarded](../discarded.md). Dry-run preview was sequenced first and is
+delivered; it is `D-01M27KKNNRRZ96` in the decision layer.
 
 ## 1. Objectives
 

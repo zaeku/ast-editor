@@ -273,9 +273,10 @@ nothing once no agent is still holding an ID for that file.
 An invariant adopted as a decision is stated there and not here, so that the
 two cannot drift; this list keeps its numbering and names the id.
 
-1. **ID durability**: a `line_id` never changes for the life of the file's
-   entry, across restarts, external edits, and moves.
-2. **No reuse**: a retired `line_id` is never reassigned while the entry lives.
+1. **ID durability**: held as `D-01M27KBH6NNXZJ`, with a fence, since
+   2026-09-11.
+2. **No reuse**: held as `D-01M27KBH6NNXZJ`, same fence. The two are one
+   decision there: non-reuse is what makes durability worth anything.
 3. **Order/identity independence**: reordering changes only `sort_order`;
    renumbering it never changes a `sequence_id`.
 4. **Reconciliation soundness**: held as `D-01M27K2D7Q5BZ5`, with a fence,

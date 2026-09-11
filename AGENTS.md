@@ -84,9 +84,9 @@ lets a fence read whatever the code layer exposes to anyone else, and ast-editor
 exposes two things: the `ast-editor` command on `PATH` — its subcommands, its
 output, its exit codes, and the files it rewrites — and the documents it
 publishes, which are `README.md`, `agent_skill/SKILL.md`, this file, and the
-strings under `resources/` that the binary prints back to a caller. `docs/` is
-history rather than a surface: an archived spec records what was decided on its
-own date, and a rule about what is true now does not live there. What
+strings under `resources/` that the binary prints back to a caller. There is no
+`docs/` any more: every rule it held names a decision, and the narrative around
+them is in the history of the changes that removed it. What
 §5 forbids is implementation internals: `src/`, `tests/`, a Cargo target, a
 `just` recipe. A rule about what this project's documents say is reachable.
 
@@ -132,8 +132,10 @@ nobody has committed to, and unblocking one is the act of saying its condition
 is met. There is no second list of ideas anywhere else; there was one, in
 `docs/`, and it went stale in the way a hand-kept list does.
 
-`docs/discarded.md` is the other half: what was reasoned out of existence, so
-that reading the board means reading only what might still become work.
+An idea refused outright is not a card at all. It goes to `decisions/` as a
+proposal and is rejected there in the next change, which leaves a tripwire
+watching for the code drifting into it and a document recoverable by id — see
+`D-01M2828G9S60M9`, the versioned content store this tool nearly became.
 
 **Nothing enforces any of this.** No fence reaches the board — a fence tests the
 code layer as a black box, and the board is neither the code layer nor

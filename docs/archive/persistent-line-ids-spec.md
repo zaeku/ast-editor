@@ -200,11 +200,9 @@ format is unchanged, so no agent-facing contract changes.
 
 ### 5.2 No tombstones
 
-The original design retained deleted rows as tombstones. That was required only
-to restore the ID map live at an older commit, a goal since dropped.
-Non-reuse is guaranteed by the monotonic counter on the file row alone, so a
-deleted line's row is deleted outright and the store tracks live lines only.
-This removes the growth that motivated the compaction phase.
+Held as `D-01M27W003J69KH`, with a fence, since 2026-09-11: the store tracks
+live lines only, and non-reuse rests on the counter rather than on retained
+rows.
 
 ### 5.3 Ordering
 

@@ -35,23 +35,16 @@ Section numbers refer to [the archived design](archive/2026-07-12-persistent-lin
 
 ## The goal was dropped
 
-Dropping the ability to reconstruct an older state is what let tombstones and
-the compaction phase go with it, and it is why the store stays bounded without
-a git dependency. These return together, or not at all.
+Held as `D-01M27W003J69KH` in the decision layer since 2026-09-11, with a
+fence: the store holds only the present, and why the three designs below come
+back together or not at all is stated there rather than here.
 
 - **Git-checkpoint rewind** (§7) — per-SHA id-map snapshots, so `git reset` /
-  `git checkout` restores the ids that were live at that commit. Reviving it
-  means reintroducing tombstones and recording enough content to rebuild an old
-  state, so price it as reversing §3 and §5.2 of the active spec rather than
-  adding to them. A checkout today resets that file's ids and loses no data.
-
+  `git checkout` restores the ids that were live at that commit.
 - **Blame backfill from git-held history** (§5.0) — lazily cache id-maps for
-  commit SHAs the tool never witnessed, improving blame fidelity. Blame is not
-  a thing this tool offers, and git already answers the question.
-
+  commit SHAs the tool never witnessed, improving blame fidelity.
 - **Merge handling** (§16.4) — accept re-anchoring over identity-merge, with
-  line-level blame lossy across a merge. Only meaningful once the tool holds
-  versions, which it does not.
+  line-level blame lossy across a merge.
 
 ## Belongs in a different project
 

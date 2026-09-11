@@ -286,3 +286,39 @@ fn a_foreign_manifest_dir_does_not_hide_the_grammars() {
         text
     );
 }
+
+/// The first call on a machine may be an edit: an agent holding ids from an
+/// earlier session has no reason to look first. It used to die with
+/// "no such table: sessions", because only the read path created the schema.
+#[test]
+fn the_first_call_may_be_an_edit() {
+    let file = scratch("first_call.txt", "first\nsecond\n");
+    let store = store_for("firstcall");
+    std::fs::remove_dir_all(&store).ok();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["edit", file.to_str().unwrap()])
+        .env("AST_EDITOR_CACHE_DIR", &store)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run ast-editor");
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin.write_all(b"append ```\nthird\n```\n").unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "first\nsecond\nthird\n"
+    );
+}

@@ -44,6 +44,22 @@ pub(crate) fn get_db_connection() -> Result<Connection> {
     conn.execute("PRAGMA temp_store = MEMORY;", [])
         .context("Failed to configure temp_store MEMORY")?;
 
+    // Every call makes what it needs: a caller whose first act is an edit opens
+    // the store the same way a caller who reads first does, rather than finding
+    // tables somebody else was expected to have created.
+    let has_schema = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .context("Failed to look for the store's schema")?
+        .is_some();
+    if !has_schema {
+        create_tables(&conn)?;
+    }
+
     Ok(conn)
 }
 

@@ -11,9 +11,11 @@ pub struct LanguageConfig {
     pub wasm_file: String,
 }
 
-/// Decouples file extension mappings from source code using languages.json.
-/// If file is missing or invalid, throws a descriptive suggestion error.
-fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
+/// If the file is missing or invalid, the error says what the format is.
+/// Every extension the grammar directory names, mapped to the language it
+/// belongs to and the wasm file that parses it. One table, so that the language
+/// a file is read as and the grammar it is read with cannot disagree.
+fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, (String, String)>> {
     let config_path = wasm_dir.join("languages.json");
 
     if !config_path.exists() {
@@ -35,9 +37,9 @@ fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
         )?;
 
     let mut map = HashMap::new();
-    for (_lang, cfg) in parsed {
+    for (lang, cfg) in parsed {
         for ext in cfg.extensions {
-            map.insert(ext, cfg.wasm_file.clone());
+            map.insert(ext, (lang.clone(), cfg.wasm_file.clone()));
         }
     }
 
@@ -45,7 +47,7 @@ fn init_languages_map(wasm_dir: &Path) -> Result<HashMap<String, String>> {
 }
 
 static LANGUAGES_MAP_CACHE: once_cell::sync::Lazy<
-    std::sync::Mutex<HashMap<PathBuf, HashMap<String, String>>>,
+    std::sync::Mutex<HashMap<PathBuf, HashMap<String, (String, String)>>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
 /// The languages the grammar directory actually provides, and whether each
@@ -56,15 +58,7 @@ pub fn describe_languages(wasm_dir: &Path) -> Result<Vec<(String, bool)>> {
         .values()
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
-        .map(|wasm_file| {
-            let name = wasm_file
-                .strip_suffix(".wasm")
-                .unwrap_or(wasm_file)
-                .strip_prefix("tree-sitter-")
-                .unwrap_or(wasm_file)
-                .to_string();
-            (name, wasm_dir.join(wasm_file).is_file())
-        })
+        .map(|(language, wasm_file)| (language.clone(), wasm_dir.join(wasm_file).is_file()))
         .collect();
     described.sort();
     Ok(described)
@@ -72,6 +66,18 @@ pub fn describe_languages(wasm_dir: &Path) -> Result<Vec<(String, bool)>> {
 
 /// Dynamically lookup wasm grammar file name for a given file extension under a custom raw wasm directory.
 pub fn get_wasm_file(wasm_dir: &Path, ext: &str) -> Result<String> {
+    entry_for(wasm_dir, ext)?
+        .map(|(_language, wasm_file)| wasm_file)
+        .with_context(|| format!("Unsupported file extension: {}", ext))
+}
+
+/// The language an extension is read as, from the same table. `None` where the
+/// grammar directory names no such extension.
+pub fn language_for_extension(wasm_dir: &Path, ext: &str) -> Result<Option<String>> {
+    Ok(entry_for(wasm_dir, ext)?.map(|(language, _wasm_file)| language))
+}
+
+fn entry_for(wasm_dir: &Path, ext: &str) -> Result<Option<(String, String)>> {
     let lookup_key = if ext.starts_with('.') {
         ext.to_string()
     } else {
@@ -80,21 +86,13 @@ pub fn get_wasm_file(wasm_dir: &Path, ext: &str) -> Result<String> {
 
     let mut cache = LANGUAGES_MAP_CACHE.lock().unwrap();
     if let Some(map) = cache.get(wasm_dir) {
-        if let Some(wasm_file) = map.get(&lookup_key) {
-            return Ok(wasm_file.clone());
-        } else {
-            bail!("Unsupported file extension: {}", ext);
-        }
+        return Ok(map.get(&lookup_key).cloned());
     }
 
     let map = init_languages_map(wasm_dir)?;
-    let result = if let Some(wasm_file) = map.get(&lookup_key) {
-        Ok(wasm_file.clone())
-    } else {
-        bail!("Unsupported file extension: {}", ext)
-    };
+    let found = map.get(&lookup_key).cloned();
     cache.insert(wasm_dir.to_path_buf(), map);
-    result
+    Ok(found)
 }
 
 /// Clear caching for test isolation (noop after removing cache)

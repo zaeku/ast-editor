@@ -213,29 +213,18 @@ fn outline_of(
     entries
 }
 
-/// The grammar an extension is read with.
-pub(crate) fn language_name(ext: &str) -> Result<&'static str> {
-    Ok(match ext {
-        "py" => "python",
-        "rs" => "rust",
-        "js" | "jsx" => "javascript",
-        "ts" => "typescript",
-        "tsx" => "tsx",
-        "go" => "go",
-        "java" => "java",
-        "c" | "h" => "c",
-        "cpp" | "cc" | "cxx" => "cpp",
-        "html" | "htm" => "html",
-        "json" => "json",
-        "lua" => "lua",
-        "toml" => "toml",
-        "yaml" | "yml" => "yaml",
-        "md" | "markdown" => "markdown",
-        "sh" | "bash" | "zsh" | "ksh" => "bash",
-        "swift" => "swift",
-        "nix" => "nix",
-        _ => bail!("Unsupported extension: {}", ext),
-    })
+/// The language an extension is read as, taken from the same languages.json the
+/// parser reads: a grammar dropped in there reaches the structural tools too,
+/// which is what D-01M27WE1VYAKPP asks for.
+///
+/// Markdown is the exception and is not in that file, because comrak parses it
+/// and no wasm grammar ships for it.
+pub(crate) fn language_name(ext: &str) -> Result<String> {
+    if matches!(ext, "md" | "markdown") {
+        return Ok("markdown".to_string());
+    }
+    crate::config::language_for_extension(&crate::config::get_wasm_dir(), ext)?
+        .with_context(|| format!("Unsupported extension: {}", ext))
 }
 
 #[derive(Debug, Serialize)]
@@ -325,7 +314,7 @@ pub(crate) async fn outline_report(
             &code,
             &repository,
             &session_id_opt,
-            lang_name,
+            &lang_name,
         ),
     };
     Ok(serde_json::to_string_pretty(&report)?)
@@ -401,7 +390,7 @@ pub async fn run_inspect(
     // than as a search that found no matches.
     let query_str = match (&args.query, &args.template) {
         (Some(q), _) => Some(q.clone()),
-        (None, Some(temp)) => template_query(lang_name, temp),
+        (None, Some(temp)) => template_query(&lang_name, temp),
         (None, None) => None,
     };
 

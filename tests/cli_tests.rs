@@ -360,3 +360,45 @@ fn a_query_that_does_not_compile_is_an_error() {
         String::from_utf8_lossy(&fine.stderr)
     );
 }
+
+/// Nix ships a grammar and was never syntax-checked: a hand-written list of
+/// what could be validated had been left one language behind the configuration
+/// the parser reads (D-01M27WE1VYAKPP).
+#[test]
+fn every_shipped_language_is_syntax_checked() {
+    let file = scratch("checked.nix", "{\n  a = 1;\n}\n");
+    let listing = ast_editor("nixchecked", &["view", file.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&listing.stdout);
+    let target = text
+        .lines()
+        .filter_map(|line| line.split('|').next())
+        .map(str::trim)
+        .filter(|id| id.contains('#'))
+        .nth(1)
+        .expect("no second line id")
+        .to_string();
+
+    let before = std::fs::read_to_string(&file).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["edit", file.to_str().unwrap(), "--strict"])
+        .env("AST_EDITOR_CACHE_DIR", store_for("nixchecked"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run ast-editor");
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(format!("replace {} ```\n  a = ((( ;\n```\n", target).as_bytes())
+            .unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+
+    assert!(
+        !out.status.success(),
+        "wrote syntax the nix grammar rejects under --strict"
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+}

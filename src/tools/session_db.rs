@@ -1134,40 +1134,23 @@ fn compute_sha256(path: &str) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// Whether a file's syntax can be checked at all: the grammar directory names
+/// its extension, or it is markdown, which comrak parses without one. Derived
+/// rather than listed, so that dropping a grammar in reaches the check too
+/// (D-01M27WE1VYAKPP).
 pub fn check_language_supported(path: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+
+    if matches!(ext.as_str(), "md" | "markdown") {
+        return true;
+    }
     matches!(
-        ext.as_str(),
-        "py" | "js"
-            | "jsx"
-            | "ts"
-            | "tsx"
-            | "go"
-            | "rs"
-            | "java"
-            | "cpp"
-            | "cc"
-            | "cxx"
-            | "c"
-            | "h"
-            | "lua"
-            | "html"
-            | "htm"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "toml"
-            | "swift"
-            | "md"
-            | "markdown"
-            | "sh"
-            | "bash"
-            | "zsh"
-            | "ksh"
+        crate::config::language_for_extension(&crate::config::get_wasm_dir(), &ext),
+        Ok(Some(_))
     )
 }
 

@@ -24,8 +24,8 @@ for a `python3 - <<'PY'` heredoc instead.
 
 This format is a **transport change only**. It introduces no operation, no
 argument and no concept that the JSON schema does not already have; it is a
-second way to say the same thing. The JSON form stays, and remains what MCP
-speaks and what a program should generate.
+second way to say the same thing. The JSON form stays, and remains what a
+program should generate.
 
 ### Non-Goals
 

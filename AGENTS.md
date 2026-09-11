@@ -7,8 +7,8 @@ product — read `README.md` for that, and read it first if you have not.
 **Terms.** *Line id* means the `n#hash` pair a tool prints beside a line: a
 sequence number and a hash of that line's content. *Session* means the cached
 database under the user's cache directory that maps a file's lines to their ids.
-*Grammar* means a tree-sitter `.wasm` compiled on demand into a `.cwasm` and
-cached outside this repository. *Script* means the edit-directive format
+*Grammar* means a tree-sitter `.wasm` the runtime compiles in process on first
+use and caches outside this repository. *Script* means the edit-directive format
 `ast-editor edit` reads from stdin. *Tool* means one of the five the binary
 serves: `inspect`, `outline`, `view`, `edit`, `create`.
 

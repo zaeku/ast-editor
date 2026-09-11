@@ -15,5 +15,6 @@
   "warning_no_grammar": "No grammar for this file type, so an edit to it is not syntax-checked. Line ids, viewing and editing work as they do anywhere else.",
   "help_footer": "Pass the whole argument object instead with --json '{...}'. `ast-editor skill api` lists every tool's parameters.",
   "error_strict_refused": "Nothing was written. If you judge the parser wrong about this code, apply the batch it kept: ast-editor edit {} --apply {}",
-  "error_strict_unevaluable": "The syntax check could not run: {}. Nothing was written. The batch is kept: ast-editor edit {} --apply {}"
+  "error_strict_unevaluable": "The syntax check could not run: {}. Nothing was written. The batch is kept: ast-editor edit {} --apply {}",
+  "message_not_checked": "No grammar covers this file type, so the result was written without a syntax check."
 }

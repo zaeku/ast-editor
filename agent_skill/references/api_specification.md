@@ -301,7 +301,9 @@ Applies a transactional batch of operations to lines using their unique IDs.
 {
   "modified_ids": [
     "4#b7a3", "2#9639", "4#b7a3"
-  ]
+  ],
+  "syntax_valid": null,
+  "message": "No grammar covers this file type, so the result was written without a syntax check."
 }
 ```
 
@@ -360,8 +362,9 @@ the diff and syntax result no longer describe the outcome, so preview again.
 ```
 ```json
 {
+  "message": "No grammar covers this file type, so the result was written without a syntax check.",
   "preview_id": "p1f",
-  "syntax_valid": true
+  "syntax_valid": null
 }
 ```
 ```

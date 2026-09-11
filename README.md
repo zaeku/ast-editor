@@ -406,7 +406,9 @@ Applies a transactional batch of operations to lines using their unique IDs.
 {
   "modified_ids": [
     "4#b7a3", "2#9639", "4#b7a3"
-  ]
+  ],
+  "syntax_valid": null,
+  "message": "No grammar covers this file type, so the result was written without a syntax check."
 }
 ```
 

@@ -462,3 +462,60 @@ fn the_first_thirty_lines_of_help_stand_alone() {
         );
     }
 }
+
+/// Silence used to mean two things: the file parsed, or nothing could read it.
+/// An edit to a file no grammar covers says so; one that parsed stays silent.
+#[test]
+fn an_unchecked_edit_says_it_was_not_checked() {
+    let prose = scratch("unchecked.txt", "one\ntwo\n");
+    let said = edit_first_line("unchecked", &prose, "ONE");
+    assert!(
+        said.contains("\"syntax_valid\": null") && said.contains("without a syntax check"),
+        "an edit nothing could check reported nothing about it: {said}"
+    );
+
+    let code = scratch("checked.rs", "fn a() {}\nfn b() {}\n");
+    let said = edit_first_line("checked", &code, "fn renamed() {}");
+    assert!(
+        !said.contains("syntax_valid") && !said.contains("message"),
+        "an edit that parsed said more than its ids: {said}"
+    );
+}
+
+/// Replace a file's first line through the script form, returning the response.
+fn edit_first_line(test: &str, file: &std::path::Path, replacement: &str) -> String {
+    let listing = ast_editor(test, &["view", file.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&listing.stdout);
+    let target = text
+        .lines()
+        .filter_map(|line| line.split('|').next())
+        .map(str::trim)
+        .find(|id| id.contains('#'))
+        .expect("no line id")
+        .to_string();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["edit", file.to_str().unwrap()])
+        .env("AST_EDITOR_CACHE_DIR", store_for(test))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run ast-editor");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(format!("replace {target} ```\n{replacement}\n```\n").as_bytes())
+            .unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).to_string()
+}

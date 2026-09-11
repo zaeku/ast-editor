@@ -119,6 +119,10 @@ fn lint_markdown(content: &str) -> Vec<String> {
 
 enum SyntaxValidationResult {
     Success,
+    /// Nothing checked it: no grammar covers this file type. Distinct from
+    /// Success, because a response that cannot tell them apart says the same
+    /// thing about a file that parsed and a file nobody read (card #1).
+    NotChecked,
     Warnings(Vec<String>),
     SyntaxErrors {
         errors: Vec<String>,
@@ -208,7 +212,7 @@ async fn validate_syntax(
     }
 
     if !check_language_supported(filepath) {
-        return SyntaxValidationResult::Success;
+        return SyntaxValidationResult::NotChecked;
     }
 
     let (tree, _language) = match parser_manager.parse_code(&ext, content).await {
@@ -323,6 +327,11 @@ pub async fn edit_lines_dry_run(
             "syntax_valid": true,
             "preview_id": repository.create_preview(filepath, &edits)?,
         }),
+        SyntaxValidationResult::NotChecked => serde_json::json!({
+            "syntax_valid": serde_json::Value::Null,
+            "message": crate::tools::metadata::get_config().message_not_checked,
+            "preview_id": repository.create_preview(filepath, &edits)?,
+        }),
         SyntaxValidationResult::Warnings(warnings) => serde_json::json!({
             "syntax_valid": true,
             "warnings": warnings,
@@ -404,8 +413,13 @@ pub async fn edit_lines_with_validation(
     // Validate syntax
     let validation = validate_syntax(filepath, &final_content, parser_manager).await;
 
+    let mut checked = true;
     let warnings = match validation {
         SyntaxValidationResult::Success => None,
+        SyntaxValidationResult::NotChecked => {
+            checked = false;
+            None
+        }
         SyntaxValidationResult::Warnings(warns) => Some(warns),
         SyntaxValidationResult::SyntaxErrors {
             errors,
@@ -546,16 +560,20 @@ pub async fn edit_lines_with_validation(
         }
     }
 
-    let output = if let Some(warns) = warnings {
-        let warns_json = serde_json::to_string(&warns)?;
-        format!(
-            "{{\n  \"modified_ids\": {},\n  \"warnings\": {}\n}}",
-            indented_ids, warns_json
-        )
-    } else {
-        format!("{{\n  \"modified_ids\": {}\n}}", indented_ids)
-    };
-    Ok(output)
+    // A field appears when it has something to say: an edit that parsed says
+    // nothing, and one nothing could read says so (card #1).
+    let mut fields = vec![format!("\"modified_ids\": {}", indented_ids)];
+    if let Some(warns) = warnings {
+        fields.push(format!("\"warnings\": {}", serde_json::to_string(&warns)?));
+    }
+    if !checked {
+        fields.push("\"syntax_valid\": null".to_string());
+        fields.push(format!(
+            "\"message\": {}",
+            serde_json::to_string(&crate::tools::metadata::get_config().message_not_checked)?
+        ));
+    }
+    Ok(format!("{{\n  {}\n}}", fields.join(",\n  ")))
 }
 
 pub async fn edit_lines(
@@ -1460,20 +1478,22 @@ fn main() {
         let env = TestEnvironment::new("response_formatting");
         let repository = SqliteSessionRepository;
 
-        let file_path = env.dir.join("test.txt");
-        let file_content = "line 1\nline 2\nline 3";
+        // A file a grammar covers: an edit that parses says nothing but its
+        // ids, which is what this checks. The other case is its own test.
+        let file_path = env.dir.join("test.rs");
+        let file_content = "fn a() {}\nfn b() {}\nfn c() {}";
         fs::write(&file_path, file_content)?;
 
         let filepath_str = file_path.to_str().unwrap();
         let _init_res = init_edit_session(filepath_str, false)?;
 
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let line_1_id = find_line_id(&lines_view, "line 1");
+        let line_1_id = find_line_id(&lines_view, "fn a() {}");
 
         let edits = vec![LineEdit {
             op: EditOp::Replace,
             target_id: Some(line_1_id.clone()),
-            content: Some("new line 1".to_string()),
+            content: Some("fn renamed() {}".to_string()),
             ..Default::default()
         }];
 

@@ -110,8 +110,15 @@ pub fn get_wasm_dir() -> PathBuf {
     if let Some(dir) = env::var_os("AST_EDITOR_WASM_DIR") {
         return PathBuf::from(dir);
     }
+    // Cargo sets this for everything it runs, so an installed ast-editor called
+    // from another crate's `cargo test` would be sent looking for grammars in
+    // whichever crate cargo is building. It only counts when it is this
+    // project's own tree.
     if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
-        return PathBuf::from(manifest_dir).join("resources").join("wasm");
+        let in_manifest = PathBuf::from(manifest_dir).join("resources").join("wasm");
+        if in_manifest.join("languages.json").is_file() {
+            return in_manifest;
+        }
     }
     if let Ok(exe_path) = env::current_exe() {
         if let Some(prefix) = exe_path.parent().and_then(|p| p.parent()) {
@@ -123,7 +130,10 @@ pub fn get_wasm_dir() -> PathBuf {
                 return installed;
             }
             // A self-contained deployment: grammars beside the binary's parent.
-            return prefix.join("resources").join("wasm");
+            let beside = prefix.join("resources").join("wasm");
+            if beside.is_dir() {
+                return beside;
+            }
         }
     }
     PathBuf::from("./resources/wasm")

@@ -255,3 +255,34 @@ fn test_the_json_form_a_program_would_send_still_works() {
         String::from_utf8_lossy(&flagged.stdout)
     );
 }
+
+/// Cargo sets CARGO_MANIFEST_DIR for everything it runs, so an installed
+/// ast-editor called from another crate's build was sent looking for grammars
+/// in whichever crate cargo was building, and lost every language.
+#[test]
+fn a_foreign_manifest_dir_does_not_hide_the_grammars() {
+    let file = scratch("foreign_manifest.rs", "fn named() {}\n");
+    let elsewhere =
+        std::env::temp_dir().join(format!("ast-editor-not-this-crate-{}", std::process::id()));
+    std::fs::create_dir_all(&elsewhere).unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["outline", file.to_str().unwrap()])
+        .env("AST_EDITOR_CACHE_DIR", store_for("foreignmanifest"))
+        .env("CARGO_MANIFEST_DIR", &elsewhere)
+        .output()
+        .expect("failed to run ast-editor");
+
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("named"),
+        "outlined nothing for a Rust file: {}",
+        text
+    );
+}

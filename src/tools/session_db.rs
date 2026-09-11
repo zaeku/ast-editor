@@ -1449,9 +1449,16 @@ pub fn compute_parent_contexts(filepath: &str, content: &str) -> Vec<Option<Stri
         return contexts;
     }
 
+    // A file no grammar covers has no parent contexts and that is the answer,
+    // not a failure: asking anyway logged an error on every view of a text
+    // file, twice a call, in the stream a caller watches for real ones.
+    if crate::config::grammar_for_extension(&ext).is_none() {
+        return contexts;
+    }
+
     match parse_code_sync(&ext, content) {
         Err(e) => {
-            tracing::error!("parse_code_sync failed: {:?}", e);
+            tracing::debug!("parse_code_sync failed for .{}: {:?}", ext, e);
         }
         Ok(tree) => {
             let mut visit_stack = vec![(tree.root_node(), None)];

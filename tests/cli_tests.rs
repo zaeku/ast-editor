@@ -534,3 +534,18 @@ fn no_tool_offers_an_option_it_will_ignore() {
         );
     }
 }
+
+/// A file no grammar covers has no parent contexts, which is an answer rather
+/// than a failure. Asking anyway logged an error per call, twice, in the
+/// stream a caller watches for real ones.
+#[test]
+fn reading_a_file_without_a_grammar_is_quiet() {
+    let prose = scratch("quiet.txt", "one\ntwo\nthree\n");
+    let out = ast_editor("quiet", &["view", prose.to_str().unwrap()]);
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "",
+        "a successful read of a text file wrote to stderr"
+    );
+}

@@ -83,10 +83,10 @@ standing in; the change that deletes the rule is the mapping.
 lets a fence read whatever the code layer exposes to anyone else, and ast-editor
 exposes two things: the `ast-editor` command on `PATH` — its subcommands, its
 output, its exit codes, and the files it rewrites — and the documents it
-publishes, which are `README.md`, `agent_skill/SKILL.md`, this file, and the
-strings under `resources/` that the binary prints back to a caller. There is no
-`docs/` any more: every rule it held names a decision, and the narrative around
-them is in the history of the changes that removed it. What
+publishes, which are `README.md`, `agent_skill/SKILL.md`, `CHANGELOG.md`, this
+file, and the strings under `resources/` that the binary prints back to a
+caller. There is no `docs/` any more: every rule it held names a decision, and
+the narrative around them is in the history of the changes that removed it. What
 §5 forbids is implementation internals: `src/`, `tests/`, a Cargo target, a
 `just` recipe. A rule about what this project's documents say is reachable.
 

@@ -4,3 +4,5 @@
 *.cwasm
 /scratch/
 /.direnv/
+kanban/
+decisions/

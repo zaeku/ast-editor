@@ -1232,8 +1232,8 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
     .unwrap_err();
     let msg = format!("{}", err);
     assert!(
-        msg.contains("CONCURRENCY_ERROR") || msg.contains("CHECKSUM_ERROR"),
-        "expected a refusal naming the conflict, got: {}",
+        msg.contains("changed") && msg.contains("Read that"),
+        "expected a refusal naming the conflict and the remedy, got: {}",
         msg
     );
     assert_eq!(

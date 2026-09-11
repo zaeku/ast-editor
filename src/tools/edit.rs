@@ -803,7 +803,7 @@ mod tests {
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(
-            err_msg.contains("CHECKSUM_ERROR"),
+            err_msg.contains("changed since you read it"),
             "Expected checksum error, got: {}",
             err_msg
         );

@@ -321,14 +321,21 @@ impl LineBuffer {
                 .lines
                 .iter()
                 .position(|l| l.seq == seq)
-                .with_context(|| format!("Target line not found for target_id={}", target_id))?;
+                .with_context(|| {
+                    crate::tools::metadata::get_config()
+                        .error_target_gone
+                        .replacen("{}", target_id, 1)
+                })?;
             let actual = compute_line_hash(&self.lines[idx].content);
             if actual != hash {
+                // Which rejection this is decides what the caller should do, so
+                // each says it (card #6).
+                let _ = (role, field);
                 bail!(
-                    "CHECKSUM_ERROR: {} line hash mismatch for {}={}. Edit rejected.",
-                    role,
-                    field,
-                    target_id
+                    "{}",
+                    crate::tools::metadata::get_config()
+                        .error_target_changed
+                        .replacen("{}", target_id, 1)
                 );
             }
             Ok(idx)
@@ -1083,8 +1090,10 @@ fn reconcile_index(
     for (seq, hash) in &targeted {
         if !seqs.contains(seq) {
             bail!(
-                "CONCURRENCY_ERROR: Targeted line with hash '{}' has been modified or deleted externally.",
-                hash
+                "{}",
+                crate::tools::metadata::get_config()
+                    .error_target_changed_outside
+                    .replacen("{}", hash, 1)
             );
         }
     }

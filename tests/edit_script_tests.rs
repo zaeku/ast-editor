@@ -115,7 +115,11 @@ fn test_a_line_changed_earlier_in_the_batch_cannot_be_targeted_again() {
     );
     let out = edit("restage", &file, &[], &script);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("CHECKSUM_ERROR"));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("changed since you read it") && said.contains("Read that line again"),
+        "a refusal names what to do next: {said}"
+    );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), body);
 }
 

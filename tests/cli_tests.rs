@@ -549,3 +549,55 @@ fn reading_a_file_without_a_grammar_is_quiet() {
         "a successful read of a text file wrote to stderr"
     );
 }
+
+/// The two rejections mean different things and used to read the same, so a
+/// caller treated both as "my ids are dead" and re-read everything.
+#[test]
+fn a_rejected_id_says_what_to_do_next() {
+    let file = scratch("rejected.txt", "one\ntwo\nthree\n");
+    let listing = ast_editor("rejected", &["view", file.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&listing.stdout);
+    let held: Vec<String> = text
+        .lines()
+        .filter_map(|line| line.split('|').next())
+        .map(|id| id.trim().to_string())
+        .filter(|id| id.contains('#'))
+        .collect();
+
+    let gone = refuse("rejected", &file, "ff#0000");
+    assert!(
+        gone.contains("gone") && gone.contains("nothing to re-read"),
+        "an id that names no line should say so: {gone}"
+    );
+
+    std::fs::write(&file, "one\nCHANGED\nthree\n").unwrap();
+    let changed = refuse("rejected", &file, &held[1]);
+    assert!(
+        changed.contains("changed") && changed.contains("Read that"),
+        "a changed line should say to read it again: {changed}"
+    );
+}
+
+/// Try to replace `target` and return what the refusal said.
+fn refuse(test: &str, file: &std::path::Path, target: &str) -> String {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["edit", file.to_str().unwrap()])
+        .env("AST_EDITOR_CACHE_DIR", store_for(test))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run ast-editor");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(format!("replace {target} ```\nX\n```\n").as_bytes())
+            .unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success(), "the edit was not refused");
+    String::from_utf8_lossy(&out.stderr).to_string()
+}

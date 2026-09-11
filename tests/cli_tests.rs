@@ -436,3 +436,29 @@ fn a_tool_answers_its_own_help() {
         );
     }
 }
+
+/// The help is read by piping it to `head`, which closes the pipe partway
+/// through: that used to panic, and the first thirty lines are budgeted for
+/// exactly that reader.
+#[test]
+fn the_first_thirty_lines_of_help_stand_alone() {
+    let out = ast_editor("helphead", &["--help"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    let head: Vec<&str> = text.lines().take(30).collect();
+    let head = head.join("\n");
+
+    for needed in [
+        "ast-editor <tool>",
+        "outline",
+        "#<hash>",
+        "insert_after",
+        "replace_range",
+        "delete",
+    ] {
+        assert!(
+            head.contains(needed),
+            "the first thirty lines do not carry {needed:?}:\n{head}"
+        );
+    }
+}

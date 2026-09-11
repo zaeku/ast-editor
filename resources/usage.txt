@@ -1,0 +1,53 @@
+ast-editor — line-precise editing over tree-sitter
+
+    ast-editor <tool> <file> [options]  call one tool and print its output
+    ast-editor edit <file> < script     apply an edit script read from stdin
+    ast-editor skill [topic]            the skill document, or a reference
+    ast-editor --version                version, and the grammars compiled in
+    ast-editor --help                   this text
+
+Tools, smallest answer first: outline lists what a file declares, view prints
+lines, inspect searches by query or template, edit changes lines, create makes
+a file.
+
+A line id is <number>#<hash>. The number names the line for as long as it
+lives; the hash guards its content. An edit mints ids for the lines it writes
+and leaves every other id alone:
+
+    before   1#fe05  2#ad78  3#b802  4#9f8f
+                     insert_after 2#ad78
+    after    1#fe05  2#ad78  6#7722  3#b802  4#9f8f
+
+So an id read before an edit still names its line afterwards, and re-reading a
+file after editing it is wasted work. An id whose line changed underneath is
+refused rather than applied to whatever sits there now.
+
+Directives are one per line; a payload is fenced in three or more backticks.
+    with a payload:  replace <id> · replace_range <start> <end>
+                     insert_after <id> · insert_before <id> · append · prepend
+    without one:     delete <id> · move <start> [<end>] before|after <dest>
+
+A response is fenced blocks: what the tool printed, then a ```json block
+carrying the data. Failures go to stderr and exit non-zero, so a response that
+arrived is a response about work that happened.
+
+An edit script carries code with no escaping:
+
+    ast-editor edit src/config.rs <<'EOF'
+    replace_range 3f#a1b2 4c#d3e4 ```
+        let a = 1;
+    ```
+    delete 6b#99aa
+    EOF
+
+Options are the tool's own parameters, so whatever `ast-editor <tool> --help`
+lists can be passed as one. A tool is named by any unambiguous prefix. Paths
+are relative to the working directory:
+
+    ast-editor view src/main.rs --start-line 40 --end-line 80
+    ast-editor inspect src/main.rs --template functions
+    ast-editor edit src/main.rs --apply p1f
+
+A shape no option can carry, such as an array of edits, goes in as JSON:
+
+    ast-editor edit src/main.rs --json '{"edits":[...]}'

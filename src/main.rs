@@ -4,38 +4,26 @@ use ast_editor::tools::ToolDispatcher;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
-const USAGE: &str = "\
-ast-editor — line-precise editing over tree-sitter
+/// What the tool says about itself lives in resources/ (D-01M27G4E6GTCA8), and
+/// the first thirty lines are budgeted for a reader who pipes this to `head`.
+const USAGE: &str = include_str!("../resources/usage.txt");
 
-    ast-editor edit <file> < script  apply an edit script read from stdin
-    ast-editor skill [topic]         the skill document, or one of its references
-    ast-editor <tool> <file> [opts]  call one tool and print its output
-    ast-editor --version             version, and the grammars it can reach
-    ast-editor --help                this text
-
-An edit script carries code with no escaping, one directive per line, each
-block fenced with three or more backticks:
-
-    ast-editor edit src/config.rs <<'EOF'
-    replace_range 3f#a1b2 4c#d3e4 ```
-        let a = 1;
-    ```
-    delete 6b#99aa
-    EOF
-
-Options are the tool's own parameters, so whatever `ast-editor skill api`
-lists can be passed as one. A tool is named by any unambiguous prefix, so the
-`_lines` and `_ast` suffixes can be left off. Paths are relative to the
-working directory:
-
-    ast-editor view src/main.rs --start-line 40 --end-line 80
-    ast-editor inspect src/main.rs --template functions
-    ast-editor edit src/main.rs --apply p1f
-
-A shape no option can carry, such as an array of edits, goes in as JSON:
-
-    ast-editor edit src/main.rs --json '{\"edits\":[...]}'
-";
+/// Write to stdout, treating a closed reader as the end of the work rather than
+/// a failure. An agent reading `--help | head -30` closes the pipe on line 31,
+/// and Rust's `println!` panics on that.
+fn say(text: &str) {
+    use std::io::Write;
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => std::process::exit(0),
+        Err(err) => {
+            eprintln!("failed writing to stdout: {}", err);
+            std::process::exit(1);
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
             init_tracing(tracing::Level::WARN);
             match run_edit(&args[1..]).await {
                 Ok(output) => {
-                    println!("{}", output);
+                    say(&format!("{}\n", output));
                     Ok(())
                 }
                 Err(err) => {
@@ -57,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some("skill") => match ast_editor::skill::document(args.get(1).map(String::as_str)) {
             Ok(text) => {
-                print!("{}", text);
+                say(&text);
                 Ok(())
             }
             Err(err) => {
@@ -66,13 +54,16 @@ async fn main() -> anyhow::Result<()> {
             }
         },
         Some("--version") | Some("-V") | Some("version") => {
-            print!("{}", version_report());
+            say(&version_report());
             Ok(())
         }
         Some("--help") | Some("-h") | Some("help") => {
-            print!("{}", USAGE);
-            println!("\nTools:  {}", tool_names().join(", "));
-            println!("Topics: {}", ast_editor::skill::topics().join(", "));
+            say(USAGE);
+            say(&format!("\nTools:  {}\n", tool_names().join(", ")));
+            say(&format!(
+                "Topics: {}\n",
+                ast_editor::skill::topics().join(", ")
+            ));
             Ok(())
         }
         None => {
@@ -84,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
             init_tracing(tracing::Level::WARN);
             match call_once(tool, &args[1..]).await {
                 Ok(output) => {
-                    println!("{}", output);
+                    say(&format!("{}\n", output));
                     Ok(())
                 }
                 Err(err) => {

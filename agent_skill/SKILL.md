@@ -166,12 +166,23 @@ with ids and line numbers as JSON instead.
 
 ## 🌟 What a Line Id Holds
 
-1. **A line id addresses one line, not a position.** Inserting or deleting
-   lines elsewhere does not move it, so a batch cannot slide out of alignment,
-   and a pattern that repeats cannot send an edit to the wrong line.
+1. **After an edit, do not read the same lines again.** The ids you already
+   hold still address them. An edit mints ids for the lines it writes and
+   leaves every other id alone, so re-reading a file you just edited buys
+   nothing and costs a call:
+
+       before   1#fe05  2#ad78  3#b802  4#9f8f
+                        insert_after 2#ad78
+       after    1#fe05  2#ad78  6#7722  3#b802  4#9f8f
+
+   The number locates the line and the hash guards its content, which is why
+   `3#b802` still names the line it named before, at a line number one
+   further down.
 2. **An id stays valid while its line is unchanged.** It survives edits
    elsewhere in the file, restarts, and reformatting by an external formatter,
-   so an id held from an earlier turn still edits the line it named.
+   so an id held from an earlier turn still edits the line it named. An id
+   whose own line changed underneath is refused, never applied to whatever
+   sits there now.
 3. **`--dry-run` answers with the diff and the syntax result an edit batch
    would produce, and writes nothing.** A batch that validates also mints a
    short `preview_id`. Pass it back with `--apply` and the same file to commit

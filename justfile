@@ -58,9 +58,8 @@ install-bin: build
     @echo 'grammars  {{share_dir}}/wasm'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
-# Only the hub is installed. It reaches its references by naming
-# `ast-editor skill <topic>` rather than a path, so copies of them here would
-# be files nothing points at — and a second place for them to go stale.
+# Only the hub is installed, and what lands there is what the binary prints:
+# D-01M27W3KCKF69G in decisions/, with a fence.
 
 # Install just the skill document.
 install-skill: build

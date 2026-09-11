@@ -44,7 +44,7 @@ Options are the tool's own parameters, so whatever `ast-editor <tool> --help`
 lists can be passed as one. A tool is named by any unambiguous prefix. Paths
 are relative to the working directory:
 
-    ast-editor view src/main.rs --start-line 40 --end-line 80
+    ast-editor view src/main.rs 40,80        the way sed takes a range
     ast-editor inspect src/main.rs --template functions
     ast-editor edit src/main.rs --apply p1f
 

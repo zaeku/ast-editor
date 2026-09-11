@@ -159,7 +159,21 @@ pub fn arguments(tool: &str, args: &[String]) -> Result<Value> {
             continue;
         }
 
+        // A second positional is a line range, the way sed is reached for:
+        // `view f.rs 10,40`, `10`, `10,` or `,40` (card #7). It only means
+        // that where the tool has the lines to take it.
         if positional.is_some() {
+            if let Some((start, end)) = line_range(arg) {
+                if properties.contains_key("start_line") {
+                    if let Some(start) = start {
+                        out.insert("start_line".to_string(), Value::from(start));
+                    }
+                    if let Some(end) = end {
+                        out.insert("end_line".to_string(), Value::from(end));
+                    }
+                    continue;
+                }
+            }
             bail!("'{}' takes one file; also given '{}'.", tool, arg);
         }
         positional = Some(arg.clone());
@@ -174,6 +188,27 @@ pub fn arguments(tool: &str, args: &[String]) -> Result<Value> {
     }
 
     Ok(Value::Object(out))
+}
+
+/// A line range written the way `sed -n '10,40p'` writes one: `10,40`, `10`,
+/// `10,` to the end, `,40` from the start. `None` where the argument is not
+/// one, so a path that happens to follow another path still reads as a path.
+fn line_range(arg: &str) -> Option<(Option<u64>, Option<u64>)> {
+    let number = |text: &str| -> Option<Option<u64>> {
+        if text.is_empty() {
+            Some(None)
+        } else {
+            text.parse::<u64>().ok().filter(|n| *n > 0).map(Some)
+        }
+    };
+
+    match arg.split_once(',') {
+        Some((start, end)) => {
+            let (start, end) = (number(start)?, number(end)?);
+            (start.is_some() || end.is_some()).then_some((start, end))
+        }
+        None => number(arg)?.map(|start| (Some(start), None)),
+    }
 }
 
 /// Coerce a flag's text to what the schema says the property holds.

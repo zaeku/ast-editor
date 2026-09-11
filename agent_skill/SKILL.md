@@ -15,13 +15,15 @@ Run the `ast-editor` command with a tool name, a path, and the tool's own
 parameters as options. Paths are relative to the working directory:
 
 ```bash
-ast-editor view src/config.rs --start-line 40 --end-line 80
+ast-editor view src/config.rs 40,80
 ast-editor inspect src/config.rs --template functions
 ast-editor --help
 ```
 
 A tool is named by any unambiguous prefix, so `ins` is `inspect` and `cr` is
-`create`.
+`create`. A line range can follow the path the way `sed -n '40,80p'` takes one:
+`40,80`, `40` alone, `40,` to the end, `,80` from the start. The
+`--start-line` and `--end-line` options mean the same thing.
 
 The options are the schema. Pass any parameter `ast-editor skill api` lists as
 `--kebab-case`. A boolean option takes `--flag`, `--flag false` or `--no-flag`.

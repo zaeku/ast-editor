@@ -601,3 +601,29 @@ fn refuse(test: &str, file: &std::path::Path, target: &str) -> String {
     assert!(!out.status.success(), "the edit was not refused");
     String::from_utf8_lossy(&out.stderr).to_string()
 }
+
+/// Agents reach for `sed -n '10,40p'`, so a range after the path means the
+/// same thing here. The flags keep working.
+#[test]
+fn a_range_can_follow_the_path() {
+    let body: String = (1..=20).map(|n| format!("line-{n}\n")).collect();
+    let file = scratch("ranged.txt", &body);
+    let path = file.to_str().unwrap();
+
+    for (range, start, end) in [("5,8", 5, 8), ("18", 18, 20), ("18,", 18, 20), (",3", 1, 3)] {
+        let out = ast_editor("ranged", &["view", path, range]);
+        assert!(
+            out.status.success(),
+            "{range}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let data = json_block(&out.stdout);
+        assert_eq!(data["showing_start"].as_u64().unwrap(), start, "{range}");
+        assert_eq!(data["showing_end"].as_u64().unwrap(), end, "{range}");
+    }
+
+    // A second path is still a second path, not a range.
+    let confused = ast_editor("ranged", &["view", path, path]);
+    assert!(!confused.status.success());
+    assert!(String::from_utf8_lossy(&confused.stderr).contains("takes one file"));
+}

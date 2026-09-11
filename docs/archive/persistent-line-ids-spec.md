@@ -283,7 +283,9 @@ two cannot drift; this list keeps its numbering and names the id.
    since 2026-09-11.
 5. **Targeted-conflict safety**: held as `D-01M27JNJJDYSWD` in the decision
    layer, with a fence, since 2026-09-11.
-6. **Cosmetic invariance**: respacing a whole file preserves every `line_id`.
+6. **Cosmetic invariance**: held as `D-01M27KFWV8TDTC`, with a fence, since
+   2026-09-11. Stated there as what it is: the number survives, the printed
+   hash moves with the text, and a re-wrap is not carried.
 7. **Insertion endurance**: 1,000 consecutive insertions between the same pair
    of lines keep a correct order and mint no duplicate IDs.
 8. **Duplicate-line safety**: a file whose lines are not unique reconciles

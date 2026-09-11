@@ -1,5 +1,13 @@
 # Specification: Rust-based tree-sitter-inspector with Lazy Local AOT Compilation
 
+> Superseded in both halves, and kept as the record of how the Rust host was
+> planned and built. The stdio JSON-RPC interface is `D-01M27HCE0CSBZR` and the
+> bundled grammar compiler is `D-01M27HCE8A5YBG`; both were adopted, both were
+> retired, and `decisions/tripwires/` now watches for either returning. The
+> project shape below — a `rust/` subdirectory of a TypeScript package, a binary
+> named `tree-sitter-inspector`, per-target bundles carrying a compiler — went
+> with them.
+
 This document specifies the technical design, architectural flow, and deployment strategy for migrating the `tree-sitter-inspector` MCP server to a Rust-based host utilizing a headless WebAssembly (WASM) runtime with lazy local AOT (Ahead-of-Time) compilation.
 
 ---

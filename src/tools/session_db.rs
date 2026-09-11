@@ -348,6 +348,21 @@ impl LineBuffer {
         }
     }
 
+    /// Each of `ids` with the 1-indexed line it now sits on, in file order.
+    /// An id the buffer no longer holds is dropped: a delete mints nothing and
+    /// leaves nothing to point at.
+    pub fn locate(&self, ids: &[String]) -> Vec<(String, usize)> {
+        let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        self.lines
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, _)| {
+                let id = self.id_at(idx);
+                wanted.contains(id.as_str()).then_some((id, idx + 1))
+            })
+            .collect()
+    }
+
     fn id_at(&self, idx: usize) -> String {
         format!(
             "{:x}#{}",

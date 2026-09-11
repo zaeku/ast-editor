@@ -571,9 +571,10 @@ async fn test_integration_create_lines_flow() {
     assert_eq!(ids.len(), 3);
 
     // 2. Assert that the returned line IDs are correct
-    let id0 = ids[0].as_str().unwrap();
-    let id1 = ids[1].as_str().unwrap();
-    let id2 = ids[2].as_str().unwrap();
+    // Each entry is [id, line] (card #5).
+    let id0 = ids[0][0].as_str().unwrap();
+    let id1 = ids[1][0].as_str().unwrap();
+    let id2 = ids[2][0].as_str().unwrap();
 
     assert!(id0.contains('#'));
     assert!(id1.contains('#'));
@@ -1307,7 +1308,7 @@ async fn test_a_deleted_id_is_never_reissued() {
     .await
     .unwrap();
     let val: serde_json::Value = serde_json::from_str(&res).unwrap();
-    let minted = val["modified_ids"][0].as_str().unwrap();
+    let minted = val["modified_ids"][0][0].as_str().unwrap();
     let minted_seq = i64::from_str_radix(minted.split('#').next().unwrap(), 16).unwrap();
     assert_ne!(minted_seq, retired, "id {} was handed out twice", retired);
 }
@@ -1338,7 +1339,7 @@ async fn test_repeated_insertion_between_the_same_pair() {
         .await
         .unwrap();
         let val: serde_json::Value = serde_json::from_str(&res).unwrap();
-        let minted = val["modified_ids"][0]
+        let minted = val["modified_ids"][0][0]
             .as_str()
             .unwrap()
             .split('#')

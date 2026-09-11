@@ -408,6 +408,9 @@ pub async fn edit_lines_with_validation(
     // Plan the batch without persisting it. Nothing is committed until the
     // content it produces has been accepted, so a rejected edit needs no undo.
     let (buffer, newly_modified_ids) = repository.plan_line_edits(&session_id, &edits)?;
+    // Each id with the line it is now, walked off the planned buffer: an id
+    // alone does not say where its line went (card #5).
+    let newly_modified_ids = buffer.locate(&newly_modified_ids);
     let final_content = buffer.join(line_ending);
 
     // Validate syntax
@@ -687,9 +690,10 @@ mod tests {
         let modified = res["modified_ids"].as_array().unwrap();
         let (seq, _) = parse_line_id(&target_id)?;
         let expected_prefix = format!("{:x}#", seq);
+        // Each entry is [id, line] (card #5).
         assert!(modified
             .iter()
-            .any(|id| id.as_str().unwrap().starts_with(&expected_prefix)));
+            .any(|entry| entry[0].as_str().unwrap().starts_with(&expected_prefix)));
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "fn main() {\n    let a = 42;\n}\n"
@@ -722,7 +726,9 @@ mod tests {
         let lines_view = test_view_lines(&repository, filepath_str, 1, 4, None)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
-        assert!(modified.iter().any(|id| id.as_str().unwrap() == b_id));
+        assert!(modified
+            .iter()
+            .any(|entry| entry[0].as_str().unwrap() == b_id));
 
         // 3. Test delete
         let edits = vec![LineEdit {
@@ -1503,12 +1509,18 @@ fn main() {
         assert!(val["status"].is_null(), "success is the exit code: {}", val);
         let modified_ids = val["modified_ids"].as_array().unwrap();
         assert_eq!(modified_ids.len(), 1);
-        let new_id = modified_ids[0].as_str().unwrap();
+        let new_id = modified_ids[0][0].as_str().unwrap();
+        assert_eq!(
+            modified_ids[0][1].as_u64().unwrap(),
+            1,
+            "the id says which line it is: {}",
+            val
+        );
         let (old_seq, _) = crate::tools::session_db::parse_line_id(&line_1_id)?;
         let (new_seq, _) = crate::tools::session_db::parse_line_id(new_id)?;
         assert_eq!(old_seq, new_seq);
 
-        let expected_json = format!("{{\n  \"modified_ids\": [\n    \"{}\"\n  ]\n}}", new_id);
+        let expected_json = format!("{{\n  \"modified_ids\": [\n    [\"{}\",1]\n  ]\n}}", new_id);
         assert_eq!(result, expected_json);
 
         fs::remove_dir_all(&env.dir)?;

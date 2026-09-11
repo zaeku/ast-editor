@@ -9,9 +9,9 @@
     "description": "Retrieve file lines along with persistent Line IDs. Set only_ids to true to retrieve only IDs and line numbers, excluding text contents."
   },
   "edit": {
-    "description": "Apply edits transactionally to a file. Returns only status and the list of modified Line IDs in a compact flat array."
+    "description": "Apply edits transactionally to a file. Returns each line it changed as [id, line number], so a following edit needs no second read."
   },
   "create": {
-    "description": "Create a new file and initialize its editing session. Returns only metadata and the generated Line IDs in a compact flat array (no file content)."
+    "description": "Create a new file and initialize its editing session. Returns its metadata and each line as [id, line number], without the file's content."
   }
 }

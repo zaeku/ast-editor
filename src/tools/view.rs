@@ -318,16 +318,16 @@ pub fn create_lines(
             let message = warning_parts.join("; ");
 
             let output = if return_ids_bool {
-                let ids: Vec<String> = items_opt
+                let ids: Vec<(String, usize)> = items_opt
                     .and_then(|json_str| serde_json::from_str::<serde_json::Value>(&json_str).ok())
                     .and_then(|val| val.as_array().cloned())
                     .map(|arr| {
                         arr.iter()
                             .filter_map(|val| {
-                                val.as_array()
-                                    .and_then(|item| item.first())
-                                    .and_then(|id_val| id_val.as_str())
-                                    .map(|s| s.to_string())
+                                let item = val.as_array()?;
+                                let id = item.first()?.as_str()?.to_string();
+                                let line = item.get(1)?.as_u64()? as usize;
+                                Some((id, line))
                             })
                             .collect()
                     })
@@ -474,9 +474,13 @@ mod tests {
 
         let ids = val["ids"].as_array().unwrap();
         assert_eq!(ids.len(), 3);
-        assert!(ids[0].as_str().unwrap().starts_with("1#"));
-        assert!(ids[1].as_str().unwrap().starts_with("2#"));
-        assert!(ids[2].as_str().unwrap().starts_with("3#"));
+        for (index, entry) in ids.iter().enumerate() {
+            assert!(entry[0]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("{}#", index + 1)));
+            assert_eq!(entry[1].as_u64().unwrap(), index as u64 + 1);
+        }
         assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
         assert_eq!(val["total_bytes"].as_u64().unwrap(), content.len() as u64);
 

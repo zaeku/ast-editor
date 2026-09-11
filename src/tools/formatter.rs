@@ -179,7 +179,11 @@ pub fn retrieve_and_format_lines(
     })
 }
 
-pub fn format_modified_ids(ids: &[String], wrap_trigger_length: usize) -> String {
+/// The ids an edit minted or touched, each with the line it is now, in the
+/// shape `view --only-ids` already answers with. An id alone does not say
+/// where its line went, so a caller wanting the line beside it had to read the
+/// file again (card #5).
+pub fn format_modified_ids(ids: &[(String, usize)], wrap_trigger_length: usize) -> String {
     if ids.is_empty() {
         return "[]".to_string();
     }
@@ -189,8 +193,12 @@ pub fn format_modified_ids(ids: &[String], wrap_trigger_length: usize) -> String
     result.push('\n');
 
     let mut current_line = "  ".to_string();
-    for (i, id) in ids.iter().enumerate() {
-        let item = serde_json::to_string(id).unwrap_or_else(|_| format!("\"{}\"", id));
+    for (i, (id, line)) in ids.iter().enumerate() {
+        let item = format!(
+            "[{},{}]",
+            serde_json::to_string(id).unwrap_or_else(|_| format!("\"{}\"", id)),
+            line
+        );
         if i > 0 {
             let next_len = current_line.len() + 2 + item.len();
             if next_len > wrap_trigger_length {
@@ -431,25 +439,25 @@ mod tests {
 
     #[test]
     fn test_format_modified_ids_empty() {
-        let ids: Vec<String> = vec![];
+        let ids: Vec<(String, usize)> = vec![];
         assert_eq!(format_modified_ids(&ids, 80), "[]");
     }
 
     #[test]
     fn test_format_modified_ids_wrap() {
         let ids = vec![
-            "1#77cf".to_string(),
-            "2#bcb4".to_string(),
-            "3#c2b7".to_string(),
+            ("1#77cf".to_string(), 1),
+            ("2#bcb4".to_string(), 2),
+            ("3#c2b7".to_string(), 3),
         ];
         // small trigger -> wraps
         let res_wrap = format_modified_ids(&ids, 15);
-        let expected_wrap = "[\n  \"1#77cf\",\n  \"2#bcb4\",\n  \"3#c2b7\"\n]";
+        let expected_wrap = "[\n  [\"1#77cf\",1],\n  [\"2#bcb4\",2],\n  [\"3#c2b7\",3]\n]";
         assert_eq!(res_wrap, expected_wrap);
 
         // large trigger -> no wrap
         let res_no_wrap = format_modified_ids(&ids, 100);
-        let expected_no_wrap = "[\n  \"1#77cf\", \"2#bcb4\", \"3#c2b7\"\n]";
+        let expected_no_wrap = "[\n  [\"1#77cf\",1], [\"2#bcb4\",2], [\"3#c2b7\",3]\n]";
         assert_eq!(res_no_wrap, expected_no_wrap);
     }
 }

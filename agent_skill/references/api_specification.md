@@ -67,7 +67,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ```json
 {
   "ids": [
-    "1#77cf", "2#bcb4", "3#c2b7"
+    ["1#77cf",1], ["2#bcb4",2], ["3#c2b7",3]
   ],
   "total_bytes": 30,
   "total_lines": 3
@@ -300,7 +300,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ```json
 {
   "modified_ids": [
-    "4#b7a3", "2#9639", "4#b7a3"
+    ["2#9639",2], ["4#b7a3",3]
   ],
   "syntax_valid": null,
   "message": "No grammar covers this file type, so the result was written without a syntax check."

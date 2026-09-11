@@ -1,5 +1,6 @@
 //! The edit script format, driven through the binary as a shell would drive it.
-//! Verification plan of docs/archive/edit-script-spec.md.
+//! The grammar is D-01M27ZZNWK431A in decisions/, which fences it from outside;
+//! these drive the same rules through the module.
 
 use std::io::Write;
 use std::process::{Command, Stdio};

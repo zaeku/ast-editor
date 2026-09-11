@@ -67,7 +67,7 @@ relative to the working directory. A shape no option can carry goes in as
 works unchanged.
 
 Editing has a second form that takes a script on stdin, so code needs no
-escaping at all — see [the format](docs/archive/edit-script-spec.md):
+escaping at all — `ast-editor skill usage` has the worked examples:
 
 ```bash
 ast-editor edit src/config.rs <<'EOF'

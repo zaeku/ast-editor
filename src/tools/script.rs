@@ -1,7 +1,7 @@
 //! The `edit` script format: a line-oriented way to write an edit batch, so a
 //! shell heredoc can carry code with no escaping.
 //!
-//! Specified in docs/archive/edit-script-spec.md. This module only turns a script
+//! The grammar is D-01M27ZZNWK431A in decisions/. This module only turns a script
 //! into the same `LineEdit` values the JSON form produces; everything after
 //! that is shared.
 

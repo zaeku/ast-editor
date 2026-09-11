@@ -95,6 +95,10 @@ Retrieves a range of lines for any text file along with their persistent unique 
       "description": "Absolute path to the target file",
       "type": "string"
     },
+    "filepaths": {
+      "description": "More files to read in the same call, answered with one block each. A path after the first on the command line lands here.",
+      "type": "array"
+    },
     "fixed_string": {
       "default": false,
       "description": "If true, 'query' is searched for literally rather than as a regular expression.",

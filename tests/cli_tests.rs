@@ -622,8 +622,75 @@ fn a_range_can_follow_the_path() {
         assert_eq!(data["showing_end"].as_u64().unwrap(), end, "{range}");
     }
 
-    // A second path is still a second path, not a range.
-    let confused = ast_editor("ranged", &["view", path, path]);
-    assert!(!confused.status.success());
-    assert!(String::from_utf8_lossy(&confused.stderr).contains("takes one file"));
+    // A path is never read as a range. `view` takes several files, so a
+    // second path there is a second file; a tool that takes one says so.
+    let both = ast_editor("ranged", &["view", path, path]);
+    assert!(both.status.success());
+    assert_eq!(
+        json_block(&both.stdout)["files"].as_array().unwrap().len(),
+        2
+    );
+
+    let one_only = ast_editor("ranged", &["outline", path, path]);
+    assert!(!one_only.status.success());
+    assert!(String::from_utf8_lossy(&one_only.stderr).contains("takes one file"));
+}
+
+/// Skimming a directory was a shell loop over sed, because view refused a
+/// second path. Several paths answer with one block each.
+#[test]
+fn several_files_in_one_call() {
+    let first = scratch("several_one.rs", "fn a() {}\nfn b() {}\n");
+    let second = scratch("several_two.py", "x = 1\ny = 2\n");
+
+    let out = ast_editor(
+        "several",
+        &["view", first.to_str().unwrap(), second.to_str().unwrap()],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("```rust"), "no rust block: {text}");
+    assert!(text.contains("```python"), "no python block: {text}");
+
+    let data = json_block(&out.stdout);
+    let files = data["files"].as_array().expect("a files array");
+    assert_eq!(files.len(), 2);
+    assert!(files[0]["filepath"].as_str().unwrap().ends_with("one.rs"));
+    assert!(files[1]["filepath"].as_str().unwrap().ends_with("two.py"));
+
+    // One file answers as it always has.
+    let alone = ast_editor("severalone", &["view", first.to_str().unwrap()]);
+    let data = json_block(&alone.stdout);
+    assert!(
+        data["files"].is_null(),
+        "one file grew a files array: {data}"
+    );
+    assert_eq!(data["total_lines"].as_u64().unwrap(), 2);
+
+    // A range still reads as a range, and applies to both.
+    let ranged = ast_editor(
+        "severalrange",
+        &[
+            "view",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+            "2",
+        ],
+    );
+    let data = json_block(&ranged.stdout);
+    for file in data["files"].as_array().unwrap() {
+        assert_eq!(file["showing_start"].as_u64().unwrap(), 2);
+    }
+
+    // A file that is not there fails the call and names itself.
+    let missing = ast_editor(
+        "severalmissing",
+        &["view", first.to_str().unwrap(), "/nonexistent/file.rs"],
+    );
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("/nonexistent/file.rs"));
 }

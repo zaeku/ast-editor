@@ -25,6 +25,10 @@ A tool is named by any unambiguous prefix, so `ins` is `inspect` and `cr` is
 `40,80`, `40` alone, `40,` to the end, `,80` from the start. The
 `--start-line` and `--end-line` options mean the same thing.
 
+`view` takes several paths and answers with one block per file, followed by a
+`json` block whose `files` array carries each file's own metadata under its
+`filepath`. One path answers as it always has.
+
 The options are the schema. Pass any parameter `ast-editor skill api` lists as
 `--kebab-case`. A boolean option takes `--flag`, `--flag false` or `--no-flag`.
 A shape no option can carry, such as an array of edits, goes in as

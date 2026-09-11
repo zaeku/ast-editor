@@ -163,6 +163,17 @@ pub fn arguments(tool: &str, args: &[String]) -> Result<Value> {
         // `view f.rs 10,40`, `10`, `10,` or `,40` (card #7). It only means
         // that where the tool has the lines to take it.
         if positional.is_some() {
+            // A tool that takes more than one file collects the rest here
+            // (card #8); a range is still a range.
+            if line_range(arg).is_none() && properties.contains_key("filepaths") {
+                let more = out
+                    .entry("filepaths".to_string())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                if let Some(list) = more.as_array_mut() {
+                    list.push(Value::String(absolute(arg)?));
+                }
+                continue;
+            }
             if let Some((start, end)) = line_range(arg) {
                 if properties.contains_key("start_line") {
                     if let Some(start) = start {

@@ -129,6 +129,10 @@ impl ToolDispatcher {
                             "type": "string",
                             "description": "Absolute path to the target file"
                         },
+                        "filepaths": {
+                            "type": "array",
+                            "description": "More files to read in the same call, answered with one block each. A path after the first on the command line lands here."
+                        },
                         "start_line": {
                             "type": "integer",
                             "description": "1-indexed starting line number (inclusive)"
@@ -309,23 +313,56 @@ impl ToolDispatcher {
                     .and_then(|v| v.as_u64())
                     .map(|v| v as usize);
                 let fixed_string = arguments.get("fixed_string").and_then(|v| v.as_bool());
-                let repository = session_db::SqliteSessionRepository;
-                let res = view::view_lines(
-                    &repository,
-                    filepath,
-                    start_line,
-                    end_line,
-                    only_ids,
-                    query,
-                    context_lines,
-                    fixed_string,
-                )?;
 
-                let mut blocks = Vec::new();
-                if let Some(code) = res.lines_text {
-                    blocks.push(fenced(fence_language(filepath), &code));
+                // One file answers as it always has. Several answer with one
+                // block each and a json block that says which is which, so
+                // skimming a directory is one call (card #8).
+                let mut paths = vec![filepath.to_string()];
+                if let Some(more) = arguments.get("filepaths").and_then(|v| v.as_array()) {
+                    paths.extend(more.iter().filter_map(|v| v.as_str()).map(str::to_string));
                 }
-                blocks.push(fenced("json", &res.metadata_json));
+
+                let repository = session_db::SqliteSessionRepository;
+                let mut blocks = Vec::new();
+                let mut per_file = Vec::new();
+
+                for path in &paths {
+                    let res = view::view_lines(
+                        &repository,
+                        path,
+                        start_line,
+                        end_line,
+                        only_ids,
+                        query.clone(),
+                        context_lines,
+                        fixed_string,
+                    )
+                    .with_context(|| format!("reading {}", path))?;
+
+                    if let Some(code) = res.lines_text {
+                        blocks.push(fenced(fence_language(path), &code));
+                    }
+                    if paths.len() == 1 {
+                        blocks.push(fenced("json", &res.metadata_json));
+                    } else {
+                        let mut entry: serde_json::Value =
+                            serde_json::from_str(&res.metadata_json)?;
+                        if let Some(object) = entry.as_object_mut() {
+                            object.insert(
+                                "filepath".to_string(),
+                                serde_json::Value::String(path.clone()),
+                            );
+                        }
+                        per_file.push(entry);
+                    }
+                }
+
+                if paths.len() > 1 {
+                    blocks.push(fenced(
+                        "json",
+                        &serde_json::to_string_pretty(&serde_json::json!({ "files": per_file }))?,
+                    ));
+                }
                 Ok(blocks.join("\n"))
             }
             "edit" => {

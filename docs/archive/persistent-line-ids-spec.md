@@ -7,10 +7,10 @@
 Turns the session store from a copy of the file into an index over it, then
 makes the identity in that index survive external edits and restarts.
 
-Guiding principle, unchanged from the original design: *disk is the ground
-truth; the ID store is a durable index over it, reconciled — never blindly
-rebuilt.* What changed is that the store now takes that literally and holds no
-file content at all.
+Guiding principle, unchanged from the original design and held as
+`D-01M27K2D7Q5BZ5` in the decision layer since 2026-09-11. What changed when
+this was built is that the store takes it literally and holds no file content
+at all.
 
 Split out of [the original design](../archive/2026-07-12-persistent-line-ids-and-reconciliation-design.md).
 Git-checkpoint compaction, semantic-path targeting, the entity layer, and the
@@ -278,8 +278,8 @@ two cannot drift; this list keeps its numbering and names the id.
 2. **No reuse**: a retired `line_id` is never reassigned while the entry lives.
 3. **Order/identity independence**: reordering changes only `sort_order`;
    renumbering it never changes a `sequence_id`.
-4. **Reconciliation soundness**: after reconciliation the index's lines are
-   exactly the disk lines, in the same order.
+4. **Reconciliation soundness**: held as `D-01M27K2D7Q5BZ5`, with a fence,
+   since 2026-09-11.
 5. **Targeted-conflict safety**: held as `D-01M27JNJJDYSWD` in the decision
    layer, with a fence, since 2026-09-11.
 6. **Cosmetic invariance**: respacing a whole file preserves every `line_id`.

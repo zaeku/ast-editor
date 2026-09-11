@@ -7,5 +7,10 @@
   "warning_header_hierarchy": "Header hierarchy mismatch at line {}: found H{} after H{} without H{}",
   "warning_malformed_link": "Possible malformed link syntax at line {}: unclosed parenthesis or bracket in link",
   "warning_html_syntax": "HTML syntax warning: AST contains error or missing nodes.\n{}",
-  "error_query_does_not_compile": "Invalid Tree-sitter query: {}\n{}"
+  "error_query_does_not_compile": "Invalid Tree-sitter query: {}\n{}",
+  "error_preview_unknown": "Preview '{}' is unknown, already applied, or expired. Take a fresh one with --dry-run.",
+  "error_preview_other_file": "Preview '{}' belongs to {}, not {}. Apply it against the file it was previewed on.",
+  "error_preview_stale": "PREVIEW_STALE: {} changed since preview '{}' was taken, so its diff and syntax check no longer describe the result. Take a fresh one with --dry-run.",
+  "error_preview_id_shape": "Invalid preview id '{}'. A preview id looks like 'p1f'.",
+  "warning_no_grammar": "No grammar for this file type, so an edit to it is not syntax-checked. Line ids, viewing and editing work as they do anywhere else."
 }

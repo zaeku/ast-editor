@@ -812,10 +812,9 @@ impl SessionRepository for SqliteSessionRepository {
             .strip_prefix('p')
             .and_then(|digits| i64::from_str_radix(digits, 16).ok())
             .with_context(|| {
-                format!(
-                    "Invalid preview id '{}'. Preview ids look like 'p1f'.",
-                    preview_id
-                )
+                crate::tools::metadata::get_config()
+                    .error_preview_id_shape
+                    .replacen("{}", preview_id, 1)
             })?;
 
         let conn = get_db_connection()?;
@@ -833,23 +832,31 @@ impl SessionRepository for SqliteSessionRepository {
             )
             .optional()?;
 
-        let (preview_path, file_hash, edits_json) = row.with_context(|| format!(
-            "Preview '{}' is unknown, already applied, or expired. Run edit_lines with dry_run again to get a fresh preview.",
-            preview_id
-        ))?;
+        let (preview_path, file_hash, edits_json) = row.with_context(|| {
+            crate::tools::metadata::get_config()
+                .error_preview_unknown
+                .replacen("{}", preview_id, 1)
+        })?;
 
         if preview_path != filepath {
             bail!(
-                "Preview '{}' belongs to {}, not {}. Apply it against the file it was previewed on.",
-                preview_id, preview_path, filepath
+                "{}",
+                crate::tools::metadata::get_config()
+                    .error_preview_other_file
+                    .replacen("{}", preview_id, 1)
+                    .replacen("{}", &preview_path, 1)
+                    .replacen("{}", filepath, 1)
             );
         }
 
         if compute_sha256(filepath)? != file_hash {
             conn.execute("DELETE FROM previews WHERE id = ?1", [rowid])?;
             bail!(
-                "PREVIEW_STALE: {} changed since preview '{}' was taken, so its diff and syntax check no longer describe the result. Run dry_run again.",
-                filepath, preview_id
+                "{}",
+                crate::tools::metadata::get_config()
+                    .error_preview_stale
+                    .replacen("{}", filepath, 1)
+                    .replacen("{}", preview_id, 1)
             );
         }
 
@@ -1230,7 +1237,11 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
-        Some("This file type is not supported for AST syntax validation. However, you can still view and edit it safely using line-level editing tools (view_lines and edit_lines). All line sequence IDs are fully active!".to_string())
+        Some(
+            crate::tools::metadata::get_config()
+                .warning_no_grammar
+                .clone(),
+        )
     } else {
         None
     };

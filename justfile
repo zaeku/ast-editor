@@ -41,21 +41,17 @@ doc:
 # The binary is no use to an agent that has not been told the command exists,
 # so this installs both halves.
 
-# Install the binary, its grammars, and the skill.
+# Install the binary and the skill.
 install: install-bin install-skill
 
-# The binary lands in <prefix>/bin and the grammars in
-# <prefix>/share/ast-editor/wasm, which is where the binary looks for them
-# relative to itself — so nothing needs to be exported to use it. Set
-# AST_EDITOR_WASM_DIR to override that for an unusual layout.
+# The grammars are compiled into the binary (D-01M28RAGW19ZZC), so the install
+# is one file and there is nothing beside it to find.
 
-# Install just the binary and its grammars.
+# Install just the binary.
 install-bin: build
-    mkdir -p '{{bin_dir}}' '{{share_dir}}/wasm'
+    mkdir -p '{{bin_dir}}'
     install -m 755 target/release/ast-editor '{{bin_dir}}/ast-editor'
-    cp resources/wasm/*.wasm resources/wasm/languages.json '{{share_dir}}/wasm/'
     @echo 'installed {{bin_dir}}/ast-editor'
-    @echo 'grammars  {{share_dir}}/wasm'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
 # Only the hub is installed, and what lands there is what the binary prints:

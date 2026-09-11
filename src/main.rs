@@ -103,36 +103,20 @@ fn init_tracing(level: tracing::Level) {
         .init();
 }
 
-/// The binary's version and the grammar set it is paired with. A grammar
-/// directory that does not match the binary is the likeliest cause of a file
-/// that will not parse, so it is reported rather than left to be guessed at.
+/// The binary's version and the grammars compiled into it, each with the
+/// version Cargo.lock pinned (D-01M28RAGW19ZZC), so that a file parsing
+/// differently than expected can be traced to a grammar without opening the
+/// tree it was built from.
 fn version_report() -> String {
     let mut out = format!("ast-editor {}\n", env!("CARGO_PKG_VERSION"));
-    let wasm_dir = ast_editor::config::get_wasm_dir();
-    out.push_str(&format!("grammars {}\n", wasm_dir.display()));
-
-    match ast_editor::config::describe_languages(&wasm_dir) {
+    match ast_editor::config::describe_languages() {
         Ok(languages) => {
-            let missing: Vec<&str> = languages
-                .iter()
-                .filter(|(_, present)| !present)
-                .map(|(name, _)| name.as_str())
-                .collect();
-            let names: Vec<&str> = languages.iter().map(|(name, _)| name.as_str()).collect();
-            out.push_str(&format!(
-                "         {} declared: {}\n",
-                names.len(),
-                names.join(", ")
-            ));
-            if !missing.is_empty() {
-                out.push_str(&format!(
-                    "         {} MISSING: {}\n",
-                    missing.len(),
-                    missing.join(", ")
-                ));
+            out.push_str(&format!("grammars {} compiled in\n", languages.len()));
+            for (name, version) in languages {
+                out.push_str(&format!("         {name} {version}\n"));
             }
         }
-        Err(err) => out.push_str(&format!("         unreadable: {:#}\n", err)),
+        Err(err) => out.push_str(&format!("grammars unreadable: {:#}\n", err)),
     }
     out
 }

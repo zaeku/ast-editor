@@ -213,17 +213,11 @@ fn outline_of(
     entries
 }
 
-/// The language an extension is read as, taken from the same languages.json the
-/// parser reads: a grammar dropped in there reaches the structural tools too,
-/// which is what D-01M27WE1VYAKPP asks for.
-///
-/// Markdown is the exception and is not in that file, because comrak parses it
-/// and no wasm grammar ships for it.
+/// The language an extension is read as, from the one table that also carries
+/// the parser for it (D-01M28RAGW19ZZC).
 pub(crate) fn language_name(ext: &str) -> Result<String> {
-    if matches!(ext, "md" | "markdown") {
-        return Ok("markdown".to_string());
-    }
-    crate::config::language_for_extension(&crate::config::get_wasm_dir(), ext)?
+    crate::config::language_for_extension(ext)
+        .map(str::to_string)
         .with_context(|| format!("Unsupported extension: {}", ext))
 }
 
@@ -836,13 +830,7 @@ fn main() {}
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join("resources")
-            .join("wasm");
-        let pm = Arc::new(
-            ParserManager::with_paths(temp_dir.join("cache"), temp_dir.join("compiler"), wasm_dir)
-                .unwrap(),
-        );
+        let pm = Arc::new(ParserManager::new().unwrap());
 
         async fn test_one(
             pm: &Arc<ParserManager>,
@@ -998,13 +986,7 @@ fn main() {}
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let wasm_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join("resources")
-            .join("wasm");
-        let pm = Arc::new(
-            ParserManager::with_paths(temp_dir.join("cache"), temp_dir.join("compiler"), wasm_dir)
-                .unwrap(),
-        );
+        let pm = Arc::new(ParserManager::new().unwrap());
 
         let file_path = temp_dir.join("test.nix");
         std::fs::write(&file_path, "{ x = 1; }").unwrap();

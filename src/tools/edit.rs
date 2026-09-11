@@ -577,7 +577,8 @@ mod tests {
     };
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
 
-    // Helper to setup mock language config and raw wasm files in temporary wasm directory
+    /// A temporary directory to put fixtures in. The grammars are compiled in
+    /// (D-01M28RAGW19ZZC), so nothing else has to be arranged.
     struct TestEnvironment {
         dir: std::path::PathBuf,
         pm: ParserManager,
@@ -588,64 +589,10 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("tree_sitter_edit_tests_{}", name));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
-
-            let cache_dir = dir.join("cache");
-            let compiler_path = dir.join("compiler");
-            let wasm_dir = dir.join("wasm");
-            fs::create_dir_all(&cache_dir).unwrap();
-            fs::create_dir_all(&wasm_dir).unwrap();
-
-            let langs_json_path = wasm_dir.join("languages.json");
-            let mock_config = serde_json::json!({
-                "rust": {
-                    "extensions": [".rs"],
-                    "wasm_file": "tree-sitter-rust.wasm"
-                },
-                "bash": {
-                    "extensions": [".sh", ".bash", ".zsh", ".ksh"],
-                    "wasm_file": "tree-sitter-bash.wasm"
-                },
-                "html": {
-                    "extensions": [".html", ".htm"],
-                    "wasm_file": "tree-sitter-html.wasm"
-                }
-            });
-            fs::write(
-                &langs_json_path,
-                serde_json::to_string(&mock_config).unwrap(),
-            )
-            .unwrap();
-
-            // Copy real rust, bash and html wasm so parsing/compilation succeeds
-            let manifest_dir =
-                std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-            let real_wasm_path = manifest_dir
-                .join("resources")
-                .join("wasm")
-                .join("tree-sitter-rust.wasm");
-            let target_wasm_path = wasm_dir.join("tree-sitter-rust.wasm");
-            if real_wasm_path.exists() {
-                fs::copy(&real_wasm_path, &target_wasm_path).unwrap();
+            Self {
+                dir,
+                pm: ParserManager::new().unwrap(),
             }
-            let real_bash_wasm_path = manifest_dir
-                .join("resources")
-                .join("wasm")
-                .join("tree-sitter-bash.wasm");
-            let target_bash_wasm_path = wasm_dir.join("tree-sitter-bash.wasm");
-            if real_bash_wasm_path.exists() {
-                fs::copy(&real_bash_wasm_path, &target_bash_wasm_path).unwrap();
-            }
-            let real_html_wasm_path = manifest_dir
-                .join("resources")
-                .join("wasm")
-                .join("tree-sitter-html.wasm");
-            let target_html_wasm_path = wasm_dir.join("tree-sitter-html.wasm");
-            if real_html_wasm_path.exists() {
-                fs::copy(&real_html_wasm_path, &target_html_wasm_path).unwrap();
-            }
-
-            let pm = ParserManager::with_paths(cache_dir, compiler_path, wasm_dir).unwrap();
-            Self { dir, pm }
         }
     }
 
@@ -1625,85 +1572,6 @@ fn main() {
         assert_eq!(lines_strict[0].2.trim(), "fi");
 
         fs::remove_dir_all(&env.dir)?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_graceful_fallback_on_infrastructure_error() -> Result<()> {
-        let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join("ts_infra_error_test");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-
-        let cache_dir = dir.join("cache");
-        let compiler_path = dir.join("compiler");
-        let wasm_dir = dir.join("wasm");
-        fs::create_dir_all(&cache_dir).unwrap();
-        fs::create_dir_all(&wasm_dir).unwrap();
-
-        // Write a config where "rust" points to a missing file
-        let config_path = wasm_dir.join("languages.json");
-        let mock_config = serde_json::json!({
-            "rust": {
-                "extensions": [".rs"],
-                "wasm_file": "missing-tree-sitter-rust.wasm"
-            }
-        });
-        fs::write(&config_path, serde_json::to_string(&mock_config).unwrap()).unwrap();
-
-        let pm = ParserManager::with_paths(cache_dir, compiler_path, wasm_dir).unwrap();
-        let repository = SqliteSessionRepository;
-
-        let file_path = dir.join("code.rs");
-        let initial_content = "fn main() {\n    let a = 1;\n}\n";
-        fs::write(&file_path, initial_content)?;
-        let filepath_str = file_path.to_str().unwrap();
-
-        let _metadata = init_edit_session(filepath_str, false)?;
-
-        let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id = find_line_id(&lines_view, "let a = 1;");
-        assert!(!target_id.is_empty());
-
-        let edits = vec![LineEdit {
-            op: EditOp::Replace,
-            target_id: Some(target_id),
-            content: Some("    let a = 42;".to_string()),
-            ..Default::default()
-        }];
-
-        // 1. Permissive mode: should save anyway and return status "saved"
-        let res = edit_lines_with_validation(&repository, filepath_str, edits.clone(), false, &pm)
-            .await?;
-        let val: serde_json::Value = serde_json::from_str(&res)?;
-        assert_eq!(val["status"], "saved");
-        assert!(val["message"]
-            .as_str()
-            .unwrap()
-            .contains("validation failed because"));
-        assert_eq!(
-            fs::read_to_string(&file_path)?,
-            "fn main() {\n    let a = 42;\n}\n"
-        );
-
-        // 2. Strict mode: should roll back and return Err
-        fs::write(&file_path, initial_content)?;
-        let _metadata_strict = init_edit_session(filepath_str, false)?;
-        let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
-        let edits_strict = vec![LineEdit {
-            op: EditOp::Replace,
-            target_id: Some(target_id_strict),
-            content: Some("    let a = 99;".to_string()),
-            ..Default::default()
-        }];
-
-        let res_strict =
-            edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &pm).await;
-        assert!(res_strict.is_err());
-        assert_eq!(fs::read_to_string(&file_path)?, initial_content);
-
-        let _ = fs::remove_dir_all(&dir);
         Ok(())
     }
 }

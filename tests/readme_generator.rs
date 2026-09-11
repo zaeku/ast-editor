@@ -45,16 +45,10 @@ fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
     }
 }
 
-fn create_test_parser_manager(tmp: &std::path::Path) -> ParserManager {
-    let cache_dir = tmp.join("cache");
-    let compiler_path = tmp.join("compiler");
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let wasm_dir = manifest_dir.join("resources").join("wasm");
-
-    let _ = fs::create_dir_all(&cache_dir);
-    let _ = fs::create_dir_all(&compiler_path);
-
-    ParserManager::with_paths(cache_dir, compiler_path, wasm_dir).unwrap()
+fn create_test_parser_manager() -> ParserManager {
+    // Every grammar is compiled in (D-01M28RAGW19ZZC), so there is no
+    // directory to arrange.
+    ParserManager::new().unwrap()
 }
 
 #[tokio::test]
@@ -75,7 +69,7 @@ async fn generate_readme() {
     };
 
     let repo = SqliteSessionRepository;
-    let pm = create_test_parser_manager(&temp_dir);
+    let pm = create_test_parser_manager();
 
     // 2. Act:
     // Run create return_ids=false

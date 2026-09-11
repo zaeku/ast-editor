@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tree_sitter::{Parser, WasmStore};
+use tree_sitter::Parser;
 
 pub fn get_db_path() -> Result<PathBuf> {
     let mut path = if let Some(dir) = env::var_os("AST_EDITOR_CACHE_DIR") {
@@ -1145,13 +1145,7 @@ pub fn check_language_supported(path: &str) -> bool {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    if matches!(ext.as_str(), "md" | "markdown") {
-        return true;
-    }
-    matches!(
-        crate::config::language_for_extension(&crate::config::get_wasm_dir(), &ext),
-        Ok(Some(_))
-    )
+    crate::config::language_for_extension(&ext).is_some()
 }
 
 /// How long a file's entry outlives its last use. Evicting one costs nothing
@@ -1366,47 +1360,14 @@ pub fn compute_line_hash(content: &str) -> String {
     compute_stored_hash(content)[..4].to_string()
 }
 
-static WASM_ENGINE: once_cell::sync::Lazy<wasmtime::Engine> = once_cell::sync::Lazy::new(|| {
-    let config = wasmtime::Config::new();
-    wasmtime::Engine::new(&config).expect("Failed to initialize Wasmtime engine")
-});
-
-static SYNCHRONOUS_LANGUAGES: once_cell::sync::Lazy<
-    std::sync::Mutex<std::collections::HashMap<String, tree_sitter::Language>>,
-> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
 fn parse_code_sync(ext: &str, code: &str) -> Result<tree_sitter::Tree> {
-    let wasm_dir = crate::config::get_wasm_dir();
-    let wasm_file = crate::config::get_wasm_file(&wasm_dir, ext)?;
-    let wasm_name = wasm_file.strip_suffix(".wasm").unwrap_or(&wasm_file);
-    let lang_symbol = wasm_name
-        .strip_prefix("tree-sitter-")
-        .unwrap_or(wasm_name)
-        .replace("-", "_");
+    let grammar = crate::config::grammar_for_extension(ext)
+        .with_context(|| format!("Unsupported file extension: {}", ext))?;
+    let language = grammar
+        .language()
+        .with_context(|| format!("No tree-sitter grammar for {}", grammar.name))?;
 
-    let cached_lang = {
-        let cache = SYNCHRONOUS_LANGUAGES.lock().unwrap();
-        cache.get(&lang_symbol).cloned()
-    };
-
-    let language = if let Some(lang) = cached_lang {
-        lang
-    } else {
-        let raw_wasm_path = wasm_dir.join(format!("{}.wasm", wasm_name));
-        let wasm_bytes = std::fs::read(&raw_wasm_path)?;
-
-        let engine = &*WASM_ENGINE;
-        let mut wasm_store = WasmStore::new(engine)?;
-        let lang = wasm_store.load_language(&lang_symbol, &wasm_bytes)?;
-
-        let mut cache = SYNCHRONOUS_LANGUAGES.lock().unwrap();
-        cache.entry(lang_symbol.clone()).or_insert(lang).clone()
-    };
-
-    let engine = &*WASM_ENGINE;
-    let wasm_store = WasmStore::new(engine)?;
     let mut parser = Parser::new();
-    parser.set_wasm_store(wasm_store)?;
     parser.set_language(&language)?;
     let tree = parser.parse(code, None).context("Failed to parse code")?;
     Ok(tree)

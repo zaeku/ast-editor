@@ -1,7 +1,6 @@
 /target/
 /.cargo-cache/
 .DS_Store
-*.cwasm
 /scratch/
 /.direnv/
 kanban/

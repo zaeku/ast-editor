@@ -125,12 +125,15 @@ different and harder claim than the code compiling.
 what the project now holds true goes in `decisions/`. The board holds only what
 has not been done yet.
 
-**`docs/backlog.md` is not the board.** It holds work that could plausibly
-happen, each entry naming the condition that would make it worth scheduling, and
-nothing in it is scheduled. An entry whose condition is met becomes a card; a
-card is a commitment and a backlog entry is not. `docs/discarded.md` holds what
-was reasoned out of existence, so that reading the backlog means reading only
-what might still become work.
+**A card that is waiting for something says so.** Work that could plausibly
+happen sits in `backlog` with `--block` carrying the condition that would make
+it worth scheduling — `kanban-md list --blocked` is therefore the list of things
+nobody has committed to, and unblocking one is the act of saying its condition
+is met. There is no second list of ideas anywhere else; there was one, in
+`docs/`, and it went stale in the way a hand-kept list does.
+
+`docs/discarded.md` is the other half: what was reasoned out of existence, so
+that reading the board means reading only what might still become work.
 
 **Nothing enforces any of this.** No fence reaches the board — a fence tests the
 code layer as a black box, and the board is neither the code layer nor

@@ -1,10 +1,10 @@
 # Discarded
 
 Designs that were reasoned out of existence rather than postponed. The
-distinction from [the backlog](backlog.md) is what a reader should do with an
-entry: a backlog item may become work when its condition is met, whereas
-nothing here is waiting for a condition. Each entry records what the design
-was and what removed the need for it.
+distinction from a blocked card on the board is what a reader should do with an
+entry: a card waits for a condition and becomes work when it is met, whereas
+nothing here is waiting for anything. Each entry records what the design was and
+what removed the need for it.
 
 Kept because a decision is worth more than a blank space: the same ideas
 resurface, and the reasoning is what stops them being re-litigated. Reviving

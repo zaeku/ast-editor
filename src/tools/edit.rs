@@ -336,14 +336,19 @@ pub async fn edit_lines_dry_run(
             let diagnostics: Vec<_> = errors.iter().zip(contexts.iter())
                 .map(|(message, context)| serde_json::json!({ "message": message, "context": context }))
                 .collect();
+            // An id even here: the verdict travels beside it, and a caller who
+            // judges the parser wrong applies the batch rather than retyping it
+            // (D-01M28NM3ECNY08).
             serde_json::json!({
                 "syntax_valid": false,
                 "diagnostics": diagnostics,
+                "preview_id": repository.create_preview(filepath, &edits)?,
             })
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => serde_json::json!({
             "syntax_valid": serde_json::Value::Null,
             "message": format!("validation could not run: {}", reason),
+            "preview_id": repository.create_preview(filepath, &edits)?,
         }),
     };
 
@@ -408,16 +413,29 @@ pub async fn edit_lines_with_validation(
             _raw_ast: _,
         } => {
             if strict_validation {
-                // Construct a detailed error message
-                let mut err_msg = "Validation error: Syntactical errors detected in code after edits. Compilation/AST verification aborted.\n".to_string();
-                for (msg, ctx) in errors.iter().zip(contexts.iter()) {
-                    err_msg.push_str(&format!("  - {}\n", msg));
-                    err_msg.push_str("    Context:\n");
-                    for line in ctx {
-                        err_msg.push_str(&format!("      {}\n", line));
-                    }
-                }
-                anyhow::bail!(err_msg);
+                // A refusal in the shape of a dry run: the same verdict, the
+                // same diagnostics, and the batch kept under an id, so a caller
+                // who judges the parser wrong applies it rather than sending it
+                // again (D-01M28NM3ECNY08). The exit code still says nothing
+                // happened (D-01M28HCSAMTEFS).
+                let diagnostics: Vec<_> = errors
+                    .iter()
+                    .zip(contexts.iter())
+                    .map(|(message, context)| {
+                        serde_json::json!({ "message": message, "context": context })
+                    })
+                    .collect();
+                let kept = repository.create_preview(filepath, &edits)?;
+                let report = serde_json::json!({
+                    "syntax_valid": false,
+                    "diagnostics": diagnostics,
+                    "preview_id": kept,
+                    "hint": crate::tools::metadata::get_config()
+                        .error_strict_refused
+                        .replacen("{}", filepath, 1)
+                        .replacen("{}", &kept, 1),
+                });
+                anyhow::bail!("```json\n{}\n```", serde_json::to_string_pretty(&report)?);
             } else {
                 // Permissive Mode: Write to disk and save, but return status "saved_with_errors" with details
                 fs::write(filepath, &final_content)?;
@@ -459,10 +477,17 @@ pub async fn edit_lines_with_validation(
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => {
             if strict_validation {
-                anyhow::bail!(
-                    "Validation error: Failed to parse code for syntax validation: {}",
-                    reason
-                );
+                let kept = repository.create_preview(filepath, &edits)?;
+                let report = serde_json::json!({
+                    "syntax_valid": serde_json::Value::Null,
+                    "preview_id": kept,
+                    "hint": crate::tools::metadata::get_config()
+                        .error_strict_unevaluable
+                        .replacen("{}", &reason, 1)
+                        .replacen("{}", filepath, 1)
+                        .replacen("{}", &kept, 1),
+                });
+                anyhow::bail!("```json\n{}\n```", serde_json::to_string_pretty(&report)?);
             } else {
                 // Permissive Mode: Write to disk, but return "saved" with error reason message
                 fs::write(filepath, &final_content)?;
@@ -873,8 +898,13 @@ mod tests {
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
         assert!(
-            err_msg.contains("Validation error"),
-            "Expected syntax validation error, got: {}",
+            err_msg.contains("\"syntax_valid\": false"),
+            "Expected the refusal to carry its verdict, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("preview_id"),
+            "Expected the refusal to name the batch it kept, got: {}",
             err_msg
         );
 
@@ -1576,8 +1606,13 @@ fn main() {
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
         assert!(
-            err_msg.contains("Validation error"),
-            "Expected syntax validation error, got: {}",
+            err_msg.contains("\"syntax_valid\": false"),
+            "Expected the refusal to carry its verdict, got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("preview_id"),
+            "Expected the refusal to name the batch it kept, got: {}",
             err_msg
         );
 

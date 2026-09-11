@@ -246,7 +246,7 @@ async fn test_edit_operations_and_ast_validation() {
     assert!(edit_res
         .unwrap_err()
         .to_string()
-        .contains("Validation error"));
+        .contains("\"syntax_valid\": false"));
 
     // Verify file content didn't change (rolled back)
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -1014,7 +1014,10 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
 }
 
 #[tokio::test]
-async fn test_failed_dry_run_mints_no_preview_id() {
+/// A verdict is a report, not a veto: a dry run whose result does not parse
+/// says so and still names the batch, so a caller who judges the parser wrong
+/// applies it rather than sending it again (D-01M28NM3ECNY08).
+async fn test_a_failed_dry_run_still_names_its_batch() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("preview_invalid.rs", "fn main() {\n    let a = 1;\n}\n");
     let repository = SqliteSessionRepository;
@@ -1039,7 +1042,16 @@ async fn test_failed_dry_run_mints_no_preview_id() {
         .unwrap();
     let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     assert_eq!(preview["syntax_valid"], false);
-    assert!(preview["preview_id"].is_null());
+    assert!(
+        preview["diagnostics"].is_array(),
+        "no diagnostics beside the verdict: {}",
+        res.report
+    );
+    assert!(
+        preview["preview_id"].is_string(),
+        "kept no id for the refused batch: {}",
+        res.report
+    );
 }
 
 #[tokio::test]

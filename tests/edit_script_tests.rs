@@ -252,7 +252,12 @@ fn test_a_batch_that_fails_validation_writes_none_of_itself() {
     );
     let out = edit("atomic", &file, &["--strict"], &script);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("Validation error"));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("\"syntax_valid\": false") && said.contains("preview_id"),
+        "a refusal carries its verdict and names the batch it kept: {}",
+        said
+    );
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
         body,

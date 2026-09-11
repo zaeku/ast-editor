@@ -96,10 +96,6 @@ impl ToolDispatcher {
                         "include_code": {
                             "type": "boolean",
                             "description": "Whether to include the source code of the enclosing definition (default: true)"
-                        },
-                        "output_file": {
-                            "type": "boolean",
-                            "description": "If true, saves the inspect output JSON to a unique file in the plugin's outputs directory and returns its absolute path. Recommended for large source files to bypass token limits."
                         }
                     }
                 }

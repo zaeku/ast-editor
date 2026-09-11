@@ -519,3 +519,18 @@ fn edit_first_line(test: &str, file: &std::path::Path, replacement: &str) -> Str
     );
     String::from_utf8_lossy(&out.stdout).to_string()
 }
+
+/// A schema that advertises an option the tool dropped gets it accepted and
+/// then ignored, which is worse than refusing it.
+#[test]
+fn no_tool_offers_an_option_it_will_ignore() {
+    for tool in ["inspect", "outline", "view", "edit", "create"] {
+        let help = ast_editor("offered", &[tool, "--help"]);
+        assert!(help.status.success());
+        let text = String::from_utf8_lossy(&help.stdout);
+        assert!(
+            !text.contains("--output-file"),
+            "{tool} still offers --output-file, which nothing reads: {text}"
+        );
+    }
+}

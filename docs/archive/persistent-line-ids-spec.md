@@ -254,17 +254,10 @@ a file's rows loses no data — only ID stability, and only for that file. The
 question is never whether eviction is safe but what it costs, and it costs
 nothing once no agent is still holding an ID for that file.
 
-- **Eviction axis**: least-recently-accessed. The window is
-  `SESSION_TTL_SECONDS`, widened from 30 minutes to 7 days: the old figure
-  predated IDs being expected to outlive a restart, and expired an agent's IDs
-  over a lunch break.
-- **When cleanup runs**: on `init_edit_session`, which every entry point calls,
-  so no separate hook is needed. Expired previews are pruned there too rather
-  than only when a new one is stored.
-- **Reclaiming disk**: deleting rows moves pages to the free list without
-  returning them, which had left 342 of 627 pages free in a live store. The
-  store now runs in `auto_vacuum = INCREMENTAL`, with a pass on each cleanup;
-  an existing database is switched by one full `VACUUM` at open.
+Held as `D-01M280AZHVZXV2`, with a fence, since 2026-09-11: the axis, the
+seven-day window and its reason, the sweep riding on an ordinary call, and
+`auto_vacuum = INCREMENTAL` are stated there. An existing database is switched
+to it by one full `VACUUM` at open.
 
 ## 8. Invariants (test targets)
 

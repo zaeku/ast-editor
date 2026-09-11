@@ -22,20 +22,10 @@ than an awkward one. The tax is paid on every edit, it is a recurring source of
 malformed calls, and it is the reason a caller who knows the tool still reaches
 for a `python3 - <<'PY'` heredoc instead.
 
-This format is a **transport change only**. It introduces no operation, no
-argument and no concept that the JSON schema does not already have; it is a
-second way to say the same thing. The JSON form stays, and remains what a
-program should generate.
-
-### Non-Goals
-
-- Replacing the JSON form. Anything a program builds should keep building JSON.
-- Addressing lines by anything other than a line id. Naming a line by quoting
-  its current text would reintroduce exactly the cost line ids exist to remove:
-  the original would have to cross the boundary again.
-- `replace_substring`. It needs two payloads, a pattern and a replacement, which
-  this format has no shape for. It targets long single lines, where escaping was
-  never the obstacle, so it stays JSON-only.
+That the format is a transport and nothing more — no operation the JSON schema
+lacks, a line named only by its id, and `replace_substring` left where it lives
+— is `D-01M27VV9X5P9J9` in the decision layer, with a fence, since 2026-09-11.
+What follows is the grammar that carries it.
 
 ## 2. Invocation
 

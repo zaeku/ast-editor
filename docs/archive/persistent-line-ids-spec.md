@@ -270,6 +270,9 @@ nothing once no agent is still holding an ID for that file.
 
 ## 8. Invariants (test targets)
 
+An invariant adopted as a decision is stated there and not here, so that the
+two cannot drift; this list keeps its numbering and names the id.
+
 1. **ID durability**: a `line_id` never changes for the life of the file's
    entry, across restarts, external edits, and moves.
 2. **No reuse**: a retired `line_id` is never reassigned while the entry lives.
@@ -277,8 +280,8 @@ nothing once no agent is still holding an ID for that file.
    renumbering it never changes a `sequence_id`.
 4. **Reconciliation soundness**: after reconciliation the index's lines are
    exactly the disk lines, in the same order.
-5. **Targeted-conflict safety**: an edit to a line whose on-disk content changed
-   under it fails loudly, never silently mis-targets.
+5. **Targeted-conflict safety**: held as `D-01M27JNJJDYSWD` in the decision
+   layer, with a fence, since 2026-09-11.
 6. **Cosmetic invariance**: respacing a whole file preserves every `line_id`.
 7. **Insertion endurance**: 1,000 consecutive insertions between the same pair
    of lines keep a correct order and mint no duplicate IDs.

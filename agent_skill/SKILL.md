@@ -60,6 +60,10 @@ taking none: `delete <id>`, `move <start> [<end>] before|after <dest>`.
 Add `--dry-run` or `--strict` after the file. `--strict` is the
 `strict_validation` parameter the API reference names.
 
+The syntax check is a parser's opinion and tree-sitter is sometimes wrong about
+valid code, so nothing a check refuses is thrown away: a refusal names the batch
+it kept, and `--apply <preview_id>` commits it if you judge the parser wrong.
+
 Within one batch, do not target a line an earlier directive changed. The id
 carries that line's content hash, so it no longer matches and `edit` refuses
 the whole batch.

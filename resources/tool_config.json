@@ -6,5 +6,6 @@
   "warning_line_limit_exceeded": "Line count limit (800 lines max) exceeded. Output capped at 800 lines.",
   "warning_header_hierarchy": "Header hierarchy mismatch at line {}: found H{} after H{} without H{}",
   "warning_malformed_link": "Possible malformed link syntax at line {}: unclosed parenthesis or bracket in link",
-  "warning_html_syntax": "HTML syntax warning: AST contains error or missing nodes.\n{}"
+  "warning_html_syntax": "HTML syntax warning: AST contains error or missing nodes.\n{}",
+  "error_query_does_not_compile": "Invalid Tree-sitter query: {}\n{}"
 }

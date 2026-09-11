@@ -322,3 +322,41 @@ fn the_first_call_may_be_an_edit() {
         "first\nsecond\nthird\n"
     );
 }
+
+/// A query that does not compile is not a query that found nothing: nothing
+/// ran, so the call did not do what it was asked (D-01M28HCSAMTEFS).
+#[test]
+fn a_query_that_does_not_compile_is_an_error() {
+    let file = scratch("bad_query.rs", "fn named() {}\n");
+
+    let broken = ast_editor(
+        "badquery",
+        &["inspect", file.to_str().unwrap(), "--query", "zzz"],
+    );
+    assert!(
+        !broken.status.success(),
+        "exited 0 for a query that does not compile: {}{}",
+        String::from_utf8_lossy(&broken.stdout),
+        String::from_utf8_lossy(&broken.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&broken.stderr).contains("zzz"),
+        "did not name the query that failed: {}",
+        String::from_utf8_lossy(&broken.stderr)
+    );
+
+    let fine = ast_editor(
+        "goodquery",
+        &[
+            "inspect",
+            file.to_str().unwrap(),
+            "--query",
+            "(function_item) @f",
+        ],
+    );
+    assert!(
+        fine.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fine.stderr)
+    );
+}

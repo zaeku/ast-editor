@@ -485,11 +485,16 @@ pub async fn run_inspect(
                 }
             }
             Err(e) => {
-                status = Some("error".to_string());
-                hint = Some(format!(
-                    "Invalid Tree-sitter query S-expression: {}. Error: {:?}",
-                    q_str, e
-                ));
+                // Nothing ran, so "no matches" would not be an answer to what
+                // was asked: a typo in a query and a query that found nothing
+                // would read the same (D-01M28HCSAMTEFS).
+                bail!(
+                    "{}",
+                    crate::tools::metadata::get_config()
+                        .error_query_does_not_compile
+                        .replacen("{}", q_str, 1)
+                        .replacen("{}", &format!("{:?}", e), 1)
+                );
             }
         }
     }

@@ -150,6 +150,9 @@ fn tool_names() -> Vec<String> {
 async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     use std::io::Read;
 
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return ast_editor::cli::help_for("edit");
+    }
     // `--strict` is how the script form has always spelled strict_validation.
     let args: Vec<String> = args
         .iter()
@@ -193,6 +196,11 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
 /// output rather than the JSON-RPC envelope around it.
 async fn call_once(tool: &str, args: &[String]) -> anyhow::Result<String> {
     let tool = ast_editor::cli::resolve(tool)?;
+    // Asking what a tool takes is a question, not a mistake: answer it rather
+    // than refusing the call and listing the options in the complaint.
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return ast_editor::cli::help_for(&tool);
+    }
     let arguments = ast_editor::cli::arguments(&tool, args)?;
     call_with(&tool, arguments).await
 }

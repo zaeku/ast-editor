@@ -211,6 +211,93 @@ fn coerce(raw: &str, field: &Value, flag: &str) -> Result<Value> {
 }
 
 /// The options a tool accepts, named as they are typed.
+/// What one tool takes, rendered from its own schema: the same list the error
+/// for an unknown option prints, with each parameter's type and description, so
+/// that asking is not a mistake a caller has to make before they learn.
+pub fn help_for(tool: &str) -> Result<String> {
+    let name = resolve(tool)?;
+    let schema = schema_of(&name)?;
+    let empty = Map::new();
+    let properties = schema["properties"].as_object().unwrap_or(&empty);
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .map(|items| items.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+
+    let mut rendered = format!(
+        "{} — {}\n\n",
+        name,
+        crate::tools::metadata::get_tool_description(&name)
+    );
+
+    let mut names: Vec<&String> = properties.keys().collect();
+    names.sort();
+    let width = names
+        .iter()
+        .map(|field| field.len() + 2)
+        .max()
+        .unwrap_or(0)
+        .min(24);
+
+    for field in names {
+        let property = &properties[field];
+        let flag = format!("--{}", field.replace('_', "-"));
+        let kind = match property["type"].as_str() {
+            Some(kind) => kind.to_string(),
+            None => property["enum"]
+                .as_array()
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join("|")
+                })
+                .unwrap_or_default(),
+        };
+        let mark = if required.contains(&field.as_str()) {
+            " (required)"
+        } else {
+            ""
+        };
+        rendered.push_str(&format!(
+            "  {:<width$} {}{}\n",
+            flag,
+            kind,
+            mark,
+            width = width + 2
+        ));
+        if let Some(description) = property["description"].as_str() {
+            for line in wrap(description, 66) {
+                rendered.push_str(&format!("  {:<width$} {}\n", "", line, width = width + 2));
+            }
+        }
+    }
+
+    rendered.push('\n');
+    rendered.push_str(&crate::tools::metadata::get_config().help_footer);
+    rendered.push('\n');
+    Ok(rendered)
+}
+
+/// Break a description into lines that fit beside the flag column.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.len() + 1 + word.len() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
 fn options_of(properties: &Map<String, Value>) -> String {
     let mut names: Vec<String> = properties
         .keys()

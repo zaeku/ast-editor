@@ -24,6 +24,7 @@ pub struct ToolConfig {
     pub warning_malformed_link: String,
     pub warning_html_syntax: String,
     pub warning_no_grammar: String,
+    pub help_footer: String,
     pub error_preview_unknown: String,
     pub error_preview_other_file: String,
     pub error_preview_stale: String,

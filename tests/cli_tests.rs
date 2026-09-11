@@ -402,3 +402,37 @@ fn every_shipped_language_is_syntax_checked() {
     );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
 }
+
+/// Asking what a tool takes is a question, not a mistake. It used to answer
+/// with "'view' takes no option '--help'" and exit 1.
+#[test]
+fn a_tool_answers_its_own_help() {
+    for (tool, expected) in [
+        ("view", "--only-ids"),
+        ("edit", "--apply"),
+        ("ins", "--template"),
+    ] {
+        let out = ast_editor("toolhelp", &[tool, "--help"]);
+        assert!(
+            out.status.success(),
+            "{} --help exited {}: {}",
+            tool,
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(expected),
+            "{} --help did not list {}: {}",
+            tool,
+            expected,
+            text
+        );
+        assert!(
+            text.contains("skill api"),
+            "{} --help did not say where the full reference is: {}",
+            tool,
+            text
+        );
+    }
+}

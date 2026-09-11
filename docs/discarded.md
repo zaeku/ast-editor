@@ -16,13 +16,9 @@ Section numbers refer to [the archived design](archive/2026-07-12-persistent-lin
 
 - **Lexicographic fractional ordering** (§4.2) — replace `sort_order REAL` with
   a LexoRank-style `TEXT` key, because midpoint insertion exhausts the `f64`
-  mantissa after roughly 50 insertions between the same pair. Phase 1 removed
-  the midpoints: an edit rewrites the whole ordered run as evenly spaced
-  values, so nothing subdivides and the mantissa is never approached. What a
-  fractional key would still buy is renumbering one row instead of all of them,
-  which is throughput, not correctness, and no measurement asks for it. An
-  endurance test drives 200 insertions at one point and checks the ordering
-  holds.
+  mantissa after roughly 50 insertions between the same pair. Why the premise
+  no longer holds is `D-01M280K4V8RX4F`, which has a fence driving insertions
+  at one point.
 
 - **Structural-hash cosmetic gate** (§5.5) — hash the enclosing tree-sitter
   node, skipping comments, and gate reconciliation per region on it, so a

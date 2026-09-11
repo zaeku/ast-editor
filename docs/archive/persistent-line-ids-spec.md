@@ -277,10 +277,10 @@ two cannot drift; this list keeps its numbering and names the id.
 6. **Cosmetic invariance**: held as `D-01M27KFWV8TDTC`, with a fence, since
    2026-09-11. Stated there as what it is: the number survives, the printed
    hash moves with the text, and a re-wrap is not carried.
-7. **Insertion endurance**: 1,000 consecutive insertions between the same pair
-   of lines keep a correct order and mint no duplicate IDs.
-8. **Duplicate-line safety**: a file whose lines are not unique reconciles
-   without mis-assigning IDs.
+7. **Insertion endurance**: held as `D-01M280K4V8RX4F`, with a fence, since
+   2026-09-11.
+8. **Duplicate-line safety**: held as `D-01M280K52X35JE`, with a fence, since
+   2026-09-11.
 9. **No content at rest**: held as `D-01M27K7HHEWS57`, with a fence, since
    2026-09-11. Stated more precisely there: a pending preview's batch is the
    caller's text and is the one exception.

@@ -10,17 +10,18 @@ Kept because a decision is worth more than a blank space: the same ideas
 resurface, and the reasoning is what stops them being re-litigated. Reviving
 one means arguing with the reason given, not merely finding it interesting.
 
-Section numbers refer to [the archived design](archive/2026-07-12-persistent-line-ids-and-reconciliation-design.md).
+Every entry below came out of the 2026-07-12 design discussion, which git
+holds.
 
 ## The premise stopped holding
 
-- **Lexicographic fractional ordering** (§4.2) — replace `sort_order REAL` with
+- **Lexicographic fractional ordering** — replace `sort_order REAL` with
   a LexoRank-style `TEXT` key, because midpoint insertion exhausts the `f64`
   mantissa after roughly 50 insertions between the same pair. Why the premise
   no longer holds is `D-01M280K4V8RX4F`, which has a fence driving insertions
   at one point.
 
-- **Structural-hash cosmetic gate** (§5.5) — hash the enclosing tree-sitter
+- **Structural-hash cosmetic gate** — hash the enclosing tree-sitter
   node, skipping comments, and gate reconciliation per region on it, so a
   reformat preserves ids. Phase 2b satisfies that invariant with a
   whitespace-free line hash and no parse. The AST version's residual benefits
@@ -35,16 +36,16 @@ Held as `D-01M27W003J69KH` in the decision layer since 2026-09-11, with a
 fence: the store holds only the present, and why the three designs below come
 back together or not at all is stated there rather than here.
 
-- **Git-checkpoint rewind** (§7) — per-SHA id-map snapshots, so `git reset` /
+- **Git-checkpoint rewind** — per-SHA id-map snapshots, so `git reset` /
   `git checkout` restores the ids that were live at that commit.
-- **Blame backfill from git-held history** (§5.0) — lazily cache id-maps for
+- **Blame backfill from git-held history** — lazily cache id-maps for
   commit SHAs the tool never witnessed, improving blame fidelity.
-- **Merge handling** (§16.4) — accept re-anchoring over identity-merge, with
+- **Merge handling** — accept re-anchoring over identity-merge, with
   line-level blame lossy across a merge.
 
 ## Belongs in a different project
 
-- **SSOT-as-SQLite: content-addressed versioning with git projection** (§16) —
+- **SSOT-as-SQLite: content-addressed versioning with git projection** —
   a git-shaped object graph over a content-addressed block store, snapshot and
   changeset hybrid, unified local and remote backends, and projection back out
   to git, motivated by running the editor on Cloudflare's infrastructure. It
@@ -52,7 +53,7 @@ back together or not at all is stated there rather than here.
   product rather than a phase here. It also carries an unresolved blocker: the
   parser runs tree-sitter through `wasmtime`, which cannot run inside a Worker,
   so an in-Worker deployment needs a JS/WASM parser path and probably a second
-  codebase (§17.3 "C").
+  codebase.
 
 ## Not worth doing on its own
 

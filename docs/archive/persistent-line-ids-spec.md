@@ -12,9 +12,8 @@ Guiding principle, unchanged from the original design and held as
 this was built is that the store takes it literally and holds no file content
 at all.
 
-Split out of [the original design](../archive/2026-07-12-persistent-line-ids-and-reconciliation-design.md).
 Git-checkpoint compaction, semantic-path targeting, the entity layer, and the
-content-addressed storage rewrite are out of scope: what might still become
+content-addressed storage rewrite were out of scope: what might still become
 work is in [the backlog](../backlog.md), and what was reasoned out of existence
 is in [discarded](../discarded.md). Dry-run preview was sequenced first and is
 delivered; it is `D-01M27KKNNRRZ96` in the decision layer.
@@ -237,6 +236,15 @@ lines (
     sort_order      REAL NOT NULL,
     parent_context  TEXT,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+)
+
+-- A preview's pending batch, the one text the store holds (D-01M27K7HHEWS57).
+previews (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    filepath    TEXT NOT NULL,
+    file_hash   TEXT NOT NULL,
+    edits_json  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
 )
 ```
 

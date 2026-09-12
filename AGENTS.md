@@ -45,31 +45,6 @@ reaches.
 that would have to be rediscovered belongs there whether or not anything can
 execute it. §4 provides `fence: none` with `verified:` for that case.
 
-**Write the fence in the same change that adopts the rule** (§8 Adopt), and
-delete the rule from this file in that same change. A rule kept in both places
-drifts, and the copy without the fence is the one that goes stale.
-
-**Identify a rule by its opening sentence, not by a number.** Rules leave this
-file one at a time, so a position shifts under every adoption.
-
-**Keep no list of decisions here.** `live/` is the list, and
-`cargo run --bin check` derives the rest. §2 allows references in one direction
-only: the faster layer points at the slower one. To find which rule a decision
-came from, run `jj log -r 'diff_lines(substring:"D-...")' -p` in whichever layer
-you are standing in.
-
-**Adopt a decision about where this tool should end up before the code satisfies
-it.** §5 says a fence that cannot find its subject exits 2, and that this is the
-intended direction of work rather than a defect. The fence states the standard,
-and `cargo run --bin check` answers how far off the code is.
-
-**Write the numbers a decision relies on into its own body, and name no file
-here.** A path into this layer dangles the moment this layer is what was lost.
-Give the figure, how it was measured, and when.
-
-**Run `just install` before `cargo run --bin check` in `decisions/`.** `check`
-tests the `ast-editor` on `PATH`, and `target/release/` is not on it.
-
 ## Board
 
 Run `kanban-md board` from the repository root. `kanban/` holds what is next

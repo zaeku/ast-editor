@@ -12,8 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
       - uses: Swatinem/rust-cache@v2
       - run: nix develop --command rustc --version
       - run: nix develop --command just test

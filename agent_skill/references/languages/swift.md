@@ -1,14 +1,14 @@
 # Swift Language Reference - `ast-editor`
 
-This document details the AST queries, templates, and compiler/linter integration details for **Swift** (`.swift`).
+Templates and queries for **Swift** (`.swift`).
 
----
+## Templates
 
-## 1. Syntax Inspection Template
-`functions`, `classes` and `imports` are supported via `inspect`, and
-`outline` lists what a file declares from the first two.
+`functions`, `classes` and `imports`. `outline` lists what a file declares from
+the first two.
 
-## 2. Common S-Expression Queries
-*   **List All Classes/Structs/Enums/Protocols**: `[(class_declaration name: (type_identifier) @class) (protocol_declaration name: (type_identifier) @protocol)]`
-*   **List All Functions**: `(function_declaration name: (simple_identifier) @function)`
-*   **List All Imports**: `(import_declaration) @import`
+## Queries
+
+- **Classes and protocols**: `[(class_declaration name: (type_identifier) @class) (protocol_declaration name: (type_identifier) @protocol)]`
+- **Functions**: `(function_declaration name: (simple_identifier) @function)`
+- **Imports**: `(import_declaration) @import`

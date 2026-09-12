@@ -1,12 +1,13 @@
 # Shell Script Language Reference - `ast-editor`
 
-This document details the AST queries, templates, and parser details for **Shell Scripts (POSIX shell, Bash, Zsh, Ksh)** (`.sh`, `.bash`, `.zsh`, `.ksh`).
+Templates and queries for **shell scripts** (`.sh`, `.bash`, `.zsh`, `.ksh`),
+read with the Bash grammar.
 
----
+## Templates
 
-## 1. Syntax Inspection Template
-Bash supports `"functions"` template via `inspect`.
+`functions`.
 
-## 2. Common S-Expression Queries
-*   **List All Functions**: `(function_definition name: (word) @function)`
-*   **List Command Calls**: `(command_name) @command`
+## Queries
+
+- **Functions**: `(function_definition name: (word) @function)`
+- **Commands called**: `(command_name) @command`

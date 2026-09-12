@@ -27,6 +27,10 @@ const REFERENCES: &[(&str, &str)] = &[
         include_str!("../agent_skill/references/languages/javascript.md"),
     ),
     (
+        "go",
+        include_str!("../agent_skill/references/languages/go.md"),
+    ),
+    (
         "markup",
         include_str!("../agent_skill/references/languages/markup.md"),
     ),

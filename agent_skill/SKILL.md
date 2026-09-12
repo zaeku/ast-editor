@@ -224,8 +224,8 @@ ast-editor skill usage    # editing workflows: resync, replace_range, long lines
 S-expression queries per language:
 
 ```bash
-ast-editor skill rust        ast-editor skill nix
+ast-editor skill rust        ast-editor skill go
 ast-editor skill python      ast-editor skill swift
 ast-editor skill javascript  ast-editor skill shell
-ast-editor skill markup      # markup and configuration formats
+ast-editor skill nix         ast-editor skill markup
 ```

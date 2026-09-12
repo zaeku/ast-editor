@@ -1,13 +1,14 @@
 # JavaScript / TypeScript Language Reference - `ast-editor`
 
-This document details the AST queries, templates, and compiler/linter integration details for **JavaScript / TypeScript / TSX** (`.js`, `.ts`, `.tsx`).
+Templates and queries for **JavaScript / TypeScript / TSX** (`.js`, `.jsx`,
+`.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.tsx`).
 
----
+## Templates
 
-## 1. Syntax Inspection Template
-The `"functions"`, `"classes"`, and `"imports"` templates are supported via `inspect`.
+`functions`, `classes` and `imports`, via `inspect --template`.
 
-## 2. Common S-Expression Queries
-*   **List All Functions**: `[(function_declaration) @func (arrow_function) @func (method_definition) @func]`
-*   **List Imports**: `(import_paragraph) @import`
-*   **List Interface Names**: `(interface_declaration name: (type_identifier) @interface)`
+## Queries
+
+- **Every function**: `[(function_declaration) @func (arrow_function) @func (method_definition) @func]`
+- **Imports**: `(import_statement) @import`
+- **Interface names** (TypeScript): `(interface_declaration name: (type_identifier) @interface)`

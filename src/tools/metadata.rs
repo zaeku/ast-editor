@@ -59,18 +59,23 @@ mod tests {
 
     #[test]
     fn test_metadata_retrieval() {
-        let view_desc = get_tool_description("view");
-        assert!(view_desc.contains("Retrieve file lines"));
-        assert!(view_desc.contains("Line IDs"));
-
-        let edit_desc = get_tool_description("edit");
-        assert!(edit_desc.contains("Apply edits"));
+        for tool in ["outline", "inspect", "view", "edit", "create"] {
+            assert!(
+                !get_tool_description(tool).is_empty(),
+                "{tool} has no description, and the documents render it"
+            );
+        }
+        assert!(get_tool_description("nonesuch").is_empty());
     }
 
     #[test]
     fn test_config_retrieval() {
         let config = get_config();
         assert_eq!(config.only_ids_wrap_trigger_length, 1000);
-        assert!(config.warning_line_cap.contains("800"));
+        // The warning names the cap the formatter enforces, and they drift apart
+        // silently unless something compares them.
+        assert!(config
+            .warning_line_cap
+            .contains(&crate::tools::formatter::LINE_CAP.to_string()));
     }
 }

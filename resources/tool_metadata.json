@@ -3,15 +3,15 @@
     "description": "Lists the definitions a file declares, each with its line range and the line IDs that edit it. The first look at an unfamiliar file."
   },
   "inspect": {
-    "description": "Inspects code structure and finds target lines in source files using Tree-sitter."
+    "description": "Search a file's structure with a Tree-sitter query or a named template, and answer with each match's line range and the ids that edit it."
   },
   "view": {
-    "description": "Retrieve file lines along with persistent Line IDs. Set only_ids to true to retrieve only IDs and line numbers, excluding text contents."
+    "description": "Print a file's lines with the ids that edit them, or with only_ids the ids and line numbers alone."
   },
   "edit": {
     "description": "Apply edits transactionally to a file. Answers with the lines it changed, each as [id, line number], so a following edit needs no second read."
   },
   "create": {
-    "description": "Create a new file and initialize its editing session. Answers with its metadata, and with each line as [id, line number] when asked."
+    "description": "Write a new file and answer with its lines, each as [id, line number] when asked. Refuses to overwrite a file that exists, so an existing file is changed with edit."
   }
 }

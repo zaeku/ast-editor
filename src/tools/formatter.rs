@@ -9,7 +9,12 @@ const WRAP_WIDTH: usize = 300;
 
 /// What the caps count, which is not what a row is: lowering the display width
 /// must not make a response run out of budget ten times sooner.
-const SEGMENT_LENGTH: usize = 2048;
+pub const SEGMENT_LENGTH: usize = 2048;
+
+/// How much one call will answer with. The documents render both figures
+/// rather than repeating them.
+pub const LINE_CAP: usize = 800;
+pub const RESPONSE_BYTE_CAP: usize = 45_000;
 
 pub struct FormattedLinesResult {
     pub lines_text: Option<String>,
@@ -53,10 +58,9 @@ pub fn retrieve_and_format_lines(
             segments.push(String::new());
         }
 
-        // Check 800 segment limit
         let mut segments_to_add = segments.len();
-        if segment_count + segments_to_add > 800 {
-            segments_to_add = 800 - segment_count;
+        if segment_count + segments_to_add > LINE_CAP {
+            segments_to_add = LINE_CAP - segment_count;
             line_cap_reached = true;
         }
 
@@ -71,7 +75,7 @@ pub fn retrieve_and_format_lines(
             }
         }
 
-        if cumulative_bytes + line_len > 45000 {
+        if cumulative_bytes + line_len > RESPONSE_BYTE_CAP {
             capacity_truncated = true;
             break;
         }

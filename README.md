@@ -40,8 +40,8 @@ Under `~/.agents` by default:
 
 | | |
 |---|---|
-| `bin/ast-editor` | the binary |
-| `skills/ast-editor/SKILL.md` | the skill document |
+| `~/.agents/bin/ast-editor` | the binary |
+| `~/.agents/skills/ast-editor/SKILL.md` | the skill document |
 
 The skill documents are embedded in the binary, so what `install-skill` writes
 is what that binary carries. Only the hub is installed: it reaches its
@@ -119,16 +119,17 @@ written without a check.
 
 ### `view`
 
-Prints lines with their ids. Each line is printed as `<id>|<line>: <text>`; a
-line too long for one row is broken at a fixed character count onto `│:` and
-`└:` rows that join back to it exactly. A range can follow the path the way
-`sed -n '40,80p'` takes one.
+Print a file's lines with the ids that edit them, or with only_ids the ids and line numbers alone.
+
+Each line is printed as `<id>|<line>: <text>`; a line too long for one row is
+broken at a fixed character count onto `│:` and `└:` rows that join back to it
+exactly. A range can follow the path the way `sed -n '40,80p'` takes one.
 
 * A range is capped at 800 lines per call.
 * Returned text is capped at 45,000 bytes.
-* A line over 2048 characters is truncated in the view and its id is suffixed
-  `#TRUNC`. An edit to such a line is refused, to prevent the truncation being
-  written back; run a formatter over the file first.
+* A line over 2048 characters is truncated in the view and its id
+  is suffixed `#TRUNC`. An edit to such a line is refused, to prevent the
+  truncation being written back; run a formatter over the file first.
 
 #### Input Schema
 ```json
@@ -230,24 +231,24 @@ line too long for one row is broken at a fixed character count onto `│:` and
 
 ### `outline`
 
-Lists the definitions a file declares — signature, line range, and the ids that
-edit them — which is the first look at an unfamiliar file. With `sexp` it
-returns the AST as S-expression text instead, up to a fixed depth, which is what
-a custom `inspect` query is written against.
+Lists the definitions a file declares, each with its line range and the line IDs that edit it. The first look at an unfamiliar file.
+
+With `sexp` it returns the AST as S-expression text instead, up to a fixed
+depth, which is what a custom `inspect` query is written against.
 
 ### `inspect`
 
-Searches a file's structure with a tree-sitter query or a named template, and
-answers with each match's line range and the ids that edit it. A matched
-definition's code comes back as its own block, printed as `view` prints lines;
-`include_code: false` leaves it out. A query that does not compile is an error
-rather than zero matches.
+Search a file's structure with a Tree-sitter query or a named template, and answer with each match's line range and the ids that edit it.
+
+A matched definition's code comes back as its own block, printed as `view`
+prints lines; `include_code: false` leaves it out. A query that does not compile
+is an error rather than zero matches.
 
 `ast-editor inspect --help` lists the templates each language has.
 
 ### `edit`
 
-Applies a batch of operations to lines named by their ids, as one transaction.
+Apply edits transactionally to a file. Answers with the lines it changed, each as [id, line number], so a following edit needs no second read.
 
 * `replace`, `replace_range`, `replace_substring`, `insert_before`,
   `insert_after`, `delete`, `move`.
@@ -432,10 +433,11 @@ Applies a batch of operations to lines named by their ids, as one transaction.
 
 ### `create`
 
-Writes a new file and returns its lines with their ids in one step. It refuses
-to overwrite an existing file (`FILE_ALREADY_EXISTS`), so the way to change a
-file that is already there is `edit`, which replaces the lines it was given and
-leaves the rest of the file alone.
+Write a new file and answer with its lines, each as [id, line number] when asked. Refuses to overwrite a file that exists, so an existing file is changed with edit.
+
+The refusal is `FILE_ALREADY_EXISTS`, and it is deliberate: rewriting a whole
+file to change part of it is how a file gets truncated when something goes
+wrong halfway.
 
 #### Input Schema
 ```json

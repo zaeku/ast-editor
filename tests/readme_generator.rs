@@ -286,6 +286,49 @@ async fn generate_readme() {
     let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
     let fmt_edit_dry_run = format!("```json\n{}\n```", out_edit_dry_run);
 
+    // Each tool's one-line description is the one the binary prints, so the
+    // document repeats what the tool says about itself rather than a second
+    // account of it.
+    let describe = |tool: &str| ast_editor::tools::metadata::get_tool_description(tool);
+    let fmt_outline_description = describe("outline");
+    let fmt_inspect_description = describe("inspect");
+    let fmt_view_description = describe("view");
+    let fmt_edit_description = describe("edit");
+    let fmt_create_description = describe("create");
+
+    // The caps, from the constants the formatter enforces.
+    let fmt_line_cap = ast_editor::tools::formatter::LINE_CAP.to_string();
+    let fmt_response_cap = {
+        let bytes = ast_editor::tools::formatter::RESPONSE_BYTE_CAP;
+        format!("{},{:03}", bytes / 1000, bytes % 1000)
+    };
+    let fmt_segment_length = ast_editor::tools::formatter::SEGMENT_LENGTH.to_string();
+
+    // The version floor Cargo was given for this build.
+    let fmt_msrv = env!("CARGO_PKG_RUST_VERSION").to_string();
+
+    // The install paths, evaluated by just with a prefix written the way a
+    // document wants it rather than the way this machine spells it.
+    let evaluated = std::process::Command::new("just")
+        .arg("--evaluate")
+        .env("AST_EDITOR_PREFIX", "~/.agents")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("just is the task list and has to be on PATH to render the install paths");
+    let evaluated = String::from_utf8(evaluated.stdout).unwrap();
+    let evaluate = |name: &str| {
+        evaluated
+            .lines()
+            .find_map(|line| {
+                let (key, value) = line.split_once(":=")?;
+                (key.trim() == name).then(|| value.trim().trim_matches('"').to_string())
+            })
+            .unwrap_or_else(|| panic!("just --evaluate printed no {name}"))
+    };
+    let fmt_prefix = evaluate("prefix");
+    let fmt_bin_dir = evaluate("bin_dir");
+    let fmt_skill_dir = evaluate("skill_dir");
+
     // The language table is the one the binary carries, so the document cannot
     // claim a grammar that is not compiled in or miss one that is.
     let fmt_languages = {
@@ -306,6 +349,18 @@ async fn generate_readme() {
     let placeholders: Vec<(&str, &str)> = vec![
         ("{{create_schema}}", &fmt_create_schema),
         ("{{languages}}", &fmt_languages),
+        ("{{outline_description}}", &fmt_outline_description),
+        ("{{inspect_description}}", &fmt_inspect_description),
+        ("{{view_description}}", &fmt_view_description),
+        ("{{edit_description}}", &fmt_edit_description),
+        ("{{create_description}}", &fmt_create_description),
+        ("{{line_cap}}", &fmt_line_cap),
+        ("{{response_cap}}", &fmt_response_cap),
+        ("{{segment_length}}", &fmt_segment_length),
+        ("{{msrv}}", &fmt_msrv),
+        ("{{prefix}}", &fmt_prefix),
+        ("{{bin_dir}}", &fmt_bin_dir),
+        ("{{skill_dir}}", &fmt_skill_dir),
         ("{{create_input_default}}", &fmt_create_input_default),
         ("{{create_output_default}}", &fmt_create_default),
         ("{{create_input_ids}}", &fmt_create_input_ids),

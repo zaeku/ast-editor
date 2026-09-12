@@ -1,3 +1,4 @@
+use crate::tools::formatter;
 use crate::tools::session_db::SessionRepository;
 use anyhow::Result;
 
@@ -128,8 +129,8 @@ pub fn view_lines(
             );
         }
         let requested_len = if end >= start { end - start + 1 } else { 0 };
-        let capped_end = if requested_len > 800 {
-            start.saturating_add(799)
+        let capped_end = if requested_len > formatter::LINE_CAP {
+            start.saturating_add(formatter::LINE_CAP - 1)
         } else {
             end
         };
@@ -180,8 +181,8 @@ pub fn view_lines(
     let requested_start = start_line.unwrap_or(1);
     let requested_end = end_line.unwrap_or(total_lines);
     let line_count_capped = query.is_none()
-        && requested_end.saturating_sub(requested_start) + 1 > 800
-        && total_lines > 800;
+        && requested_end.saturating_sub(requested_start) + 1 > formatter::LINE_CAP
+        && total_lines > formatter::LINE_CAP;
     let mut message = None;
     if line_count_capped {
         message = Some(config.warning_line_limit_exceeded.clone());

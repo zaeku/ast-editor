@@ -78,7 +78,8 @@ fn create_tables(conn: &Connection) -> Result<()> {
             file_hash TEXT NOT NULL,
             mtime INTEGER NOT NULL,
             last_accessed_at INTEGER NOT NULL,
-            next_line_id INTEGER NOT NULL DEFAULT 1
+            next_line_id INTEGER NOT NULL DEFAULT 1,
+            line_ending_crlf INTEGER DEFAULT 0
         );",
         [],
     )
@@ -122,33 +123,6 @@ fn create_tables(conn: &Connection) -> Result<()> {
         [],
     )
     .context("Failed to create previews table")?;
-
-    // Add crlf column if not present
-    let _ = conn.execute(
-        "ALTER TABLE sessions ADD COLUMN line_ending_crlf INTEGER DEFAULT 0;",
-        [],
-    );
-    // Add parent_context column to lines if not present
-    let _ = conn.execute("ALTER TABLE lines ADD COLUMN parent_context TEXT;", []);
-    let _ = conn.execute("ALTER TABLE lines ADD COLUMN norm_hash TEXT;", []);
-    let _ = conn.execute(
-        "ALTER TABLE sessions ADD COLUMN next_line_id INTEGER NOT NULL DEFAULT 1;",
-        [],
-    );
-    // Content used to be cached here. Drop it, and with it every entry built
-    // under the old schema: line_hash was four characters wide then. Clearing
-    // the sessions is what clears the lines — dropping the line rows alone
-    // would leave each session claiming a hash and a line count it no longer
-    // has, and a file nobody had touched since would read as empty.
-    if conn
-        .execute("ALTER TABLE lines DROP COLUMN content;", [])
-        .is_ok()
-    {
-        conn.execute("DELETE FROM sessions;", [])
-            .context("Failed to clear the pre-index cache")?;
-        conn.execute("DELETE FROM lines;", [])
-            .context("Failed to clear the pre-index line cache")?;
-    }
 
     Ok(())
 }
@@ -989,8 +963,7 @@ fn reconcile_index(
 
     // Nothing to reconcile if the file still looks the way the index last saw
     // it *and* the index still covers it. Matching hashes alone are not enough:
-    // a schema migration clears the line rows while leaving the session's hash
-    // in place, and an index that is short must be rebuilt rather than trusted.
+    // an index that is short of the file must be rebuilt rather than trusted.
     if let Some((stored_hash, stored_mtime, line_count)) = &current {
         if *stored_hash == disk_file_hash
             && *stored_mtime == disk_mtime

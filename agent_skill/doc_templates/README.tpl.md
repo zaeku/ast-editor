@@ -21,7 +21,7 @@ When agentic workflows attempt to edit code using traditional string-replacement
 ## 📦 Install
 
 ```bash
-just install     # the binary, its grammars, and the skill
+just install     # the binary and the skill
 just --list      # the other tasks
 ```
 
@@ -30,7 +30,6 @@ Under `~/.agents` by default:
 | | |
 |---|---|
 | `bin/ast-editor` | the binary |
-| `share/ast-editor/wasm/` | tree-sitter grammars |
 | `skills/ast-editor/SKILL.md` | the skill document |
 
 The skill documents are embedded in the binary, so what `install-skill` writes
@@ -40,10 +39,10 @@ in a terminal and in an installed tree alike. `ast-editor --help` lists the
 topics.
 
 `AST_EDITOR_PREFIX` chooses a different prefix, and `install-bin` /
-`install-skill` install one half. The binary finds its grammars relative to
-itself, so nothing needs to be exported; `AST_EDITOR_WASM_DIR` overrides that
-for an unusual layout. `<prefix>/bin` does need to be on `PATH`, since the
-skill document calls the command by name.
+`install-skill` install one half. The grammars are compiled into the binary, so
+an install is those two files and nothing needs to be exported for a parse to
+work. `<prefix>/bin` does need to be on `PATH`, since the skill document calls
+the command by name.
 
 ---
 

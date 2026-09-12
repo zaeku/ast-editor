@@ -7,8 +7,8 @@ product — read `README.md` for that, and read it first if you have not.
 **Terms.** *Line id* means the `n#hash` pair a tool prints beside a line: a
 sequence number and a hash of that line's content. *Session* means the cached
 database under the user's cache directory that maps a file's lines to their ids.
-*Grammar* means a tree-sitter `.wasm` the runtime compiles in process on first
-use and caches outside this repository. *Script* means the edit-directive format
+*Grammar* means a tree-sitter parser compiled into the binary, at the version
+`Cargo.lock` pins. *Script* means the edit-directive format
 `ast-editor edit` reads from stdin. *Tool* means one of the five the binary
 serves: `inspect`, `outline`, `view`, `edit`, `create`.
 
@@ -37,11 +37,10 @@ serves the skill documents, `src/parser.rs` loads a grammar and runs a query, an
 `formatter.rs` owns what output looks like, and `metadata.rs` owns every string
 the binary prints. New work joins the file whose subject it already is.
 
-Two things stay outside the binary. Grammar compilation belongs to the bundled
-`wasmtime` compiler, because a host that could compile would carry a code
-generator into every install; and the cache lives under the user's cache
-directory rather than in a tree ast-editor edits, because a tool that writes into
-its subject cannot be pointed at itself safely.
+One thing stays outside the binary: the cache lives under the user's cache
+directory rather than in a tree ast-editor edits, because a tool that writes
+into its subject cannot be pointed at itself safely. The grammars do not — they
+are dependencies compiled in, so an install is the binary and the skill.
 
 ## Decision layer
 

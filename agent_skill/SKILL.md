@@ -144,7 +144,7 @@ match that straddles the break. `(?i)` at the front ignores case, and
 `--fixed-string` takes the query literally.
 
 ```bash
-ast-editor view src/config.rs --query get_wasm_dir --context-lines 2
+ast-editor view src/config.rs --query grammar_for_extension --context-lines 2
 ast-editor view src/config.rs --query '^\s*pub fn' --context-lines 0
 ```
 

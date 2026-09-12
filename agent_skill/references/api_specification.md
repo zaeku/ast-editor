@@ -199,7 +199,7 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
     },
     "dry_run": {
       "default": false,
-      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. When the result is syntactically valid the response also carries a preview_id; pass it back as 'apply' to commit that exact batch without resending it.",
+      "description": "If true, returns the unified diff and the syntax result the edits would produce, without writing to disk or assigning line IDs. The response carries a preview_id whatever the verdict; pass it back as 'apply' to commit that exact batch without resending it.",
       "type": "boolean"
     },
     "edits": {
@@ -396,7 +396,7 @@ Write a new file and answer with its lines, each as [id, line number] when asked
     },
     "return_ids": {
       "default": false,
-      "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens.",
+      "description": "If true, answers with the new file's lines, each as [id, line number]. Set to false to omit them and save tokens.",
       "type": "boolean"
     }
   },

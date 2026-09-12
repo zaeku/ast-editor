@@ -276,8 +276,8 @@ pub fn create_lines(
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if return_ids_bool {
             if meta.total_lines > 0 {
-                let end_line = if meta.total_lines > 800 {
-                    800
+                let end_line = if meta.total_lines > formatter::LINE_CAP {
+                    formatter::LINE_CAP
                 } else {
                     meta.total_lines
                 };
@@ -307,7 +307,7 @@ pub fn create_lines(
     match setup_db_and_fetch() {
         Ok((items_opt, capacity_warning, total_lines, total_bytes)) => {
             let config = crate::tools::metadata::get_config();
-            let line_count_capped = return_ids_bool && total_lines > 800;
+            let line_count_capped = return_ids_bool && total_lines > formatter::LINE_CAP;
             let mut warning_parts = Vec::new();
             if line_count_capped {
                 warning_parts.push(config.warning_line_limit_exceeded.as_str());

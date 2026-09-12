@@ -267,7 +267,10 @@ async fn generate_readme() {
             .find(|t| t["name"] == name)
             .and_then(|t| t.get("inputSchema"))
             .unwrap_or_else(|| panic!("{name} schema not found"));
-        format!("```json\n{}\n```", serde_json::to_string_pretty(schema).unwrap())
+        format!(
+            "```json\n{}\n```",
+            serde_json::to_string_pretty(schema).unwrap()
+        )
     };
     let fmt_outline_schema = schema_of("outline");
     let fmt_inspect_schema = schema_of("inspect");

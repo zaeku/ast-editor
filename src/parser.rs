@@ -13,9 +13,11 @@ use tree_sitter::{Language, Parser};
 
 use crate::config;
 
+/// The language a kept parser is set to, the parser, and the grammar it holds.
+type ActiveSession = Option<(&'static str, Parser, Language)>;
+
 pub struct ParserManager {
-    /// The language the kept parser is set to, and the parser itself.
-    active_session: Arc<TokioMutex<Option<(&'static str, Parser, Language)>>>,
+    active_session: Arc<TokioMutex<ActiveSession>>,
 }
 
 impl Default for ParserManager {

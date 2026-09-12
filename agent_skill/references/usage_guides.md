@@ -75,7 +75,8 @@ better than a loop of single-line `replace` and `delete` operations:
 ```
 
 The same batch is written more briefly as an edit script on stdin, which needs
-no JSON escaping — see `ast-editor skill usage` for the directive form.
+no JSON escaping. `ast-editor --help` carries the directive grammar, and
+`ast-editor skill` a worked example.
 
 ## Editing inside a long line
 

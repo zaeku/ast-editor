@@ -374,7 +374,7 @@ impl LineBuffer {
             match edit.op {
                 EditOp::InsertAfter | EditOp::InsertBefore | EditOp::Append | EditOp::Prepend => {
                     let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
-                    let no_target = edit.target_id.as_ref().map_or(true, |s| s.is_empty());
+                    let no_target = edit.target_id.as_ref().is_none_or(|s| s.is_empty());
 
                     let at = if edit.op == EditOp::Append
                         || (edit.op == EditOp::InsertAfter && no_target)

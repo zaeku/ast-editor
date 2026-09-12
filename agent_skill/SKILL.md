@@ -7,7 +7,7 @@ description: >
 # AST-based Code Editor and Inspector Skill
 
 Edits any text file line by line, and answers structural queries and syntax
-checks for the 17 languages it carries a grammar for.
+checks for the languages it carries a grammar for, which `--version` lists.
 
 ## 🚀 Invocation
 

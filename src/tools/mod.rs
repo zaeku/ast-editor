@@ -38,22 +38,7 @@ pub fn fence_language(filepath: &str) -> &'static str {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
-    match ext {
-        "rs" => "rust",
-        "py" => "python",
-        "js" => "javascript",
-        "ts" => "typescript",
-        "tsx" => "tsx",
-        "jsx" => "jsx",
-        "go" => "go",
-        "json" => "json",
-        "toml" => "toml",
-        "yaml" | "yml" => "yaml",
-        "html" => "html",
-        "md" => "markdown",
-        "sh" => "bash",
-        _ => "text",
-    }
+    crate::config::language_for_extension(ext).unwrap_or("text")
 }
 
 pub struct ToolDispatcher;
@@ -227,7 +212,7 @@ impl ToolDispatcher {
                         "dry_run": {
                             "type": "boolean",
                             "default": false,
-                            "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. When the result is syntactically valid the response also carries a preview_id; pass it back as 'apply' to commit that exact batch without resending it."
+                            "description": "If true, returns the unified diff and the syntax result the edits would produce, without writing to disk or assigning line IDs. The response carries a preview_id whatever the verdict; pass it back as 'apply' to commit that exact batch without resending it."
                         },
                         "apply": {
                             "type": "string",
@@ -254,7 +239,7 @@ impl ToolDispatcher {
                         "return_ids": {
                             "type": "boolean",
                             "default": false,
-                            "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens."
+                            "description": "If true, answers with the new file's lines, each as [id, line number]. Set to false to omit them and save tokens."
                         }
                     },
                     "required": ["filepath", "content"]

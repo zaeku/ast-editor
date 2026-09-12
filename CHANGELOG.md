@@ -4,6 +4,16 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.1 — 2026-09-12
+
+### Fixed
+
+- **The skill document said a replaced line keeps its id.** It keeps its
+  number; the id changes with the content, because the hash in it is of the
+  content. `ast-editor skill usage` said otherwise, and a reader who believed
+  it would hold an id that the next edit refuses — which is the failure the
+  ids exist to prevent. The 0.3.0 note above is corrected in the same way.
+
 ## 0.3.0 — 2026-09-12
 
 An address is a span now, which removes an operation and renames two fields.
@@ -27,8 +37,10 @@ An address is a span now, which removes an operation and renames two fields.
   names are refused.
 - **An op that acts at one line says so when given a span.** `insert_after a,b`
   is refused by name rather than silently taking the first id.
-- The first line of a replaced span keeps its id, where a replaced range used
-  to mint a new one for every line. The lines after it are new.
+- The first line of a replaced span keeps its line **number**, where a replaced
+  range used to retire every number in it. The id still changes, because the
+  hash in it is of the content: `2#e9d7` becomes `2#c032`, and an id held from
+  before the edit is refused either way. The lines after the first are new.
 
 ## 0.2.1 — 2026-09-12
 

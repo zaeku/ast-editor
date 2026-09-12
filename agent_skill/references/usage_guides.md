@@ -65,8 +65,15 @@ Replacing a block in one directive is better than a loop of single-line
 - Nothing in between can move, since the batch is applied against the ids it
   was given.
 
-`delete 1a#b029,22#f8c3` removes a span the same way. The first line of a
-replaced span keeps its id; the lines after it are new.
+`delete 1a#b029,22#f8c3` removes a span the same way.
+
+The first line of a replaced span keeps its **number**. An id is
+`<number>#<hash>` and the hash is of the content, so writing new content there
+mints a new id with the old number — `2#e9d7` becomes `2#c032`, and the id you
+were holding is refused like any other stale one. What the number buys is that
+the line is the same line: nothing else in the file has to move, and the
+sequence number is not retired. The lines after the first are new lines with
+new numbers.
 
 Through `--json` the same edit is:
 

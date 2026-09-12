@@ -40,7 +40,8 @@ one of them changes what an identical script does.
 - **`--version` reports the grammars compiled in**, each with its version, in
   place of the grammar directory it used to name.
 - **`AST_EDITOR_WASM_DIR` does nothing**, and the install places no
-  `share/ast-editor/wasm`. The install is the binary and the skill.
+  `share/ast-editor/wasm`. The install is the binary and the skill, and
+  installing over 0.1 removes the 14MB of grammars it left in `<prefix>/share`.
 - **`.nix` files are syntax-checked.** A `--strict` edit that breaks one is now
   refused, where it used to be written.
 - The preview refusals no longer tell you to run `edit_lines` with `dry_run`,

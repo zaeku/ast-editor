@@ -85,9 +85,25 @@ inside the tree.
 ## Version control
 
 All three layers are Jujutsu colocated with Git, so `jj` and `git` both work in
-each. Read the
+each, and a `jj` command acts on the layer whose root you are standing in. Read
+the
 [`use-jujutsu-safely`](https://github.com/zaeku/skills/tree/main/plugins/version-control/skills/use-jujutsu-safely)
-skill before an unfamiliar `jj` command.
+skill before an unfamiliar `jj` command. Measured on jj 0.45.1.
+
+**Record finished work with `jj commit -m`, not `jj describe`.** `jj commit`
+describes `@` and opens a new empty change, so the next edit lands somewhere
+new. `jj describe` leaves `@` described, and the next edit amends the change
+just described — which is how two unrelated changes end up in one commit. Use
+`jj describe -r <id>` to correct a description, or to describe a change that is
+not `@`.
+
+`jj commit` takes no `--stdin`, so a message with prose in it goes in as
+`-m "$(cat <file>)"`. Command substitution is not rescanned, so backticks and
+`$` inside the file are left alone; writing the same prose inline between double
+quotes would run it.
+
+**`jj describe` on a change that already has one replaces it silently.** Read
+`jj log` first, and resolve a revset to a commit id before passing it to `-r`.
 
 **Commit unsigned and sign before pushing.** `master` on the remote requires a
 signature, and signing each commit as it is made puts a hardware approval in the
@@ -97,6 +113,13 @@ is still mutable — everything not yet pushed. Then `jj git push`.
 **Do not sign what is already pushed.** The remote refuses a non-fast-forward,
 so a re-signed commit that is already there cannot land. `mutable()` excludes
 them for the same reason, so a bare `jj sign` is already the safe one.
+
+**Unsign `@` after signing, with `jj unsign -r @`.** `revsets.sign` reaches
+descendants too, so `@` is signed whenever anything is. `signing.behavior` is
+`keep`, every `jj` command rewrites `@`, and a rewrite preserves the signature
+by asking for it again — so a signed `@` turns `jj status` into a hardware
+prompt. Unsigning after the push costs nothing: `@` is neither pushed nor the
+parent of anything.
 
 **Write a change description from what the change does, not from what it was
 for.** A description is true of the diff or it is false, and whoever reads one

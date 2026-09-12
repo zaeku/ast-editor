@@ -1,0 +1,19 @@
+# The same command a person runs, in the same toolchain. `just test` lints and
+# then runs the suite; the flake pins which rustc, clippy and rustfmt answer, so
+# a lint set that grows in a new release cannot fail a branch nobody changed.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+      - uses: Swatinem/rust-cache@v2
+      - run: nix develop --command rustc --version
+      - run: nix develop --command just test

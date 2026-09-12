@@ -16,8 +16,12 @@ default:
 build:
     cargo build --release
 
-# Run the whole suite.
-test:
+# Lint first, because the command someone runs while working is this one and a
+# check nobody chooses to run is a check that does not happen. It costs about
+# four seconds against a suite that takes eight.
+
+# Lint, then run the whole suite.
+test: lint
     cargo test
 
 # Format with rustfmt's defaults.

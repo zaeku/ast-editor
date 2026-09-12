@@ -58,14 +58,6 @@ only: the faster layer points at the slower one. To find which rule a decision
 came from, run `jj log -r 'diff_lines(substring:"D-...")' -p` in whichever layer
 you are standing in.
 
-**Ask which surface a rule lives on before deciding it is out of reach.** §5
-lets a fence read what the code layer exposes to anyone else: the `ast-editor`
-command on `PATH` — its subcommands, its output, its exit codes, and the files
-it rewrites — and the documents it publishes, which are `README.md`,
-`agent_skill/SKILL.md`, `CHANGELOG.md`, this file, and the strings under
-`resources/` that the binary prints back to a caller. §5 forbids implementation
-internals: `src/`, `tests/`, a Cargo target, a `just` recipe.
-
 **Adopt a decision about where this tool should end up before the code satisfies
 it.** §5 says a fence that cannot find its subject exits 2, and that this is the
 intended direction of work rather than a defect. The fence states the standard,

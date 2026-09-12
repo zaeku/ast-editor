@@ -16,10 +16,9 @@ pub fn get_db_path() -> Result<PathBuf> {
         // without the flag, so integration tests set the variable above.
         std::env::temp_dir().join("line-editor-test")
     } else {
-        let mut p = dirs::home_dir().context("Failed to get home directory")?;
-        p.push(".cache");
-        p.push("line-editor");
-        p
+        dirs::cache_dir()
+            .context("Failed to get cache directory")?
+            .join("ast-editor")
     };
     fs::create_dir_all(&path).context("Failed to create cache directory")?;
     path.push("sessions.db");

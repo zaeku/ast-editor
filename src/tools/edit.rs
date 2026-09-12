@@ -1050,7 +1050,10 @@ mod tests {
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("Missing start_id for replace op"));
+        // The op and the field are named as a caller spells them, and so is
+        // what the edit did carry (card #54).
+        assert!(err_msg.contains("'replace' op needs start_id"), "{err_msg}");
+        assert!(err_msg.contains("carries content"), "{err_msg}");
 
         Ok(())
     }

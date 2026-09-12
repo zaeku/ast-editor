@@ -174,6 +174,50 @@ pub struct LineEdit {
     pub occurrence: Option<usize>,
 }
 
+/// What to say when an edit does not carry a field its op needs. The op and the
+/// field are named as a caller spells them, and so is what the edit did carry,
+/// because the mistake is usually a field in the wrong place rather than a
+/// field nobody thought of.
+fn missing_field(edit: &LineEdit, needs: &str) -> anyhow::Error {
+    let mut carried: Vec<&str> = Vec::new();
+    let filled = |value: &Option<String>| value.as_deref().is_some_and(|s| !s.is_empty());
+    if filled(&edit.start_id) {
+        carried.push("start_id");
+    }
+    if filled(&edit.end_id) {
+        carried.push("end_id");
+    }
+    if filled(&edit.dest_id) {
+        carried.push("dest_id");
+    }
+    if edit.content.is_some() {
+        carried.push("content");
+    }
+    if filled(&edit.pattern) {
+        carried.push("pattern");
+    }
+    if filled(&edit.replacement) {
+        carried.push("replacement");
+    }
+    let carried = if carried.is_empty() {
+        "no other field".to_string()
+    } else {
+        carried.join(", ")
+    };
+    let op = serde_json::to_value(edit.op)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{:?}", edit.op));
+    anyhow::anyhow!(
+        "{}",
+        crate::tools::metadata::get_config()
+            .error_edit_missing_field
+            .replacen("{}", &op, 1)
+            .replacen("{}", needs, 1)
+            .replacen("{}", &carried, 1)
+    )
+}
+
 pub fn parse_line_id(id_str: &str) -> Result<(i64, String)> {
     let parts: Vec<&str> = id_str.split('#').collect();
     if parts.len() != 2 {
@@ -291,18 +335,19 @@ impl LineBuffer {
                 .with_context(|| {
                     crate::tools::metadata::get_config()
                         .error_target_gone
-                        .replacen("{}", start_id, 1)
+                        .replacen("{}", &format!("{field} {start_id}"), 1)
                 })?;
             let actual = compute_line_hash(&self.lines[idx].content);
             if actual != hash {
                 // Which rejection this is decides what the caller should do, so
-                // each says it (card #6).
-                let _ = (role, field);
+                // each says it (card #6). A batch carries several ids, so which
+                // field this one came in under is part of locating it.
+                let _ = role;
                 bail!(
                     "{}",
                     crate::tools::metadata::get_config()
                         .error_target_changed
-                        .replacen("{}", start_id, 1)
+                        .replacen("{}", &format!("{field} {start_id}"), 1)
                 );
             }
             Ok(idx)
@@ -383,9 +428,7 @@ impl LineBuffer {
                             .start_id
                             .as_ref()
                             .filter(|s| !s.is_empty())
-                            .with_context(|| {
-                                format!("CHECKSUM_ERROR: Missing start_id for {:?}", edit.op)
-                            })?;
+                            .ok_or_else(|| missing_field(edit, "start_id"))?;
                         let idx = self.position_of(start_id, "Start", "start_id")?;
                         if edit.op == EditOp::InsertAfter {
                             idx + 1
@@ -402,11 +445,11 @@ impl LineBuffer {
                         .start_id
                         .as_ref()
                         .filter(|s| !s.is_empty())
-                        .context("Missing start_id for replace op")?;
+                        .ok_or_else(|| missing_field(edit, "start_id"))?;
                     let content = edit
                         .content
                         .as_ref()
-                        .context("Missing content for replace op")?;
+                        .ok_or_else(|| missing_field(edit, "content"))?;
                     let start_idx = self.position_of(start_id, "Start", "start_id")?;
                     let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
                         Some(end_id) => {
@@ -445,15 +488,15 @@ impl LineBuffer {
                     let start_id = edit
                         .start_id
                         .as_ref()
-                        .context("Missing start_id for replace_substring op")?;
+                        .ok_or_else(|| missing_field(edit, "start_id"))?;
                     let pattern = edit
                         .pattern
                         .as_ref()
-                        .context("Missing pattern for replace_substring op")?;
+                        .ok_or_else(|| missing_field(edit, "pattern"))?;
                     let replacement = edit
                         .replacement
                         .as_ref()
-                        .context("Missing replacement for replace_substring op")?;
+                        .ok_or_else(|| missing_field(edit, "replacement"))?;
                     let occurrence = edit.occurrence.unwrap_or(1);
                     if occurrence < 1 {
                         bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
@@ -480,7 +523,7 @@ impl LineBuffer {
                     let start_id = edit
                         .start_id
                         .as_ref()
-                        .context("Missing start_id for delete op")?;
+                        .ok_or_else(|| missing_field(edit, "start_id"))?;
                     let idx = self.position_of(start_id, "Start", "start_id")?;
                     let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
                         Some(end_id) => {
@@ -511,7 +554,7 @@ impl LineBuffer {
                         .start_id
                         .as_ref()
                         .filter(|s| !s.is_empty())
-                        .context("CHECKSUM_ERROR: Missing start_id (start_id) for move op")?;
+                        .ok_or_else(|| missing_field(edit, "start_id"))?;
                     let end_id = edit
                         .end_id
                         .as_ref()
@@ -530,9 +573,11 @@ impl LineBuffer {
                     let dest_idx = match move_pos {
                         MovePosition::Prepend | MovePosition::Append => None,
                         MovePosition::Before | MovePosition::After => {
-                            let dest_id = edit.dest_id.as_ref().filter(|s| !s.is_empty()).context(
-                                "CHECKSUM_ERROR: Missing dest_id for move before/after operation",
-                            )?;
+                            let dest_id = edit
+                                .dest_id
+                                .as_ref()
+                                .filter(|s| !s.is_empty())
+                                .ok_or_else(|| missing_field(edit, "dest_id"))?;
                             let idx = self.position_of(dest_id, "Destination", "dest_id")?;
                             if idx >= start_idx && idx <= end_idx {
                                 bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_id lies within source range).");

@@ -26,6 +26,7 @@ pub struct ToolConfig {
     pub warning_no_grammar: String,
     pub message_not_checked: String,
     pub error_target_gone: String,
+    pub error_edit_missing_field: String,
     pub error_target_changed: String,
     pub error_target_changed_outside: String,
     pub help_footer: String,

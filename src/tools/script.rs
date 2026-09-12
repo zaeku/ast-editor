@@ -102,6 +102,18 @@ fn directive_to_edit(
         .as_ref()
         .map(|body| body.iter().map(|line| format!("{line}\n")).collect());
 
+    // Name an operation nobody has before complaining about its payload: an
+    // unknown op with a block used to be told it takes no content, which reads
+    // as if the op were real and the block were the mistake.
+    if !is_known(op_name) && op_name != "replace_substring" {
+        bail!(
+            "line {}: unknown operation '{}'. Known: replace, insert_after, \
+             insert_before, append, prepend, delete, move.",
+            line,
+            op_name
+        );
+    }
+
     let takes_payload = matches!(
         op_name,
         "replace" | "insert_after" | "insert_before" | "append" | "prepend"

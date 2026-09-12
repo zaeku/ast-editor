@@ -4,6 +4,21 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.2 — 2026-09-12
+
+### Changed
+
+- **An edit that is missing a field says which op, which field, and what the
+  edit did carry.** `Missing start_id for replace op` is now `The 'replace' op
+  needs start_id, and this one carries end_id, content. \`ast-editor skill api\`
+  lists what each op takes.` The mistake is usually a field in the wrong place,
+  so naming what arrived is what locates it.
+- **A refused line id says which field it came in under**, since a batch
+  carries several: `No line here is end_id 9#dead`.
+- **An unknown directive is named as unknown**, where a script that opened a
+  block after one was told the operation takes no content — which reads as
+  though the operation were real and the block were the mistake.
+
 ## 0.3.1 — 2026-09-12
 
 ### Fixed

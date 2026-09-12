@@ -31,9 +31,6 @@ New work joins the file whose subject it already is. Three files under
 owns what output looks like, and `metadata.rs` owns every string the binary
 prints.
 
-Keep the cache under the user's cache directory, never in a tree ast-editor
-edits. A tool that writes into its subject cannot be pointed at itself safely.
-
 ## Decision layer
 
 Read `decisions/AGENTS.md`, and `decisions/SPEC.md` §7 and §12, before you add a

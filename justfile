@@ -6,7 +6,6 @@
 
 prefix := env('AST_EDITOR_PREFIX', env('HOME') / '.agents')
 bin_dir := prefix / 'bin'
-share_dir := prefix / 'share' / 'ast-editor'
 skill_dir := prefix / 'skills' / 'ast-editor'
 
 [private]
@@ -45,15 +44,12 @@ doc:
 install: install-bin install-skill
 
 # The grammars are compiled into the binary (D-01M28RAGW19ZZC), so the install
-# is one file and there is nothing beside it to find. Installing over a version
-# that kept grammars in <prefix>/share takes them with it: nothing reads them,
-# and an upgrade that leaves 14MB behind never tells anyone it did.
+# is one file and there is nothing beside it to find.
 
 # Install just the binary.
 install-bin: build
     mkdir -p '{{bin_dir}}'
     install -m 755 target/release/ast-editor '{{bin_dir}}/ast-editor'
-    @test ! -d '{{share_dir}}' || (rm -rf '{{share_dir}}' && echo 'removed    {{share_dir}}, which nothing reads now')
     @echo 'installed {{bin_dir}}/ast-editor'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
@@ -70,5 +66,5 @@ install-skill: build
 # Remove what `install` placed.
 uninstall:
     rm -f '{{bin_dir}}/ast-editor'
-    rm -rf '{{share_dir}}' '{{skill_dir}}'
-    @echo 'removed {{bin_dir}}/ast-editor, {{share_dir}} and {{skill_dir}}'
+    rm -rf '{{skill_dir}}'
+    @echo 'removed {{bin_dir}}/ast-editor and {{skill_dir}}'

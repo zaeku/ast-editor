@@ -16,7 +16,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
       "type": "string"
     },
     "filepath": {
-      "description": "Absolute path to the file.",
+      "description": "Path to the file to write, relative to the working directory or absolute",
       "type": "string"
     },
     "return_ids": {
@@ -39,7 +39,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ##### Input
 ```json
 {
-  "content": "fn main() {\n    let x = 42;\n}\n",
+  "content": "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n",
   "filepath": "/path/to/project/create_default.rs",
   "return_ids": false
 }
@@ -48,8 +48,8 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ##### Output
 ```json
 {
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
 
@@ -57,7 +57,7 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ##### Input
 ```json
 {
-  "content": "fn main() {\n    let x = 42;\n}\n",
+  "content": "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n",
   "filepath": "/path/to/project/create_ids.rs",
   "return_ids": true
 }
@@ -67,10 +67,10 @@ Creates a brand-new file with the initial content and JIT-initializes its line e
 ```json
 {
   "lines": [
-    ["1#77cf",1], ["2#bcb4",2], ["3#c2b7",3]
+    ["1#77cf",1], ["2#bcb4",2], ["3#8d90",3], ["4#c2b7",4]
   ],
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
 
@@ -92,7 +92,7 @@ Retrieves a range of lines for any text file along with their persistent unique 
       "type": "integer"
     },
     "filepath": {
-      "description": "Absolute path to the target file",
+      "description": "Path to the file, relative to the working directory or absolute",
       "type": "string"
     },
     "filepaths": {
@@ -141,16 +141,16 @@ Retrieves a range of lines for any text file along with their persistent unique 
 ```rust
 1#77cf|1: fn main() {
 2#bcb4|2:     let x = 42;
-3#c2b7|3: }
+3#8d90|3:     let scratch = 0;
 ```
 
 ```json
 {
-  "enclosing_contexts": [],
+  "enclosing_contexts": [{"end":4,"name":"fn:main","start":1}],
   "showing_end": 3,
   "showing_start": 1,
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
 
@@ -168,12 +168,12 @@ Retrieves a range of lines for any text file along with their persistent unique 
 ##### Output
 ```json
 {
-  "enclosing_contexts": [],
-  "lines": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
+  "enclosing_contexts": [{"end":4,"name":"fn:main","start":1}],
+  "lines": [["1#77cf",1],["2#bcb4",2],["3#8d90",3]],
   "showing_end": 3,
   "showing_start": 1,
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
 
@@ -258,7 +258,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
       "type": "array"
     },
     "filepath": {
-      "description": "Absolute path to the file to modify",
+      "description": "Path to the file, relative to the working directory or absolute",
       "type": "string"
     },
     "strict_validation": {
@@ -293,7 +293,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
     },
     {
       "op": "delete",
-      "target_id": "3#c2b7"
+      "target_id": "3#8d90"
     }
   ],
   "filepath": "/path/to/project/create_ids.rs"
@@ -304,10 +304,8 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ```json
 {
   "modified_lines": [
-    ["2#9639",2], ["4#b7a3",3]
-  ],
-  "syntax_valid": null,
-  "message": "No grammar covers this file type, so the result was written without a syntax check."
+    ["2#9639",2], ["5#b7a3",3], ["4#c2b7",4]
+  ]
 }
 ```
 
@@ -345,7 +343,7 @@ the diff and syntax result no longer describe the outcome, so preview again.
     },
     {
       "op": "delete",
-      "target_id": "3#c2b7"
+      "target_id": "3#8d90"
     }
   ],
   "filepath": "/path/to/project/create_ids.rs"
@@ -353,22 +351,20 @@ the diff and syntax result no longer describe the outcome, so preview again.
 ```
 
 ##### Output
-```json
 ```diff
 --- /path/to/project/create_ids.rs
 +++ /path/to/project/create_ids.rs
-@@ -1,3 +1,3 @@
+@@ -1,4 +1,4 @@
  fn main() {
 -    let x = 42;
--}
+-    let scratch = 0;
 +    let x = 100;
 +    let y = 200;
+ }
 ```
 ```json
 {
-  "message": "No grammar covers this file type, so the result was written without a syntax check.",
   "preview_id": "p1f",
-  "syntax_valid": null
+  "syntax_valid": true
 }
-```
 ```

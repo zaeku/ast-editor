@@ -131,101 +131,37 @@ exactly. A range can follow the path the way `sed -n '40,80p'` takes one.
   so a call answers with fewer rows when the lines are long. The wrapping width
   is a display choice and does not change what a call costs.
 
-#### Input Schema
-```json
-{
-  "properties": {
-    "context_lines": {
-      "description": "Optional number of surrounding context lines to return around query matches. Defaults to 5.",
-      "type": "integer"
-    },
-    "end_line": {
-      "description": "1-indexed ending line number (inclusive)",
-      "type": "integer"
-    },
-    "filepath": {
-      "description": "Absolute path to the target file",
-      "type": "string"
-    },
-    "filepaths": {
-      "description": "More files to read in the same call, answered with one block each. A path after the first on the command line lands here.",
-      "type": "array"
-    },
-    "fixed_string": {
-      "default": false,
-      "description": "If true, 'query' is searched for literally rather than as a regular expression.",
-      "type": "boolean"
-    },
-    "only_ids": {
-      "description": "If true, answers with [id, line number] pairs instead of the lines themselves.",
-      "type": "boolean"
-    },
-    "query": {
-      "description": "Optional regular expression; only lines matching it are returned. Matched against the file's own lines, so it is unaffected by how the response is printed. Prefix with (?i) to ignore case.",
-      "type": "string"
-    },
-    "start_line": {
-      "description": "1-indexed starting line number (inclusive)",
-      "type": "integer"
-    }
-  },
-  "required": [
-    "filepath"
-  ],
-  "type": "object"
-}
+```bash
+ast-editor view src/main.rs 1,3
 ```
 
-#### Usage Examples
-
-##### Default Example (`only_ids = false`)
-###### Input
-```json
-{
-  "end_line": 3,
-  "filepath": "/path/to/project/create_ids.rs",
-  "only_ids": false,
-  "start_line": 1
-}
-```
-
-###### Output
 ```rust
 1#77cf|1: fn main() {
 2#bcb4|2:     let x = 42;
-3#c2b7|3: }
+3#8d90|3:     let scratch = 0;
 ```
 
 ```json
 {
-  "enclosing_contexts": [],
+  "enclosing_contexts": [{"end":4,"name":"fn:main","start":1}],
   "showing_end": 3,
   "showing_start": 1,
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
 
-##### Example with IDs Only (`only_ids = true`)
-###### Input
-```json
-{
-  "end_line": 3,
-  "filepath": "/path/to/project/create_ids.rs",
-  "only_ids": true,
-  "start_line": 1
-}
-```
+`--only-ids` leaves the text out and answers with the pairs alone, which is what
+an edit needs:
 
-###### Output
 ```json
 {
-  "enclosing_contexts": [],
-  "lines": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
+  "enclosing_contexts": [{"end":4,"name":"fn:main","start":1}],
+  "lines": [["1#77cf",1],["2#bcb4",2],["3#8d90",3]],
   "showing_end": 3,
   "showing_start": 1,
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
 
@@ -256,179 +192,48 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 
-#### Input Schema
-```json
-{
-  "properties": {
-    "apply": {
-      "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_lines. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it.",
-      "type": "string"
-    },
-    "dry_run": {
-      "default": false,
-      "description": "If true, returns the unified diff and syntax validation result the edits would produce, without writing to disk or assigning line IDs. When the result is syntactically valid the response also carries a preview_id; pass it back as 'apply' to commit that exact batch without resending it.",
-      "type": "boolean"
-    },
-    "edits": {
-      "items": {
-        "properties": {
-          "content": {
-            "description": "The new content to insert or replace with, as line-terminated text: \"\" is no lines at all, \"\\n\" is one empty line, and a trailing newline ends the last line rather than starting another. Omitted/ignored for delete, move.",
-            "type": "string"
-          },
-          "dest_target_id": {
-            "description": "Optional destination target line ID (e.g. 10#e9c4). Required for move operations with 'before' or 'after' move_position.",
-            "type": "string"
-          },
-          "end_target_id": {
-            "description": "Optional ending target line ID for block range (e.g. 5#7f1c). Required for replace_range, optional for move.",
-            "type": "string"
-          },
-          "move_position": {
-            "description": "Optional relative position for move operations ('before', 'after', 'prepend', 'append').",
-            "enum": [
-              "before",
-              "after",
-              "prepend",
-              "append"
-            ],
-            "type": "string"
-          },
-          "occurrence": {
-            "description": "Optional 1-indexed occurrence count of the pattern (default: 1) for replace_substring.",
-            "type": "integer"
-          },
-          "op": {
-            "description": "The edit operation to perform.",
-            "enum": [
-              "replace",
-              "insert_after",
-              "insert_before",
-              "delete",
-              "replace_range",
-              "move",
-              "replace_substring"
-            ],
-            "type": "string"
-          },
-          "pattern": {
-            "description": "The substring pattern to find. Required for replace_substring.",
-            "type": "string"
-          },
-          "replacement": {
-            "description": "The replacement string. Required for replace_substring.",
-            "type": "string"
-          },
-          "target_id": {
-            "description": "Optional target line ID (e.g. 1#a5c7). Required for replace, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends).",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op"
-        ],
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "filepath": {
-      "description": "Absolute path to the file to modify",
-      "type": "string"
-    },
-    "strict_validation": {
-      "default": false,
-      "description": "If true, rolls back edits on syntax or parser error. If false, saves changes anyway and returns warnings/errors.",
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "filepath"
-  ],
-  "type": "object"
-}
+The batch below replaces one line, adds another after it, and removes the line
+the `view` above numbered 3:
+
+```bash
+ast-editor edit src/main.rs <<'EOF'
+replace 2#bcb4 ```
+    let x = 100;
+```
+insert_after 2#bcb4 ```
+    let y = 200;
+```
+delete 3#8d90
+EOF
 ```
 
-#### Usage Examples
-
-##### Compact Example
-###### Input
-```json
-{
-  "edits": [
-    {
-      "content": "    let y = 200;",
-      "op": "insert_after",
-      "target_id": "2#bcb4"
-    },
-    {
-      "content": "    let x = 100;",
-      "op": "replace",
-      "target_id": "2#bcb4"
-    },
-    {
-      "op": "delete",
-      "target_id": "3#c2b7"
-    }
-  ],
-  "filepath": "/path/to/project/create_ids.rs"
-}
-```
-
-###### Output
 ```json
 {
   "modified_lines": [
-    ["2#9639",2], ["4#b7a3",3]
-  ],
-  "syntax_valid": null,
-  "message": "No grammar covers this file type, so the result was written without a syntax check."
+    ["2#9639",2], ["5#b7a3",3], ["4#c2b7",4]
+  ]
 }
 ```
 
-##### Dry Run
-###### Input
-```json
-{
-  "dry_run": true,
-  "edits": [
-    {
-      "content": "    let y = 200;",
-      "op": "insert_after",
-      "target_id": "2#bcb4"
-    },
-    {
-      "content": "    let x = 100;",
-      "op": "replace",
-      "target_id": "2#bcb4"
-    },
-    {
-      "op": "delete",
-      "target_id": "3#c2b7"
-    }
-  ],
-  "filepath": "/path/to/project/create_ids.rs"
-}
-```
+`--dry-run` answers the same way without writing, and keeps the batch under a
+`preview_id` that `--apply` commits:
 
-###### Output
-```json
 ```diff
 --- /path/to/project/create_ids.rs
 +++ /path/to/project/create_ids.rs
-@@ -1,3 +1,3 @@
+@@ -1,4 +1,4 @@
  fn main() {
 -    let x = 42;
--}
+-    let scratch = 0;
 +    let x = 100;
 +    let y = 200;
+ }
 ```
 ```json
 {
-  "message": "No grammar covers this file type, so the result was written without a syntax check.",
   "preview_id": "p1f",
-  "syntax_valid": null
+  "syntax_valid": true
 }
-```
 ```
 
 ### `create`
@@ -439,72 +244,23 @@ The refusal is `FILE_ALREADY_EXISTS`, and it is deliberate: rewriting a whole
 file to change part of it is how a file gets truncated when something goes
 wrong halfway.
 
-#### Input Schema
-```json
-{
-  "properties": {
-    "content": {
-      "description": "Initial text content of the file.",
-      "type": "string"
-    },
-    "filepath": {
-      "description": "Absolute path to the file.",
-      "type": "string"
-    },
-    "return_ids": {
-      "default": false,
-      "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens.",
-      "type": "boolean"
-    }
-  },
-  "required": [
-    "filepath",
-    "content"
-  ],
-  "type": "object"
-}
+```bash
+ast-editor create src/new.rs --content 'fn main() {}' --return-ids
 ```
 
-#### Usage Examples
-
-##### Default Example (`return_ids = false`)
-###### Input
-```json
-{
-  "content": "fn main() {\n    let x = 42;\n}\n",
-  "filepath": "/path/to/project/create_default.rs",
-  "return_ids": false
-}
-```
-
-###### Output
-```json
-{
-  "total_bytes": 30,
-  "total_lines": 3
-}
-```
-
-##### Example with Line IDs (`return_ids = true`)
-###### Input
-```json
-{
-  "content": "fn main() {\n    let x = 42;\n}\n",
-  "filepath": "/path/to/project/create_ids.rs",
-  "return_ids": true
-}
-```
-
-###### Output
 ```json
 {
   "lines": [
-    ["1#77cf",1], ["2#bcb4",2], ["3#c2b7",3]
+    ["1#77cf",1], ["2#bcb4",2], ["3#8d90",3], ["4#c2b7",4]
   ],
-  "total_bytes": 30,
-  "total_lines": 3
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```
+
+Every tool's parameters, with their types and defaults, are in
+`ast-editor skill api`. Anything listed there can be passed as `--kebab-case`,
+or as one object with `--json`.
 
 ## Languages
 

@@ -74,12 +74,12 @@ async fn generate_readme() {
     // 2. Act:
     // Run create return_ids=false
     let file_default = temp_dir.join("create_default.rs");
-    let content = "fn main() {\n    let x = 42;\n}\n";
+    let content = "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n";
     let out_create_default =
         view::create_lines(&repo, file_default.to_str().unwrap(), content, Some(false)).unwrap();
 
     // Run create return_ids=true
-    let file_ids = temp_dir.join("create_ids.txt");
+    let file_ids = temp_dir.join("create_ids.rs");
     let out_create_ids =
         view::create_lines(&repo, file_ids.to_str().unwrap(), content, Some(true)).unwrap();
 
@@ -109,7 +109,8 @@ async fn generate_readme() {
     )
     .unwrap();
 
-    // Parse the returned line ID for `let x = 42;` (line 2)
+    // Parse the returned line IDs: line 2 is edited, line 3 is the one the
+    // batch removes, so the example leaves a file that still parses.
     let val_create_ids: serde_json::Value = serde_json::from_str(&out_create_ids).unwrap();
     let ids = val_create_ids["lines"].as_array().unwrap();
     // Each entry is [id, line] (card #5).
@@ -284,7 +285,7 @@ async fn generate_readme() {
     );
     let fmt_view_only_ids = format!("```json\n{}\n```", out_view_only_ids.metadata_json);
     let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
-    let fmt_edit_dry_run = format!("```json\n{}\n```", out_edit_dry_run);
+    let fmt_edit_dry_run = out_edit_dry_run.clone();
 
     // Each tool's one-line description is the one the binary prints, so the
     // document repeats what the tool says about itself rather than a second

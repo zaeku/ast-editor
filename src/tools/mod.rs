@@ -82,7 +82,7 @@ impl ToolDispatcher {
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Absolute path to the file to inspect"
+                            "description": "Path to the file, relative to the working directory or absolute"
                         },
                         "query": {
                             "type": "string",
@@ -108,7 +108,7 @@ impl ToolDispatcher {
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Absolute path to the file to read"
+                            "description": "Path to the file, relative to the working directory or absolute"
                         },
                         "sexp": {
                             "type": "boolean",
@@ -127,7 +127,7 @@ impl ToolDispatcher {
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Absolute path to the target file"
+                            "description": "Path to the file, relative to the working directory or absolute"
                         },
                         "filepaths": {
                             "type": "array",
@@ -170,7 +170,7 @@ impl ToolDispatcher {
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Absolute path to the file to modify"
+                            "description": "Path to the file, relative to the working directory or absolute"
                         },
                         "edits": {
                             "type": "array",
@@ -245,7 +245,7 @@ impl ToolDispatcher {
                     "properties": {
                         "filepath": {
                             "type": "string",
-                            "description": "Absolute path to the file."
+                            "description": "Path to the file to write, relative to the working directory or absolute"
                         },
                         "content": {
                             "type": "string",

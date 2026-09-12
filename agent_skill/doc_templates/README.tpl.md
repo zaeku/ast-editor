@@ -131,23 +131,15 @@ exactly. A range can follow the path the way `sed -n '40,80p'` takes one.
   so a call answers with fewer rows when the lines are long. The wrapping width
   is a display choice and does not change what a call costs.
 
-#### Input Schema
-{{view_schema}}
+```bash
+ast-editor view src/main.rs 1,3
+```
 
-#### Usage Examples
-
-##### Default Example (`only_ids = false`)
-###### Input
-{{view_input_default}}
-
-###### Output
 {{view_output_default}}
 
-##### Example with IDs Only (`only_ids = true`)
-###### Input
-{{view_input_only_ids}}
+`--only-ids` leaves the text out and answers with the pairs alone, which is what
+an edit needs:
 
-###### Output
 {{view_output_only_ids}}
 
 ### `outline`
@@ -177,23 +169,26 @@ is an error rather than zero matches.
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 
-#### Input Schema
-{{edit_schema}}
+The batch below replaces one line, adds another after it, and removes the line
+the `view` above numbered 3:
 
-#### Usage Examples
+```bash
+ast-editor edit src/main.rs <<'EOF'
+replace 2#bcb4 ```
+    let x = 100;
+```
+insert_after 2#bcb4 ```
+    let y = 200;
+```
+delete 3#8d90
+EOF
+```
 
-##### Compact Example
-###### Input
-{{edit_input_compact}}
-
-###### Output
 {{edit_output_compact}}
 
-##### Dry Run
-###### Input
-{{edit_input_dry_run}}
+`--dry-run` answers the same way without writing, and keeps the batch under a
+`preview_id` that `--apply` commits:
 
-###### Output
 {{edit_output_dry_run}}
 
 ### `create`
@@ -204,24 +199,15 @@ The refusal is `FILE_ALREADY_EXISTS`, and it is deliberate: rewriting a whole
 file to change part of it is how a file gets truncated when something goes
 wrong halfway.
 
-#### Input Schema
-{{create_schema}}
+```bash
+ast-editor create src/new.rs --content 'fn main() {}' --return-ids
+```
 
-#### Usage Examples
-
-##### Default Example (`return_ids = false`)
-###### Input
-{{create_input_default}}
-
-###### Output
-{{create_output_default}}
-
-##### Example with Line IDs (`return_ids = true`)
-###### Input
-{{create_input_ids}}
-
-###### Output
 {{create_output_ids}}
+
+Every tool's parameters, with their types and defaults, are in
+`ast-editor skill api`. Anything listed there can be passed as `--kebab-case`,
+or as one object with `--json`.
 
 ## Languages
 

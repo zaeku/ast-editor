@@ -127,9 +127,9 @@ exactly. A range can follow the path the way `sed -n '40,80p'` takes one.
 
 * A range is capped at {{line_cap}} lines per call.
 * Returned text is capped at {{response_cap}} bytes.
-* A line over {{segment_length}} characters is truncated in the view and its id
-  is suffixed `#TRUNC`. An edit to such a line is refused, to prevent the
-  truncation being written back; run a formatter over the file first.
+* A long line counts against the line cap in {{segment_length}}-character units,
+  so a call answers with fewer rows when the lines are long. The wrapping width
+  is a display choice and does not change what a call costs.
 
 #### Input Schema
 {{view_schema}}

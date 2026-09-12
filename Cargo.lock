@@ -90,10 +90,8 @@ name = "ast-editor"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "cc",
  "comrak",
  "dirs",
- "log",
  "once_cell",
  "regex",
  "rusqlite",

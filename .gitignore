@@ -5,3 +5,5 @@
 /.direnv/
 kanban/
 decisions/
+/.agents/
+/.superpowers/

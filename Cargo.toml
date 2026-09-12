@@ -2,13 +2,15 @@
 name = "ast-editor"
 version = "0.2.0"
 edition = "2021"
-authors = ["Antigravity Developer"]
-rust-version = "1.74.1"
-homepage = "https://tree-sitter.github.io/tree-sitter"
-repository = "https://github.com/tree-sitter/tree-sitter"
+authors = ["Park Jaeku <park@jaeku.kr>"]
+rust-version = "1.88"
+description = "Line-precise editing over tree-sitter: ids that survive an edit, so a file is changed without being reread."
+homepage = "https://github.com/zaeku/ast-editor"
+repository = "https://github.com/zaeku/ast-editor"
 license = "MIT"
-keywords = ["incremental", "parsing"]
-categories = ["command-line-utilities", "parsing"]
+readme = "README.md"
+keywords = ["tree-sitter", "ast", "editing", "cli", "agent"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Core parser

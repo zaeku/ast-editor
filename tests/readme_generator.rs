@@ -286,9 +286,26 @@ async fn generate_readme() {
     let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
     let fmt_edit_dry_run = format!("```json\n{}\n```", out_edit_dry_run);
 
+    // The language table is the one the binary carries, so the document cannot
+    // claim a grammar that is not compiled in or miss one that is.
+    let fmt_languages = {
+        let mut table = String::from("| Language | Extensions |\n|---|---|\n");
+        for grammar in ast_editor::config::GRAMMARS {
+            let extensions = grammar
+                .extensions
+                .iter()
+                .map(|ext| format!("`.{ext}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            table.push_str(&format!("| {} | {} |\n", grammar.name, extensions));
+        }
+        table.trim_end().to_string()
+    };
+
     // 3. Render every template from one placeholder table
     let placeholders: Vec<(&str, &str)> = vec![
         ("{{create_schema}}", &fmt_create_schema),
+        ("{{languages}}", &fmt_languages),
         ("{{create_input_default}}", &fmt_create_input_default),
         ("{{create_output_default}}", &fmt_create_default),
         ("{{create_input_ids}}", &fmt_create_input_ids),

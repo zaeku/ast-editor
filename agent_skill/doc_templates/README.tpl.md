@@ -1,24 +1,35 @@
 # ast-editor
 
-`ast-editor` is an agent-native tool suite designed to enable AI coding assistants to view, inspect, and modify codebases with absolute precision and safety. By combining Tree-sitter AST queries with a session-based transactional line editor, it eliminates common editing failure modes like line-sliding hallucinations and duplicate match corruption.
+Line-precise editing over tree-sitter. `ast-editor` reads a file, hands back an
+id for every line, and applies a batch of edits addressed by those ids — so a
+change is made without reproducing the text around it and without the line
+numbers moving underneath the next edit.
 
----
+It is a command, not a service. One call does one thing and leaves nothing
+open.
 
-## 🌟 Core Value Proposition
+## The id
 
-When agentic workflows attempt to edit code using traditional string-replacement tools (like `replace_file_content`), they suffer from:
-1. **Line-sliding Hallucinations**: Modifying a block of code shifts the line numbers, causing subsequent edits in the same session to target the wrong lines.
-2. **Brittle Matching**: Find-and-replace rules fail or match duplicate blocks when editing common or generic lines.
-3. **Token Waste**: Dumping thousands of lines to edit a small function wastes context windows and tokens.
+A line id is `<number>#<hash>`. The number names the line for as long as it
+lives, and the hash guards its content. An edit mints ids for the lines it
+writes and leaves every other id alone:
 
-`ast-editor` solves this by introducing:
-*   **Shift-Invariant targeting**: A session-cached database maps every line to a stable sequence ID and content hash (`[id, n, content]`). Line IDs remain valid even when surrounding lines are added, deleted, or shifted.
-*   **Safe Paragraph/Block-level Edits**: Instead of writing complex regex, agents edit code using target anchors with transactional rollbacks.
-*   **Multi-layered Safety Guards**: Automatic 800-line limits, 45KB response size caps, and 2048-character line truncations prevent token exhaustion.
+```
+before   1#fe05  2#ad78  3#b802  4#9f8f
+                 insert_after 2#ad78
+after    1#fe05  2#ad78  6#7722  3#b802  4#9f8f
+```
 
----
+So an id read before an edit still names its line afterwards, and re-reading a
+file to find out where everything moved is work that does not need doing. An id
+whose line changed underneath is refused rather than applied to whatever sits
+there now, and the refusal says which line to read again.
 
-## 📦 Install
+The ids are kept in a store under the user's cache directory. It holds no copy
+of the file: disk is the truth, and losing the store costs the ids of one file
+and nothing else.
+
+## Install
 
 ```bash
 just install     # the binary and the skill
@@ -44,15 +55,13 @@ an install is those two files and nothing needs to be exported for a parse to
 work. `<prefix>/bin` does need to be on `PATH`, since the skill document calls
 the command by name.
 
----
+## Calling it
 
-## 🚀 How to Call It
-
-One tool, one call. A tool is named by any unambiguous prefix, so the `_lines`
-and `_ast` suffixes can be left off (`ins` is `inspect`):
+One tool, one call. A tool is named by any unambiguous prefix, so `ins` is
+`inspect`:
 
 ```bash
-ast-editor view src/main.rs --query "fn main"
+ast-editor view src/main.rs 40,80
 ast-editor inspect src/main.rs --template functions
 ast-editor edit src/main.rs --apply p1f
 ast-editor --version
@@ -60,10 +69,9 @@ ast-editor --help
 ```
 
 Options are the tool's own parameters, derived from its schema, so anything
-`ast-editor skill api` lists can be passed as `--kebab-case`. Paths are
-relative to the working directory. A shape no option can carry goes in as
-`--json '{...}'`, and the whole-object JSON form a program would send still
-works unchanged.
+`ast-editor skill api` lists can be passed as `--kebab-case`. Paths are relative
+to the working directory, and several of them can be given at once. A shape no
+option can carry goes in as `--json '{...}'`.
 
 Editing has a second form that takes a script on stdin, so code needs no
 escaping at all — `ast-editor skill usage` has the worked examples:
@@ -77,9 +85,8 @@ delete 7c#aabb
 EOF
 ```
 
-`view` takes a `query` and `inspect` matches carry `start_id` /
-`end_id`, so finding a line by content or by structure already yields the IDs
-that edit it — no line numbers, and no `grep` pass first.
+`view` takes a `query` and `inspect` matches carry `start_id` / `end_id`, so
+finding a line by content or by structure already yields the ids that edit it.
 
 A tool prints what it has to say on stdout as fenced blocks — the file's own
 language for code, `diff` for a diff, `json` for the data — so code arrives
@@ -90,49 +97,38 @@ ast-editor edit src/main.rs --dry-run < edits.txt |
   awk '/^```json$/{f=1;next} /^```/{f=0} f' | jq -r .preview_id
 ````
 
-Failures print to stderr and exit non-zero. Because the options *are* the tool
-schema, there is no second interface to keep in step with it.
+Failures print to stderr and exit non-zero, so a response that arrived is a
+response about work that happened.
 
----
+## What a syntax check does
 
-## 🛠️ Tool Suite
+An edit is parsed after it is applied, and the verdict is reported rather than
+enforced: the answer carries `syntax_valid` and the diagnostics, and the file is
+written. A parser is not always right about valid code, and an edit that a
+grammar dislikes is often one a person meant.
 
-### 1. `create`
-Creates a brand-new file with initial content, JIT-initializes its database editing session, and returns the line list with unique line IDs in a single atomic step.
-*   **Safety**: Fails with `FILE_ALREADY_EXISTS` if the target path is not empty.
+`--strict` inverts that. The edit is refused, the file is left alone, and the
+refusal carries a `preview_id` — so `--apply <preview_id>` commits the batch
+unchanged where you judge the parser wrong. A dry run answers the same way and
+never writes.
 
-#### Input Schema
-{{create_schema}}
+`syntax_valid: null` means no grammar covers the file type and the result was
+written without a check.
 
-#### Usage Examples
+## The tools
 
-##### Default Example (`return_ids = false`)
-###### Input
-{{create_input_default}}
+### `view`
 
-###### Output
-{{create_output_default}}
+Prints lines with their ids. Each line is printed as `<id>|<line>: <text>`; a
+line too long for one row is broken at a fixed character count onto `│:` and
+`└:` rows that join back to it exactly. A range can follow the path the way
+`sed -n '40,80p'` takes one.
 
-##### Example with Line IDs (`return_ids = true`)
-###### Input
-{{create_input_ids}}
-
-###### Output
-{{create_output_ids}}
-
-#### 🛡️ Catastrophic Truncation Prevention / Why not `write_lines`
-
-Lazy agents often try to rewrite whole files to apply simple changes. When a network hiccup or token limit is reached mid-stream, it causes catastrophic mid-file truncation and permanent data loss.
-
-To prevent this, `create` intentionally blocks overwriting (`FILE_ALREADY_EXISTS`) to act as a safety guardrail forcing surgical line-level edits (`edit`) for existing files.
-
-We do not rename `create` to `write_lines` because the word "write" suggests overwriting or rewriting existing content, whereas `create` is explicitly designed as a one-time creation/initialization operation.
-
-### 2. `view`
-Retrieves a range of lines for any text file along with their persistent line IDs. Each line is printed as `<id>|<line>: <text>`; a line too long for one row is broken at a fixed character count onto `│:` and `└:` rows that join back to it exactly.
-*   **Capping**: Range length is capped at 800 lines max per call.
-*   **Capacity Limit**: Cumulative returned text is capped at 45,000 bytes.
-*   **Truncation**: Lines exceeding 2048 characters are truncated in the view and given a `#TRUNC` ID suffix.
+* A range is capped at 800 lines per call.
+* Returned text is capped at 45,000 bytes.
+* A line over 2048 characters is truncated in the view and its id is suffixed
+  `#TRUNC`. An edit to such a line is refused, to prevent the truncation being
+  written back; run a formatter over the file first.
 
 #### Input Schema
 {{view_schema}}
@@ -153,11 +149,32 @@ Retrieves a range of lines for any text file along with their persistent line ID
 ###### Output
 {{view_output_only_ids}}
 
-### 3. `edit`
-Applies a transactional batch of operations to lines using their unique IDs.
-*   **Supported Operations**: `replace`, `replace_range`, `replace_substring`, `insert_before`, `insert_after`, `delete`, `move`.
-*   **Syntax Validation**: Performs AST parsing validation for supported programming, configuration, and shell script languages, and Comrak-based structural validation for Markdown (`.md`, `.markdown` extensions) to verify elements like unclosed code fences. Changes are automatically rolled back if syntax errors are introduced.
-*   **Safety**: Reject edits to `#TRUNC` lines with a `LINE_TOO_LONG_ERROR` recommending beautifiers (prettier, black, cargo fmt) to prevent data loss.
+### `outline`
+
+Lists the definitions a file declares — signature, line range, and the ids that
+edit them — which is the first look at an unfamiliar file. With `sexp` it
+returns the AST as S-expression text instead, up to a fixed depth, which is what
+a custom `inspect` query is written against.
+
+### `inspect`
+
+Searches a file's structure with a tree-sitter query or a named template, and
+answers with each match's line range and the ids that edit it. A matched
+definition's code comes back as its own block, printed as `view` prints lines;
+`include_code: false` leaves it out. A query that does not compile is an error
+rather than zero matches.
+
+`ast-editor inspect --help` lists the templates each language has.
+
+### `edit`
+
+Applies a batch of operations to lines named by their ids, as one transaction.
+
+* `replace`, `replace_range`, `replace_substring`, `insert_before`,
+  `insert_after`, `delete`, `move`.
+* The answer is `modified_lines`, each entry a line as `[id, line number]`.
+* Content is line-terminated text: an empty payload is no lines, so a `replace`
+  with one deletes the line.
 
 #### Input Schema
 {{edit_schema}}
@@ -171,63 +188,56 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ###### Output
 {{edit_output_compact}}
 
-### 4. `inspect`
-Queries a file's structure using Tree-sitter S-expression query patterns or templates (standard templates: `functions`, `classes`, `imports` across Python, Rust, Go, JS, TS, TSX, Java, C, C++, and Swift, with Bash supporting `functions`; specialized templates: Rust `traits` & `impls`, Go `structs` & `interfaces`, and C/C++ `macros`; Markdown templates: `headings`, `headers`, `codeblocks`, `code_blocks`, `links`, `tables`, `lists`), returning each match's line range and the ids that edit it. A matched definition's code comes back as its own block, printed as `view` prints lines; `include_code: false` leaves it out.
+##### Dry Run
+###### Input
+{{edit_input_dry_run}}
 
-### 5. `outline`
-Lists the definitions a file declares — signature, line range, and the line IDs that edit them — which is the first look at an unfamiliar file. With `sexp` it returns the complete AST as S-expression text instead, up to a fixed depth, which is what a custom `inspect` query is written against.
+###### Output
+{{edit_output_dry_run}}
 
----
+### `create`
 
-## 🌐 Supported Languages & Formats
+Writes a new file and returns its lines with their ids in one step. It refuses
+to overwrite an existing file (`FILE_ALREADY_EXISTS`), so the way to change a
+file that is already there is `edit`, which replaces the lines it was given and
+leaves the rest of the file alone.
 
-`ast-editor` supports full AST-based inspection and syntax validation for:
-*   **Python** (`.py`)
-*   **JavaScript / TypeScript / TSX** (`.js`, `.jsx`, `.ts`, `.tsx`)
-*   **Go** (`.go`)
-*   **Rust** (`.rs`)
-*   **Java** (`.java`)
-*   **C / C++** (`.c`, `.h`, `.cpp`, `.cc`, `.cxx`)
-*   **Lua** (`.lua`)
-*   **HTML** (`.html`, `.htm`)
-*   **JSON** (`.json`)
-*   **YAML** (`.yaml`, `.yml`)
-*   **TOML** (`.toml`)
-*   **Swift** (`.swift`)
-*   **Markdown** (`.md`, `.markdown`)
-*   **Shell Scripts (POSIX shell, Bash, Zsh, Ksh)** (`.sh`, `.bash`, `.zsh`, `.ksh`)
-*   **Nix** (`.nix`)
+#### Input Schema
+{{create_schema}}
 
----
+#### Usage Examples
 
-## 🔄 Recommended Workflow (Agent Lifecycle)
+##### Default Example (`return_ids = false`)
+###### Input
+{{create_input_default}}
 
-```mermaid
-graph TD
-    A[Start Task] --> B{File exists?}
-    B -- Yes --> C[Call view or inspect]
-    B -- No --> D[Call create]
-    C --> E[Retrieve Stable Line IDs]
-    D --> E
-    E --> F[Plan modifications]
-    F --> G[Call edit with target IDs]
-    G --> H[Verification & Completion]
-```
+###### Output
+{{create_output_default}}
 
-### Long Line Handling
-If a line length exceeds 2048 characters and triggers a `LINE_TOO_LONG_ERROR`, run a local formatter to break it into multiple lines before editing:
-$$\text{Prettier / Black / Cargo fmt} \rightarrow \text{view\_lines} \rightarrow \text{edit\_lines}$$
+##### Example with Line IDs (`return_ids = true`)
+###### Input
+{{create_input_ids}}
 
----
+###### Output
+{{create_output_ids}}
 
-## ⚙️ Build & Setup
+## Languages
 
-### Requirements
-*   Rust 1.74.1+
-*   Cargo
+Each grammar is a dependency compiled into the binary at the version
+`Cargo.lock` pins, and `ast-editor --version` reports them with their versions.
 
-### Compilation
+{{languages}}
+
+A file whose extension is not listed is read, edited and written without a
+syntax check.
+
+## Building
+
+Rust 1.88 or newer.
+
 ```bash
-cargo build --release
+just build       # or: cargo build --release
+just test
 ```
-The compiled release binary is located at `target/release/ast-editor`.
+
+The binary is at `target/release/ast-editor`.

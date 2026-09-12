@@ -1,85 +1,94 @@
-# API Specification - `ast-editor`
+# Parameters
 
-This document defines the interface, parameters, and return formats for the `ast-editor` tool suite.
+Every tool's parameters, as the binary declares them. Each one can be passed on
+the command line as `--kebab-case`, or the whole object can be passed at once
+with `--json '{...}'`:
 
----
+```bash
+ast-editor view src/main.rs --start-line 1 --end-line 3
+ast-editor view --json '{"filepath": "src/main.rs", "start_line": 1, "end_line": 3}'
+```
 
-## 1. `create`
-Creates a brand-new file with the initial content and JIT-initializes its line editing session.
+`filepath` is the first positional argument, so it is rarely written out. A
+path is relative to the working directory unless it is absolute.
 
-### Parameters (JSON Schema)
+A tool prints its answer to stdout as fenced blocks — the file's own language
+for code, `diff` for a diff, `json` for the data. A failure prints to stderr and
+exits non-zero.
+
+## `outline`
+
+Lists the definitions a file declares, each with its line range and the line IDs that edit it. The first look at an unfamiliar file.
+
 ```json
 {
   "properties": {
-    "content": {
-      "description": "Initial text content of the file.",
-      "type": "string"
-    },
     "filepath": {
-      "description": "Path to the file to write, relative to the working directory or absolute",
+      "description": "Path to the file, relative to the working directory or absolute",
       "type": "string"
     },
-    "return_ids": {
+    "sexp": {
       "default": false,
-      "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens.",
+      "description": "If true, returns the whole parse tree as s-expression text instead of the outline. For writing a query against a grammar whose node names are not yet known.",
       "type": "boolean"
     }
   },
   "required": [
-    "filepath",
-    "content"
+    "filepath"
   ],
   "type": "object"
 }
 ```
 
-### Usage Examples
+## `inspect`
 
-#### Default Example (`return_ids = false`)
-##### Input
+Search a file's structure with a Tree-sitter query or a named template, and answer with each match's line range and the ids that edit it.
+
 ```json
 {
-  "content": "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n",
-  "filepath": "/path/to/project/create_default.rs",
-  "return_ids": false
+  "properties": {
+    "filepath": {
+      "description": "Path to the file, relative to the working directory or absolute",
+      "type": "string"
+    },
+    "include_code": {
+      "description": "Whether to include the source code of the enclosing definition (default: true)",
+      "type": "boolean"
+    },
+    "query": {
+      "description": "Optional Tree-sitter S-expression query",
+      "type": "string"
+    },
+    "template": {
+      "description": "Predefined query template to run. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp, swift); traits, impls (rust); interfaces, structs (go); macros (c, cpp); functions (bash); headings, headers, codeblocks, code_blocks, links, tables, lists (markdown).",
+      "enum": [
+        "functions",
+        "classes",
+        "imports",
+        "headings",
+        "headers",
+        "codeblocks",
+        "code_blocks",
+        "links",
+        "tables",
+        "lists",
+        "traits",
+        "impls",
+        "structs",
+        "interfaces",
+        "macros"
+      ],
+      "type": "string"
+    }
+  },
+  "type": "object"
 }
 ```
 
-##### Output
-```json
-{
-  "total_bytes": 51,
-  "total_lines": 4
-}
-```
+## `view`
 
-#### Example with Line IDs (`return_ids = true`)
-##### Input
-```json
-{
-  "content": "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n",
-  "filepath": "/path/to/project/create_ids.rs",
-  "return_ids": true
-}
-```
+Print a file's lines with the ids that edit them, or with only_ids the ids and line numbers alone.
 
-##### Output
-```json
-{
-  "lines": [
-    ["1#77cf",1], ["2#bcb4",2], ["3#8d90",3], ["4#c2b7",4]
-  ],
-  "total_bytes": 51,
-  "total_lines": 4
-}
-```
-
----
-
-## 2. `view`
-Retrieves a range of lines for any text file along with their persistent unique Line IDs. Each line is printed as `<id>|<line>: <text>`; a line too long for one row is broken at a fixed character count onto `│:` and `└:` rows that join back to it exactly.
-
-### Parameters (JSON Schema)
 ```json
 {
   "properties": {
@@ -124,10 +133,10 @@ Retrieves a range of lines for any text file along with their persistent unique 
 }
 ```
 
-### Usage Examples
+### An example
 
-#### Default Example (`only_ids = false`)
-##### Input
+Input:
+
 ```json
 {
   "end_line": 3,
@@ -137,7 +146,8 @@ Retrieves a range of lines for any text file along with their persistent unique 
 }
 ```
 
-##### Output
+Output:
+
 ```rust
 1#77cf|1: fn main() {
 2#bcb4|2:     let x = 42;
@@ -154,8 +164,8 @@ Retrieves a range of lines for any text file along with their persistent unique 
 }
 ```
 
-#### Example with IDs Only (`only_ids = true`)
-##### Input
+With `only_ids`:
+
 ```json
 {
   "end_line": 3,
@@ -165,7 +175,6 @@ Retrieves a range of lines for any text file along with their persistent unique 
 }
 ```
 
-##### Output
 ```json
 {
   "enclosing_contexts": [{"end":4,"name":"fn:main","start":1}],
@@ -177,12 +186,10 @@ Retrieves a range of lines for any text file along with their persistent unique 
 }
 ```
 
----
+## `edit`
 
-## 3. `edit`
-Applies a transactional batch of operations to lines using their unique IDs.
+Apply edits transactionally to a file. Answers with the lines it changed, each as [id, line number], so a following edit needs no second read.
 
-### Parameters (JSON Schema)
 ```json
 {
   "properties": {
@@ -274,10 +281,10 @@ Applies a transactional batch of operations to lines using their unique IDs.
 }
 ```
 
-### Usage Examples
+### An example
 
-#### Compact Example
-##### Input
+A batch that replaces a line, inserts after it, and deletes another:
+
 ```json
 {
   "edits": [
@@ -300,7 +307,6 @@ Applies a transactional batch of operations to lines using their unique IDs.
 }
 ```
 
-##### Output
 ```json
 {
   "modified_lines": [
@@ -309,24 +315,15 @@ Applies a transactional batch of operations to lines using their unique IDs.
 }
 ```
 
-#### Dry-Run Example (`dry_run = true`)
-Previews the same batch. The response carries the unified diff and the syntax
-validation result; the file and the line IDs are left untouched, and no
-`modified_ids` are returned.
+Every id the batch minted comes back in `modified_lines`, each entry a line as
+`[id, line number]`, so a following edit needs no second read.
 
-A batch that validates also returns a short single-use `preview_id`. Pass it
-back as `apply` with the same `filepath` to commit exactly that batch and
-receive the new IDs, without resending `edits`:
+### Previewing a batch
 
-```json
-{"filepath": "/path/to/file.rs", "apply": "p1f"}
-```
+`dry_run` runs the same batch against a copy. The answer carries the unified
+diff and the syntax result; the file and the line ids are untouched, and no
+`modified_lines` come back because nothing was written.
 
-The id is refused if it was already applied, if it is addressed at another
-file, or if the file changed since the preview was taken — in that last case
-the diff and syntax result no longer describe the outcome, so preview again.
-
-##### Input
 ```json
 {
   "dry_run": true,
@@ -350,7 +347,6 @@ the diff and syntax result no longer describe the outcome, so preview again.
 }
 ```
 
-##### Output
 ```diff
 --- /path/to/project/create_ids.rs
 +++ /path/to/project/create_ids.rs
@@ -366,5 +362,68 @@ the diff and syntax result no longer describe the outcome, so preview again.
 {
   "preview_id": "p1f",
   "syntax_valid": true
+}
+```
+
+The answer carries a short single-use `preview_id`. Pass it back as `apply` with
+the same `filepath` to commit exactly that batch, without resending `edits`:
+
+```json
+{"filepath": "/path/to/file.rs", "apply": "p1f"}
+```
+
+An id is refused if it was already applied, if it is addressed at another file,
+or if the file changed since the preview was taken — in that last case the diff
+and the syntax result no longer describe the outcome, so preview again.
+
+A refusal under `--strict` carries a `preview_id` too, so a batch the parser
+disliked can be committed with `apply` when you judge the parser wrong.
+
+## `create`
+
+Write a new file and answer with its lines, each as [id, line number] when asked. Refuses to overwrite a file that exists, so an existing file is changed with edit.
+
+```json
+{
+  "properties": {
+    "content": {
+      "description": "Initial text content of the file.",
+      "type": "string"
+    },
+    "filepath": {
+      "description": "Path to the file to write, relative to the working directory or absolute",
+      "type": "string"
+    },
+    "return_ids": {
+      "default": false,
+      "description": "If true, returns the flat array of generated Line IDs. Set to false to omit IDs and save tokens.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "filepath",
+    "content"
+  ],
+  "type": "object"
+}
+```
+
+### An example
+
+```json
+{
+  "content": "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n",
+  "filepath": "/path/to/project/create_ids.rs",
+  "return_ids": true
+}
+```
+
+```json
+{
+  "lines": [
+    ["1#77cf",1], ["2#bcb4",2], ["3#8d90",3], ["4#c2b7",4]
+  ],
+  "total_bytes": 51,
+  "total_lines": 4
 }
 ```

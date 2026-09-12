@@ -1,51 +1,65 @@
 # Usage Guides - `ast-editor`
 
-This document outlines key editing concepts, best practices, and transactional workflows for the `ast-editor` tool suite.
+How the id model behaves in the situations that come up while editing.
 
----
+## Ids do not shift
 
-## 1. Shift-Invariant Targeting
+`edit` targets a line by an id like `1#dfca`: a sequence number that names the
+line and a hash that guards its content.
 
-Unlike standard search-and-replace tools, the `edit` tool targets specific lines using stable sequence/hash IDs (e.g., `"1#dfca"`).
-*   **Immune to Line Shifting**: Inserting or deleting lines in one part of a file does not shift the Line IDs of other lines. Any line shifts will not invalidate your references or write changes to incorrect positions.
-*   **Safer than Content Matching**: If a file contains duplicate lines of code, targeting precise, unique Line IDs guarantees that the exact intended line is modified, eliminating duplicate matching errors.
-*   **Hash Reuse Optimization (Double-turn Avoidance)**: If the content of a line has not changed, its Line ID remains stable and invariant. You can reuse previous Line IDs directly in subsequent edits without calling `view` again.
+- **Inserting or deleting elsewhere changes nothing.** The ids you hold for
+  other lines stay valid, so an id read before an edit still names its line
+  after it.
+- **Duplicate lines are still different lines.** Two identical lines have
+  different ids, so there is no way to edit the wrong one by matching content.
+- **An unchanged line keeps its id.** Ids from an earlier `view` can be used in
+  a later edit without reading the file again.
 
----
+## The store is a cache, not a lock
 
-## 2. Stateless Local Cache & Lock-Free Design
+The ids live in a SQLite database under the user's cache directory. Files on
+disk are read, written and closed; nothing in a workspace is held open, and
+nothing is written beside the file being edited.
 
-To track Line IDs across editing operations, a SQLite database is maintained in the user directory as a stateless local cache.
-*   **No File Locks**: The database functions as a lightweight cache. Source files on disk are read, written, and closed instantly. There are no persistent file locks held on workspace files.
-*   **Markdown & Plain Text Compatibility**: Syntax validation is completely skipped for Markdown, plain text, and unsupported configuration files. Syntax validation omission or failure on these files **never blocks** updates.
+Losing the store costs the ids of the files it covered and nothing else. The
+next call reads those files and mints new ones.
 
----
+## When a file changes underneath
 
-## 3. When a File Changes Underneath
+A file changed outside the tool has its index reconciled against what is now on
+disk rather than rebuilt. A patience diff over the stored hashes decides what
+survived: unchanged lines keep their ids, a line that only moved keeps its id,
+and a line a formatter merely respaced keeps its id too. Only genuinely new
+lines draw a new one, and a retired id is never handed out again.
 
-When a file has changed outside the tool, its line index is reconciled against what is now on disk rather than rebuilt. A patience diff over the stored line hashes decides what survived: unchanged lines keep their IDs, a line that only moved keeps its ID, and a line that was merely respaced by a formatter keeps its ID too. Only genuinely new lines draw a new one, and a retired ID is never handed out again.
+That happens silently for lines you are not editing. If a line **your edit
+targets** did not survive, the edit is refused and names that line — read it
+again for its current id. The ids you hold for other lines are unaffected, so
+only the refused one needs re-reading.
 
-That happens silently for lines you are not editing. If a line **your edit targets** did not survive — its content changed or it was deleted — the edit is refused with a `CONCURRENCY_ERROR` naming it, rather than being applied to whatever is at that position now. Re-read the file to get current IDs and try again.
+## What a syntax check does
 
----
+An edit is parsed after it is applied, and the verdict is reported rather than
+enforced: the answer carries `syntax_valid` and the diagnostics, and the file is
+written. Prose is checked too — an unclosed code fence in Markdown comes back as
+a warning — and a warning never blocks a write.
 
-## 4. Editing Long Lines (`replace_substring`)
+`--strict` refuses instead, leaves the file alone, and hands back a `preview_id`
+that `--apply` commits if you judge the parser wrong.
 
-Surgical updates on long lines (lines exceeding 2,048 characters) are supported via the `"replace_substring"` operation. This avoids token explosion while still permitting precise edits inside long lines (e.g., minified JS, long strings, large JSON arrays, or HTML files).
-*   **Workflow**: Use `view` (which soft-wraps the lines for display), locate the target Line ID, and apply edits with the `"replace_substring"` operation, providing the search `pattern` and target `replacement`.
+A file no grammar covers is written with `syntax_valid: null`.
 
----
+## Replacing a block
 
-## 5. `"replace_range"` Guidelines & Examples
+`replace_range` replaces a continuous block of lines in one transaction, and is
+better than a loop of single-line `replace` and `delete` operations:
 
-The `"replace_range"` operation is designed to replace a continuous block of lines in a single atomic transaction. It is highly recommended over sending multiple single-line `"replace"` or `"delete"` operations in a loop.
+- The whole range is one batch, so it is parsed once and either reported on or,
+  under `--strict`, refused as a unit.
+- One call rather than several.
+- Nothing in between can move, since the batch is applied against the ids it
+  was given.
 
-### Advantages:
-1. **Safety & Atomicity**: The entire range replacement is validated as a single block. If any syntax error is introduced, the entire replacement is rolled back.
-2. **Token Efficiency**: Bypasses multiple round-trips and reduces overhead by sending a single edit payload.
-3. **No Line Shifting Collision**: Replacing a range at once guarantees that Line IDs remain stable, avoiding potential issues with shifted indices during sequential updates.
-
-### Example: Replacing a multi-line function definition
 ```json
 {
   "filepath": "/path/to/project/src/main.rs",
@@ -60,12 +74,26 @@ The `"replace_range"` operation is designed to replace a continuous block of lin
 }
 ```
 
----
+The same batch is written more briefly as an edit script on stdin, which needs
+no JSON escaping — see `ast-editor skill usage` for the directive form.
 
-## 6. Agent-Native Positioning Workflow (Token Savings)
+## Editing inside a long line
 
-When creating large files via `create`, passing `return_ids: false` saves significant token costs by bypassing line serialization and hashing.
-Since the file has just been initialized:
-1. **Implicit Mapping**: The agent knows the 1-indexed line numbers correspond 1-to-1 to the indices of the input content split by `\n`.
-2. **Local ID Construction**: For a newly created file, the agent can locally construct the Line ID for line number $N$ using the hexadecimal format of $N$ and the first 4 characters of the SHA-1 hex hash of the line content (e.g., `<hex_N>#<sha1_prefix>`).
-3. **Querying as Needed**: If the agent wants to edit a specific range later, it can call `view` with `only_ids: true` for just that narrow range. This retrieves only the necessary Line IDs and line numbers, keeping the payload content-free.
+`replace_substring` edits within one line, given a `pattern` and a
+`replacement`, which is what minified JavaScript, a long string or a single-line
+JSON array needs. `view` soft-wraps such a line for display onto `│:` rows; the
+id names the whole line however many rows it was shown on.
+
+## Ids for a file you just wrote
+
+`create` with `return_ids: false` skips serialising and hashing the lines back
+to you, which is worth doing for a large file. The ids are still derivable,
+because the file was written a moment ago and nothing has edited it yet:
+
+- Line numbers are the 1-indexed positions of the content split on `\n`.
+- The id of line N is N in lowercase hexadecimal, then `#`, then the first four
+  characters of the SHA-1 hex digest of that line's content.
+
+That holds for a file in the state `create` left it, and stops holding after the
+first edit, which mints new ids. After that, ask: `view` with `only_ids` over
+the range you care about answers with the pairs and no text.

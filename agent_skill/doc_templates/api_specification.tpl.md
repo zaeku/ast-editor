@@ -1,91 +1,104 @@
-# API Specification - `ast-editor`
+# Parameters
 
-This document defines the interface, parameters, and return formats for the `ast-editor` tool suite.
+Every tool's parameters, as the binary declares them. Each one can be passed on
+the command line as `--kebab-case`, or the whole object can be passed at once
+with `--json '{...}'`:
 
----
+```bash
+ast-editor view src/main.rs --start-line 1 --end-line 3
+ast-editor view --json '{"filepath": "src/main.rs", "start_line": 1, "end_line": 3}'
+```
 
-## 1. `create`
-Creates a brand-new file with the initial content and JIT-initializes its line editing session.
+`filepath` is the first positional argument, so it is rarely written out. A
+path is relative to the working directory unless it is absolute.
 
-### Parameters (JSON Schema)
-{{create_schema}}
+A tool prints its answer to stdout as fenced blocks — the file's own language
+for code, `diff` for a diff, `json` for the data. A failure prints to stderr and
+exits non-zero.
 
-### Usage Examples
+## `outline`
 
-#### Default Example (`return_ids = false`)
-##### Input
-{{create_input_default}}
+{{outline_description}}
 
-##### Output
-{{create_output_default}}
+{{outline_schema}}
 
-#### Example with Line IDs (`return_ids = true`)
-##### Input
-{{create_input_ids}}
+## `inspect`
 
-##### Output
-{{create_output_ids}}
+{{inspect_description}}
 
----
+{{inspect_schema}}
 
-## 2. `view`
-Retrieves a range of lines for any text file along with their persistent unique Line IDs. Each line is printed as `<id>|<line>: <text>`; a line too long for one row is broken at a fixed character count onto `│:` and `└:` rows that join back to it exactly.
+## `view`
 
-### Parameters (JSON Schema)
+{{view_description}}
+
 {{view_schema}}
 
-### Usage Examples
+### An example
 
-#### Default Example (`only_ids = false`)
-##### Input
+Input:
+
 {{view_input_default}}
 
-##### Output
+Output:
+
 {{view_output_default}}
 
-#### Example with IDs Only (`only_ids = true`)
-##### Input
+With `only_ids`:
+
 {{view_input_only_ids}}
 
-##### Output
 {{view_output_only_ids}}
 
----
+## `edit`
 
-## 3. `edit`
-Applies a transactional batch of operations to lines using their unique IDs.
+{{edit_description}}
 
-### Parameters (JSON Schema)
 {{edit_schema}}
 
-### Usage Examples
+### An example
 
-#### Compact Example
-##### Input
+A batch that replaces a line, inserts after it, and deletes another:
+
 {{edit_input_compact}}
 
-##### Output
 {{edit_output_compact}}
 
-#### Dry-Run Example (`dry_run = true`)
-Previews the same batch. The response carries the unified diff and the syntax
-validation result; the file and the line IDs are left untouched, and no
-`modified_ids` are returned.
+Every id the batch minted comes back in `modified_lines`, each entry a line as
+`[id, line number]`, so a following edit needs no second read.
 
-A batch that validates also returns a short single-use `preview_id`. Pass it
-back as `apply` with the same `filepath` to commit exactly that batch and
-receive the new IDs, without resending `edits`:
+### Previewing a batch
+
+`dry_run` runs the same batch against a copy. The answer carries the unified
+diff and the syntax result; the file and the line ids are untouched, and no
+`modified_lines` come back because nothing was written.
+
+{{edit_input_dry_run}}
+
+{{edit_output_dry_run}}
+
+The answer carries a short single-use `preview_id`. Pass it back as `apply` with
+the same `filepath` to commit exactly that batch, without resending `edits`:
 
 ```json
 {"filepath": "/path/to/file.rs", "apply": "p1f"}
 ```
 
-The id is refused if it was already applied, if it is addressed at another
-file, or if the file changed since the preview was taken — in that last case
-the diff and syntax result no longer describe the outcome, so preview again.
+An id is refused if it was already applied, if it is addressed at another file,
+or if the file changed since the preview was taken — in that last case the diff
+and the syntax result no longer describe the outcome, so preview again.
 
-##### Input
-{{edit_input_dry_run}}
+A refusal under `--strict` carries a `preview_id` too, so a batch the parser
+disliked can be committed with `apply` when you judge the parser wrong.
 
-##### Output
-{{edit_output_dry_run}}
+## `create`
+
+{{create_description}}
+
+{{create_schema}}
+
+### An example
+
+{{create_input_ids}}
+
+{{create_output_ids}}

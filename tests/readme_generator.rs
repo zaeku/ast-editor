@@ -261,6 +261,17 @@ async fn generate_readme() {
         .and_then(|t| t.get("inputSchema"))
         .expect("edit schema not found");
 
+    let schema_of = |name: &str| {
+        let schema = tools
+            .iter()
+            .find(|t| t["name"] == name)
+            .and_then(|t| t.get("inputSchema"))
+            .unwrap_or_else(|| panic!("{name} schema not found"));
+        format!("```json\n{}\n```", serde_json::to_string_pretty(schema).unwrap())
+    };
+    let fmt_outline_schema = schema_of("outline");
+    let fmt_inspect_schema = schema_of("inspect");
+
     // Format all to pretty-printed json inside markdown code blocks
     let fmt_create_schema = format!(
         "```json\n{}\n```",
@@ -350,6 +361,8 @@ async fn generate_readme() {
     let placeholders: Vec<(&str, &str)> = vec![
         ("{{create_schema}}", &fmt_create_schema),
         ("{{languages}}", &fmt_languages),
+        ("{{outline_schema}}", &fmt_outline_schema),
+        ("{{inspect_schema}}", &fmt_inspect_schema),
         ("{{outline_description}}", &fmt_outline_description),
         ("{{inspect_description}}", &fmt_inspect_description),
         ("{{view_description}}", &fmt_view_description),

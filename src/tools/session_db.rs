@@ -251,11 +251,6 @@ fn split_insert_content(content: &str) -> Vec<String> {
         .collect()
 }
 
-fn strip_line_ending(content: &str) -> String {
-    let trimmed = content.strip_suffix('\n').unwrap_or(content);
-    trimmed.strip_suffix('\r').unwrap_or(trimmed).to_string()
-}
-
 impl LineBuffer {
     /// `next_seq` is the file's monotonic counter. Deriving it from the lines
     /// that happen to survive would hand a deleted line's number to the next
@@ -413,13 +408,22 @@ impl LineBuffer {
                         .as_ref()
                         .context("Missing content for replace op")?;
                     let idx = self.position_of(target_id, "Target", "target_id")?;
+                    // A payload is the lines it has (D-01M280Y0JPPWBG), and a
+                    // replace may be given more than one. The line named keeps
+                    // its sequence number and takes the first of them; the rest
+                    // are new lines after it, minted like any other insertion.
                     // No lines is no lines: replacing a line with nothing takes
                     // it out, the way replace_range takes out a span.
-                    if content.is_empty() {
+                    let mut contents = split_insert_content(content);
+                    if contents.is_empty() {
                         self.lines.remove(idx);
                     } else {
-                        self.lines[idx].content = strip_line_ending(content);
+                        let rest = contents.split_off(1);
+                        self.lines[idx].content = contents.pop().unwrap_or_default();
                         modified.push(self.id_at(idx));
+                        if !rest.is_empty() {
+                            self.insert_at(idx + 1, rest, &mut modified);
+                        }
                     }
                 }
 

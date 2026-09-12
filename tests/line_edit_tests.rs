@@ -1049,6 +1049,57 @@ async fn test_a_failed_dry_run_still_names_its_batch() {
 }
 
 #[tokio::test]
+/// A replace may be given more than one line, and every line it writes has to
+/// come back: the answer is what a following edit is addressed with, so an id
+/// missing from it, or an id in it that names no line, sends the caller back to
+/// re-read a file it was just told about.
+async fn test_a_multi_line_replace_names_every_line_it_wrote() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("multi_replace.txt", "one\ntwo\nthree\n");
+    let repository = SqliteSessionRepository;
+    let pm = create_test_parser_manager();
+
+    let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&view).unwrap();
+    let target_id = val["lines"][1].as_array().unwrap()[0]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let edits = vec![edit::LineEdit {
+        op: EditOp::Replace,
+        target_id: Some(target_id),
+        content: Some("alpha\nbeta\ngamma\n".to_string()),
+        ..Default::default()
+    }];
+
+    let res = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+        .await
+        .unwrap();
+    let answer: serde_json::Value = serde_json::from_str(&res).unwrap();
+    let reported = answer["modified_lines"].as_array().unwrap();
+
+    assert_eq!(
+        fs::read_to_string(file.path_str()).unwrap(),
+        "one\nalpha\nbeta\ngamma\nthree\n"
+    );
+    assert_eq!(reported.len(), 3, "three lines written, reported: {}", res);
+
+    // Each reported id has to be the id the file's own line carries now.
+    let after = view_range(&repository, file.path_str(), 1, 5, None).unwrap();
+    let after: serde_json::Value = serde_json::from_str(&after).unwrap();
+    for entry in reported {
+        let pair = entry.as_array().unwrap();
+        let (id, number) = (pair[0].as_str().unwrap(), pair[1].as_i64().unwrap());
+        let line = &after["lines"][(number - 1) as usize];
+        assert_eq!(
+            line.as_array().unwrap()[0].as_str().unwrap(),
+            id,
+            "line {number} is not the id the edit answered with: {res}"
+        );
+    }
+}
+#[tokio::test]
 async fn test_store_holds_no_file_text() {
     let _lock = acquire_db_lock();
     let secret = "let api_key = \"correct-horse-battery-staple\";";

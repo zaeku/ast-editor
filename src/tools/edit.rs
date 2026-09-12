@@ -267,17 +267,17 @@ fn resync_if_stale(
         return Ok(());
     };
 
-    let mut target_ids = Vec::new();
+    let mut start_ids = Vec::new();
     for edit in edits {
-        for id in [&edit.target_id, &edit.end_target_id, &edit.dest_target_id]
+        for id in [&edit.start_id, &edit.end_id, &edit.dest_id]
             .into_iter()
             .flatten()
         {
-            target_ids.push(id.clone());
+            start_ids.push(id.clone());
         }
     }
 
-    repository.smart_resync(filepath, &session_id, &target_ids)
+    repository.smart_resync(filepath, &session_id, &start_ids)
 }
 
 /// Preview an edit batch without touching disk or the session store.
@@ -672,13 +672,13 @@ mod tests {
 
         // Get the line IDs by viewing
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id = find_line_id(&lines_view, "let a = 1;");
-        assert!(!target_id.is_empty());
+        let start_id = find_line_id(&lines_view, "let a = 1;");
+        assert!(!start_id.is_empty());
 
         // 1. Test update
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id.clone()),
+            start_id: Some(start_id.clone()),
             content: Some("    let a = 42;".to_string()),
             ..Default::default()
         }];
@@ -686,7 +686,7 @@ mod tests {
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
-        let (seq, _) = parse_line_id(&target_id)?;
+        let (seq, _) = parse_line_id(&start_id)?;
         let expected_prefix = format!("{:x}#", seq);
         // Each entry is [id, line] (card #5).
         assert!(modified
@@ -700,13 +700,13 @@ mod tests {
         // Refresh metadata/session
         let _metadata = init_edit_session(filepath_str, false)?;
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let new_target_id = find_line_id(&lines_view, "let a = 42;");
-        assert!(!new_target_id.is_empty());
+        let new_start_id = find_line_id(&lines_view, "let a = 42;");
+        assert!(!new_start_id.is_empty());
 
         // 2. Test insert_after
         let edits = vec![LineEdit {
             op: EditOp::InsertAfter,
-            target_id: Some(new_target_id.clone()),
+            start_id: Some(new_start_id.clone()),
             content: Some("    let b = 2;".to_string()),
             ..Default::default()
         }];
@@ -731,7 +731,7 @@ mod tests {
         // 3. Test delete
         let edits = vec![LineEdit {
             op: EditOp::Delete,
-            target_id: Some(b_id.clone()),
+            start_id: Some(b_id.clone()),
             content: None,
             ..Default::default()
         }];
@@ -762,7 +762,7 @@ mod tests {
 
         let edits = vec![LineEdit {
             op: EditOp::InsertAfter,
-            target_id: None,
+            start_id: None,
             content: Some("// success after resync\n".to_string()),
             ..Default::default()
         }];
@@ -792,7 +792,7 @@ mod tests {
 
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some("1#9999".to_string()), // Invalid hash prefix
+            start_id: Some("1#9999".to_string()), // Invalid hash prefix
             content: Some("fn main() { // updated }".to_string()),
             ..Default::default()
         }];
@@ -824,13 +824,13 @@ mod tests {
 
         // Find the line 2 ID
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id = find_line_id(&lines_view, "let a = 1;");
-        assert!(!target_id.is_empty());
+        let start_id = find_line_id(&lines_view, "let a = 1;");
+        assert!(!start_id.is_empty());
 
         // Apply edit that introduces syntax error (e.g. mismatched braces / parsing error)
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some("    let a = {;".to_string()), // Syntax error
             ..Default::default()
         }];
@@ -852,10 +852,10 @@ mod tests {
         fs::write(&file_path, initial_content)?;
         let _metadata_strict = init_edit_session(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
+        let start_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
         let edits_strict = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id_strict),
+            start_id: Some(start_id_strict),
             content: Some("    let a = {;".to_string()),
             ..Default::default()
         }];
@@ -904,7 +904,7 @@ mod tests {
 
         let edits = vec![LineEdit {
             op: EditOp::Append,
-            target_id: None,
+            start_id: None,
             content: Some("fn main() {\n}".to_string()),
             ..Default::default()
         }];
@@ -944,7 +944,7 @@ mod tests {
         // Test delete on .RS file (verifies lowercase lookup/delegation works for uppercase extensions too)
         let edits = vec![LineEdit {
             op: EditOp::Delete,
-            target_id: Some(b_id.clone()),
+            start_id: Some(b_id.clone()),
             content: None,
             ..Default::default()
         }];
@@ -978,7 +978,7 @@ mod tests {
 
         let edits = vec![LineEdit {
             op: EditOp::Append,
-            target_id: None,
+            start_id: None,
             content: Some("pub fn foo() {}".to_string()),
             ..Default::default()
         }];
@@ -1008,7 +1008,7 @@ mod tests {
 
         let edits = vec![LineEdit {
             op: EditOp::Append,
-            target_id: None,
+            start_id: None,
             content: Some("pub fn bar() -> i32 {\n    42\n}".to_string()),
             ..Default::default()
         }];
@@ -1027,7 +1027,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_strict_target_id_validation() -> Result<()> {
+    async fn test_strict_start_id_validation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("strict_validation");
         let repository = SqliteSessionRepository;
@@ -1039,10 +1039,10 @@ mod tests {
         let metadata = init_edit_session(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 1);
 
-        // Call update with target_id = None
+        // Call update with start_id = None
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: None,
+            start_id: None,
             content: Some("pub fn bar() {}".to_string()),
             ..Default::default()
         }];
@@ -1050,7 +1050,7 @@ mod tests {
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
-        assert!(err_msg.contains("Missing target_id for replace op"));
+        assert!(err_msg.contains("Missing start_id for replace op"));
 
         Ok(())
     }
@@ -1069,7 +1069,7 @@ mod tests {
 
         let edits = vec![LineEdit {
             op: EditOp::Prepend,
-            target_id: None,
+            start_id: None,
             content: Some("use std::collections::HashMap;\n\n".to_string()),
             ..Default::default()
         }];
@@ -1108,9 +1108,9 @@ mod tests {
         let id_3 = find_line_id(&lines_view, "let b = 2;");
 
         let edits = vec![LineEdit {
-            op: EditOp::ReplaceRange,
-            target_id: Some(id_2),
-            end_target_id: Some(id_3),
+            op: EditOp::Replace,
+            start_id: Some(id_2),
+            end_id: Some(id_3),
             content: Some("    let val = 42;".to_string()),
             ..Default::default()
         }];
@@ -1154,8 +1154,8 @@ mod tests {
         // Move 'foo' function before 'main' function
         let edits = vec![LineEdit {
             op: EditOp::Move,
-            target_id: Some(foo_id),
-            dest_target_id: Some(main_id),
+            start_id: Some(foo_id),
+            dest_id: Some(main_id),
             move_position: Some(MovePosition::Before),
             ..Default::default()
         }];
@@ -1187,7 +1187,7 @@ mod tests {
         let _ = repository.delete_session(filepath_str);
 
         // Call edit_lines directly without calling init_edit_session.
-        // We can append a line. Since it's append, target_id is ignored.
+        // We can append a line. Since it's append, start_id is ignored.
         let edits = vec![LineEdit {
             op: EditOp::Append,
             content: Some("line 3".to_string()),
@@ -1231,14 +1231,14 @@ mod tests {
         assert!(lines_text.contains("└: aaaaa"));
 
         // Get target ID (which should NOT have #TRUNC suffix)
-        let target_id = find_line_id(&lines_view, "    // aaaaa");
-        assert!(!target_id.is_empty());
-        assert!(!target_id.contains("#TRUNC"));
+        let start_id = find_line_id(&lines_view, "    // aaaaa");
+        assert!(!start_id.is_empty());
+        assert!(!start_id.contains("#TRUNC"));
 
         // 1. Perform replace_substring on the long line
         let edits = vec![LineEdit {
             op: EditOp::ReplaceSubstring,
-            target_id: Some(target_id.clone()),
+            start_id: Some(start_id.clone()),
             pattern: Some("aaaaa".to_string()),
             replacement: Some("bbbbb".to_string()),
             occurrence: Some(1),
@@ -1272,13 +1272,13 @@ mod tests {
 
         // Get the lines view
         let lines_view = test_view_lines(&repository, filepath_str, 1, 2, None)?;
-        let target_id = find_line_id(&lines_view, "Some content");
-        assert!(!target_id.is_empty());
+        let start_id = find_line_id(&lines_view, "Some content");
+        assert!(!start_id.is_empty());
 
         // Make an edit that introduces a lint warning (unclosed fence, header hierarchy gap, and malformed link)
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some("### Heading Gap\n\n[text(url)\n\n```rust\nlet x = 1;\n".to_string()),
             ..Default::default()
         }];
@@ -1321,13 +1321,13 @@ mod tests {
 
         // Get the lines view
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id = find_line_id(&lines_view, "<p>Hello</p>");
-        assert!(!target_id.is_empty());
+        let start_id = find_line_id(&lines_view, "<p>Hello</p>");
+        assert!(!start_id.is_empty());
 
         // Make an edit that has invalid HTML syntax
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some("<p>Hello <span class=</p>".to_string()),
             ..Default::default()
         }];
@@ -1421,7 +1421,7 @@ fn main() {
 
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(start_line_id),
+            start_id: Some(start_line_id),
             content: Some("fn main() { println!(\"x\"); }".to_string()),
             ..Default::default()
         }];
@@ -1457,7 +1457,7 @@ fn main() {
 
         let edits = vec![LineEdit {
             op: EditOp::Delete,
-            target_id: Some(target_line_id),
+            start_id: Some(target_line_id),
             ..Default::default()
         }];
 
@@ -1496,7 +1496,7 @@ fn main() {
 
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(line_1_id.clone()),
+            start_id: Some(line_1_id.clone()),
             content: Some("fn renamed() {}".to_string()),
             ..Default::default()
         }];
@@ -1543,13 +1543,13 @@ fn main() {
 
         // Find the line 3 ID (which is "fi")
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id = find_line_id(&lines_view, "fi");
-        assert!(!target_id.is_empty());
+        let start_id = find_line_id(&lines_view, "fi");
+        assert!(!start_id.is_empty());
 
         // Apply edit that introduces syntax error (e.g. replacing "fi" with "else")
         let edits = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some("else".to_string()), // Syntax error since mismatched if/else without fi
             ..Default::default()
         }];
@@ -1571,10 +1571,10 @@ fn main() {
         fs::write(&file_path, initial_content)?;
         let _metadata_strict = init_edit_session(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let target_id_strict = find_line_id(&lines_view_strict, "fi");
+        let start_id_strict = find_line_id(&lines_view_strict, "fi");
         let edits_strict = vec![LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id_strict),
+            start_id: Some(start_id_strict),
             content: Some("else".to_string()),
             ..Default::default()
         }];

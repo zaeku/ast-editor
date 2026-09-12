@@ -211,7 +211,6 @@ mod tests {
 
         let directives = [
             "replace",
-            "replace_range",
             "insert_after",
             "insert_before",
             "append",

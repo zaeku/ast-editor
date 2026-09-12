@@ -179,7 +179,7 @@ async fn test_edit_operations_and_ast_validation() {
     // Fetch the correct target ID for line 2
     let view_res = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
-    let target_id = val["lines"][0].as_array().unwrap()[0]
+    let start_id = val["lines"][0].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
@@ -187,7 +187,7 @@ async fn test_edit_operations_and_ast_validation() {
     // Perform invalid edit (Syntax error)
     let invalid_edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id.clone()),
+        start_id: Some(start_id.clone()),
         content: Some("let a = ;".to_string()), // missing value
         ..Default::default()
     }];
@@ -209,14 +209,14 @@ async fn test_edit_operations_and_ast_validation() {
     let _init = session_db::init_edit_session(file.path_str(), false).unwrap();
     let view_res_strict = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val_strict: serde_json::Value = serde_json::from_str(&view_res_strict).unwrap();
-    let target_id_strict = val_strict["lines"][0].as_array().unwrap()[0]
+    let start_id_strict = val_strict["lines"][0].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let invalid_edits_strict = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id_strict),
+        start_id: Some(start_id_strict),
         content: Some("let a = ;".to_string()),
         ..Default::default()
     }];
@@ -250,14 +250,14 @@ async fn test_edit_operations_and_ast_validation() {
     // one captured at the top; re-read it.
     let view_res = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
-    let target_id = val["lines"][0].as_array().unwrap()[0]
+    let start_id = val["lines"][0].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let valid_edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
@@ -307,13 +307,13 @@ async fn test_transactional_deletes_and_inserts() {
     let edits = vec![
         edit::LineEdit {
             op: EditOp::Delete,
-            target_id: Some(id_b),
+            start_id: Some(id_b),
             content: None,
             ..Default::default()
         },
         edit::LineEdit {
             op: EditOp::InsertAfter,
-            target_id: Some(id_a),
+            start_id: Some(id_a),
             content: Some("    let c = 3;".to_string()),
             ..Default::default()
         },
@@ -348,7 +348,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     // Get line ID
     let view_res = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view_res).unwrap();
-    let target_id = val["lines"][0].as_array().unwrap()[0]
+    let start_id = val["lines"][0].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
@@ -364,7 +364,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     // Try applying line edits, should succeed due to Smart Resync
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("    let a = 3;".to_string()),
         ..Default::default()
     }];
@@ -391,7 +391,7 @@ async fn test_integration_append_operation() {
     // Perform append
     let edits = vec![edit::LineEdit {
         op: EditOp::Append,
-        target_id: None,
+        start_id: None,
         content: Some("fn additional() {\n}".to_string()),
         ..Default::default()
     }];
@@ -437,9 +437,9 @@ async fn test_integration_advanced_operations() {
 
     // 2. Perform replace_range replacing let a = 1 and let b = 2 with let val = 100
     let edits = vec![edit::LineEdit {
-        op: EditOp::ReplaceRange,
-        target_id: Some(id_a.clone()),
-        end_target_id: Some(id_b.clone()),
+        op: EditOp::Replace,
+        start_id: Some(id_a.clone()),
+        end_id: Some(id_b.clone()),
         content: Some("    let val = 100;".to_string()),
         ..Default::default()
     }];
@@ -470,8 +470,8 @@ async fn test_integration_advanced_operations() {
     // 3. Move let val = 100; before fn main() {
     let edits_move = vec![edit::LineEdit {
         op: EditOp::Move,
-        target_id: Some(id_val_new),
-        dest_target_id: Some(id_main_new),
+        start_id: Some(id_val_new),
+        dest_id: Some(id_main_new),
         move_position: Some(MovePosition::Before),
         ..Default::default()
     }];
@@ -488,7 +488,7 @@ async fn test_integration_advanced_operations() {
 }
 
 #[tokio::test]
-async fn test_integration_insert_without_target_id() {
+async fn test_integration_insert_without_start_id() {
     let _lock = acquire_db_lock();
     let file = TestFile::new(
         "insert_jit_no_target.rs",
@@ -498,10 +498,10 @@ async fn test_integration_insert_without_target_id() {
 
     let pm = create_test_parser_manager();
 
-    // 1. Perform insert_before with target_id = None (should prepend to the beginning of the file)
+    // 1. Perform insert_before with start_id = None (should prepend to the beginning of the file)
     let edits_before = vec![edit::LineEdit {
         op: EditOp::InsertBefore,
-        target_id: None,
+        start_id: None,
         content: Some("// Prepend header".to_string()),
         ..Default::default()
     }];
@@ -520,10 +520,10 @@ async fn test_integration_insert_without_target_id() {
         content1
     );
 
-    // 2. Perform insert_after with target_id = Some("") (should append to the end of the file)
+    // 2. Perform insert_after with start_id = Some("") (should append to the end of the file)
     let edits_after = vec![edit::LineEdit {
         op: EditOp::InsertAfter,
-        target_id: Some("".to_string()),
+        start_id: Some("".to_string()),
         content: Some("// Append footer".to_string()),
         ..Default::default()
     }];
@@ -589,7 +589,7 @@ async fn test_integration_create_lines_flow() {
     // 4. Modify the newly created file using `edit` and verify the modified contents on disk
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(id1.to_string()),
+        start_id: Some(id1.to_string()),
         content: Some("    let x = 100;".to_string()),
         ..Default::default()
     }];
@@ -641,7 +641,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
     // Verify replace_substring works on this long line
     let edits = vec![edit::LineEdit {
         op: EditOp::ReplaceSubstring,
-        target_id: Some(line1_id.to_string()),
+        start_id: Some(line1_id.to_string()),
         pattern: Some("aaaaa".to_string()),
         replacement: Some("bbbbb".to_string()),
         occurrence: Some(1),
@@ -739,7 +739,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
 
     let before_view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&before_view).unwrap();
-    let target_id = val["lines"][1].as_array().unwrap()[0]
+    let start_id = val["lines"][1].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
@@ -747,7 +747,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
 
     let valid_edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id.clone()),
+        start_id: Some(start_id.clone()),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
@@ -785,7 +785,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     // 2. A batch that breaks syntax reports the failure, still without writing.
     let broken_edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("    let a = ;".to_string()),
         ..Default::default()
     }];
@@ -826,14 +826,14 @@ async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
 
     let view = view_range(&repository, file.path_str(), 3, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
-    let target_id = val["lines"][0].as_array().unwrap()[0]
+    let start_id = val["lines"][0].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("### Skipped a level".to_string()),
         ..Default::default()
     }];
@@ -911,14 +911,14 @@ async fn test_preview_id_applies_the_validated_batch() {
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
-    let target_id = val["lines"][1].as_array().unwrap()[0]
+    let start_id = val["lines"][1].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
@@ -971,14 +971,14 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
-    let target_id = val["lines"][1].as_array().unwrap()[0]
+    let start_id = val["lines"][1].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
@@ -1019,14 +1019,14 @@ async fn test_a_failed_dry_run_still_names_its_batch() {
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
-    let target_id = val["lines"][1].as_array().unwrap()[0]
+    let start_id = val["lines"][1].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("    let a = ;".to_string()),
         ..Default::default()
     }];
@@ -1061,14 +1061,14 @@ async fn test_a_multi_line_replace_names_every_line_it_wrote() {
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
-    let target_id = val["lines"][1].as_array().unwrap()[0]
+    let start_id = val["lines"][1].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
 
     let edits = vec![edit::LineEdit {
         op: EditOp::Replace,
-        target_id: Some(target_id),
+        start_id: Some(start_id),
         content: Some("alpha\nbeta\ngamma\n".to_string()),
         ..Default::default()
     }];
@@ -1110,7 +1110,7 @@ async fn test_store_holds_no_file_text() {
     // Touch every path that populates the index.
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
-    let target_id = val["lines"][1].as_array().unwrap()[0]
+    let start_id = val["lines"][1].as_array().unwrap()[0]
         .as_str()
         .unwrap()
         .to_string();
@@ -1119,7 +1119,7 @@ async fn test_store_holds_no_file_text() {
         file.path_str(),
         vec![edit::LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some(format!("    {}", secret)),
             ..Default::default()
         }],
@@ -1235,7 +1235,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
     let pm = create_test_parser_manager();
 
     // An untargeted line changes underneath. The edit should still land.
-    let target_id = live_id(&repository, file.path_str(), 2);
+    let start_id = live_id(&repository, file.path_str(), 2);
     fs::write(
         file.path_str(),
         "fn main() {\n    let a = 1;\n    let b = 99;\n}\n",
@@ -1246,7 +1246,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
         file.path_str(),
         vec![edit::LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some("    let a = 7;".to_string()),
             ..Default::default()
         }],
@@ -1262,7 +1262,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
     );
 
     // The targeted line itself changes underneath. The edit must be refused.
-    let target_id = live_id(&repository, file.path_str(), 2);
+    let start_id = live_id(&repository, file.path_str(), 2);
     fs::write(
         file.path_str(),
         "fn main() {\n    let a = 123;\n    let b = 99;\n}\n",
@@ -1273,7 +1273,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
         file.path_str(),
         vec![edit::LineEdit {
             op: EditOp::Replace,
-            target_id: Some(target_id),
+            start_id: Some(start_id),
             content: Some("    let a = 8;".to_string()),
             ..Default::default()
         }],
@@ -1336,7 +1336,7 @@ async fn test_a_deleted_id_is_never_reissued() {
         file.path_str(),
         vec![edit::LineEdit {
             op: EditOp::Delete,
-            target_id: Some(doomed.clone()),
+            start_id: Some(doomed.clone()),
             ..Default::default()
         }],
         &pm,
@@ -1381,7 +1381,7 @@ async fn test_repeated_insertion_between_the_same_pair() {
             file.path_str(),
             vec![edit::LineEdit {
                 op: EditOp::InsertAfter,
-                target_id: Some(anchor),
+                start_id: Some(anchor),
                 content: Some(format!("    let v{} = {};", n, n)),
                 ..Default::default()
             }],
@@ -1427,7 +1427,7 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
         file.path_str(),
         vec![edit::LineEdit {
             op: EditOp::InsertAfter,
-            target_id: Some(anchor),
+            start_id: Some(anchor),
             content: Some("    let inserted = 0;".to_string()),
             ..Default::default()
         }],
@@ -1592,9 +1592,9 @@ async fn test_a_structural_match_carries_the_ids_that_edit_it() {
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
-            op: EditOp::ReplaceRange,
-            target_id: Some(doomed["start_id"].as_str().unwrap().to_string()),
-            end_target_id: Some(doomed["end_id"].as_str().unwrap().to_string()),
+            op: EditOp::Replace,
+            start_id: Some(doomed["start_id"].as_str().unwrap().to_string()),
+            end_id: Some(doomed["end_id"].as_str().unwrap().to_string()),
             content: Some("// gone".to_string()),
             ..Default::default()
         }],

@@ -93,7 +93,7 @@ fn test_an_edit_reaches_the_file() {
         &[
             "edit",
             &format!(
-                r#"{{"filepath":"{}","edits":[{{"op":"replace","target_id":"{}","content":"    let a = 2;"}}]}}"#,
+                r#"{{"filepath":"{}","edits":[{{"op":"replace","start_id":"{}","content":"    let a = 2;"}}]}}"#,
                 path, target
             ),
         ],
@@ -453,7 +453,7 @@ fn the_first_thirty_lines_of_help_stand_alone() {
         "outline",
         "#<hash>",
         "insert_after",
-        "replace_range",
+        "<start_id>,<end_id>",
         "delete",
     ] {
         assert!(

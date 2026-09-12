@@ -104,7 +104,7 @@ fn directive_to_edit(
 
     let takes_payload = matches!(
         op_name,
-        "replace" | "replace_range" | "insert_after" | "insert_before" | "append" | "prepend"
+        "replace" | "insert_after" | "insert_before" | "append" | "prepend"
     );
     if takes_payload && payload.is_none() {
         bail!(
@@ -122,28 +122,25 @@ fn directive_to_edit(
     }
 
     let edit = match (op_name, args.len()) {
-        ("replace", 1) => LineEdit {
-            op: EditOp::Replace,
-            target_id: Some(args[0].to_string()),
-            content,
-            ..Default::default()
-        },
-        ("replace_range", 2) => LineEdit {
-            op: EditOp::ReplaceRange,
-            target_id: Some(args[0].to_string()),
-            end_target_id: Some(args[1].to_string()),
-            content,
-            ..Default::default()
-        },
+        ("replace", 1) => {
+            let (start, end) = span(args[0], line, "replace")?;
+            LineEdit {
+                op: EditOp::Replace,
+                start_id: Some(start),
+                end_id: end,
+                content,
+                ..Default::default()
+            }
+        }
         ("insert_after", 1) => LineEdit {
             op: EditOp::InsertAfter,
-            target_id: Some(args[0].to_string()),
+            start_id: Some(single(args[0], line, "insert_after")?),
             content,
             ..Default::default()
         },
         ("insert_before", 1) => LineEdit {
             op: EditOp::InsertBefore,
-            target_id: Some(args[0].to_string()),
+            start_id: Some(single(args[0], line, "insert_before")?),
             content,
             ..Default::default()
         },
@@ -157,11 +154,15 @@ fn directive_to_edit(
             content,
             ..Default::default()
         },
-        ("delete", 1) => LineEdit {
-            op: EditOp::Delete,
-            target_id: Some(args[0].to_string()),
-            ..Default::default()
-        },
+        ("delete", 1) => {
+            let (start, end) = span(args[0], line, "delete")?;
+            LineEdit {
+                op: EditOp::Delete,
+                start_id: Some(start),
+                end_id: end,
+                ..Default::default()
+            }
+        }
         ("move", _) => parse_move(args, line)?,
 
         ("replace_substring", _) => bail!(
@@ -177,7 +178,7 @@ fn directive_to_edit(
             usage_of(op)
         ),
         (op, _) => bail!(
-            "line {}: unknown operation '{}'. Known: replace, replace_range, insert_after, \
+            "line {}: unknown operation '{}'. Known: replace, insert_after, \
              insert_before, append, prepend, delete, move.",
             line,
             op
@@ -185,6 +186,34 @@ fn directive_to_edit(
     };
 
     Ok(edit)
+}
+
+/// An address argument: one line id, or two separated by a comma for a span.
+/// `view` reads a line-number range the same way, so this is the same comma.
+fn span(arg: &str, line: usize, op: &str) -> Result<(String, Option<String>)> {
+    match arg.split_once(',') {
+        None => Ok((arg.to_string(), None)),
+        Some((start, end)) if !start.is_empty() && !end.is_empty() && !end.contains(',') => {
+            Ok((start.to_string(), Some(end.to_string())))
+        }
+        Some(_) => bail!(
+            "line {line}: '{op}' was given '{arg}' as an address. A span is \
+             <start_id>,<end_id>, with one comma and an id on each side."
+        ),
+    }
+}
+
+/// An address for an op that acts at a point rather than over a span.
+fn single(arg: &str, line: usize, op: &str) -> Result<String> {
+    let (start, end) = span(arg, line, op)?;
+    if end.is_some() {
+        bail!(
+            "line {line}: '{op}' acts at one line, so it takes one id rather than a \
+             span. {}",
+            usage_of(op)
+        );
+    }
+    Ok(start)
 }
 
 /// `move <start> [<end>] <before|after> <dest>` or
@@ -201,13 +230,14 @@ fn parse_move(args: &[&str], line: usize) -> Result<LineEdit> {
             )
         })?;
 
-    if position_at == 0 || position_at > 2 {
+    if position_at != 1 {
         bail!(
-            "line {}: 'move' takes one or two line ids before the position. {}",
+            "line {}: 'move' takes one address before the position. {}",
             line,
             usage_of("move")
         );
     }
+    let (start, end) = span(args[0], line, "move")?;
 
     let (position, needs_dest) = match args[position_at] {
         "before" => (MovePosition::Before, true),
@@ -236,13 +266,9 @@ fn parse_move(args: &[&str], line: usize) -> Result<LineEdit> {
 
     Ok(LineEdit {
         op: EditOp::Move,
-        target_id: Some(args[0].to_string()),
-        end_target_id: if position_at == 2 {
-            Some(args[1].to_string())
-        } else {
-            None
-        },
-        dest_target_id: dest,
+        start_id: Some(start),
+        end_id: end,
+        dest_id: dest,
         move_position: Some(position),
         ..Default::default()
     })
@@ -251,27 +277,19 @@ fn parse_move(args: &[&str], line: usize) -> Result<LineEdit> {
 fn is_known(op: &str) -> bool {
     matches!(
         op,
-        "replace"
-            | "replace_range"
-            | "insert_after"
-            | "insert_before"
-            | "append"
-            | "prepend"
-            | "delete"
-            | "move"
+        "replace" | "insert_after" | "insert_before" | "append" | "prepend" | "delete" | "move"
     )
 }
 
 fn usage_of(op: &str) -> &'static str {
     match op {
-        "replace" => "Usage: replace <id> ```",
-        "replace_range" => "Usage: replace_range <start_id> <end_id> ```",
+        "replace" => "Usage: replace <id> ``` or replace <start_id>,<end_id> ```",
         "insert_after" => "Usage: insert_after <id> ```",
         "insert_before" => "Usage: insert_before <id> ```",
         "append" => "Usage: append ```",
         "prepend" => "Usage: prepend ```",
-        "delete" => "Usage: delete <id>",
-        "move" => "Usage: move <start_id> [<end_id>] before|after <dest_id>, or move <start_id> [<end_id>] prepend|append",
+        "delete" => "Usage: delete <id> or delete <start_id>,<end_id>",
+        "move" => "Usage: move <start_id>[,<end_id>] before|after <dest_id>, or move <start_id>[,<end_id>] prepend|append",
         _ => "",
     }
 }

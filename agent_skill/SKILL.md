@@ -51,7 +51,7 @@ ast-editor edit /abs/path/file.rs <<'EOF'
 replace 2#0759 ```
     let msg = format!("can't parse {:?}: {}", path, err);
 ```
-replace_range 5a#7788 6b#99aa ```
+replace 5a#7788,6b#99aa ```
     fn replaced() {
     }
 ```
@@ -59,9 +59,11 @@ delete 7c#aabb
 EOF
 ```
 
-Directives taking a payload: `replace <id>`, `replace_range <start> <end>`,
-`insert_after <id>`, `insert_before <id>`, `append`, `prepend`. Directives
-taking none: `delete <id>`, `move <start> [<end>] before|after <dest>`.
+An address is one id, or `<start_id>,<end_id>` for a span — the comma `view`
+reads in `40,80`. Directives taking a payload: `replace`, `insert_after <id>`,
+`insert_before <id>`, `append`, `prepend`. Directives taking none: `delete`,
+`move <address> before|after <dest>`. `replace`, `delete` and `move` take a
+span; the rest act at one line.
 
 Add `--dry-run` or `--strict` after the file. `--strict` is the
 `strict_validation` parameter the API reference names.
@@ -156,7 +158,7 @@ called with neither, it says to run `outline` instead. Its matches carry
 ast-editor inspect src/config.rs --template functions
 # → matches[].start_id / end_id
 ast-editor edit src/config.rs <<'EOF'
-replace_range <start_id> <end_id> ```
+replace <start_id>,<end_id> ```
     …
 ```
 EOF
@@ -218,7 +220,7 @@ only what the immediate task needs.
 
 ```bash
 ast-editor skill api      # every tool and parameter, from the live schemas
-ast-editor skill usage    # editing workflows: resync, replace_range, long lines
+ast-editor skill usage    # editing workflows: resync, spans, long lines
 ```
 
 S-expression queries per language:

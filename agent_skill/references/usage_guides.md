@@ -51,32 +51,41 @@ A file no grammar covers is written with `syntax_valid: null`.
 
 ## Replacing a block
 
-`replace_range` replaces a continuous block of lines in one transaction, and is
-better than a loop of single-line `replace` and `delete` operations:
+An address is one line id, or two separated by a comma for a span:
+`replace 1a#b029,22#f8c3`. It is the comma `view src/main.rs 40,80` already
+reads, and it is why there is no separate range operation — a span of one is
+one line.
 
-- The whole range is one batch, so it is parsed once and either reported on or,
+Replacing a block in one directive is better than a loop of single-line
+`replace` and `delete` operations:
+
+- The whole span is one batch, so it is parsed once and either reported on or,
   under `--strict`, refused as a unit.
 - One call rather than several.
 - Nothing in between can move, since the batch is applied against the ids it
   was given.
+
+`delete 1a#b029,22#f8c3` removes a span the same way. The first line of a
+replaced span keeps its id; the lines after it are new.
+
+Through `--json` the same edit is:
 
 ```json
 {
   "filepath": "/path/to/project/src/main.rs",
   "edits": [
     {
-      "op": "replace_range",
-      "target_id": "1a#b029",
-      "end_target_id": "22#f8c3",
+      "op": "replace",
+      "start_id": "1a#b029",
+      "end_id": "22#f8c3",
       "content": "pub fn execute() -> Result<()> {\n    println!(\"Updated content!\");\n    Ok(())\n}"
     }
   ]
 }
 ```
 
-The same batch is written more briefly as an edit script on stdin, which needs
-no JSON escaping. `ast-editor --help` carries the directive grammar, and
-`ast-editor skill` a worked example.
+`start_id` and `end_id` are the keys `inspect` answers with, so a match it
+found pastes into an edit without being renamed.
 
 ## Editing inside a long line
 

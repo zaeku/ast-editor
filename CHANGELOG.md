@@ -4,6 +4,32 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.0 — 2026-09-12
+
+An address is a span now, which removes an operation and renames two fields.
+**A script or a JSON batch written against 0.2 has to change.**
+
+### Changed
+
+- **`replace_range` is gone. `replace` takes the span.** An address is one id
+  or two separated by a comma, the way `view src/main.rs 40,80` already reads a
+  range: `replace 1a#b029,22#f8c3` is what `replace_range 1a#b029 22#f8c3` was.
+  A span of one line is one line, so `replace 1a#b029` is unchanged.
+- **`delete` takes a span too**, so `delete 1a#b029,22#f8c3` removes a block.
+  It used to take one line, and removing several meant replacing the range with
+  an empty payload.
+- **`move` spells its range with the comma**: `move a,b before c`, where it
+  took `move a b before c`.
+- **`target_id` is `start_id`, `end_target_id` is `end_id`, and
+  `dest_target_id` is `dest_id`.** These are the keys `inspect` and `outline`
+  already answer with, so a match they found pastes into an edit without being
+  renamed — which is what prompted the change. There are no aliases: the old
+  names are refused.
+- **An op that acts at one line says so when given a span.** `insert_after a,b`
+  is refused by name rather than silently taking the first id.
+- The first line of a replaced span keeps its id, where a replaced range used
+  to mint a new one for every line. The lines after it are new.
+
 ## 0.2.1 — 2026-09-12
 
 ### Fixed

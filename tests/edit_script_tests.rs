@@ -279,7 +279,7 @@ fn an_empty_payload_writes_nothing() {
         "emptypayload",
         &file,
         &[],
-        &format!("replace_range {} {} ```\n```\n", held[0], held[1]),
+        &format!("replace {},{} ```\n```\n", held[0], held[1]),
     );
     assert!(
         removed.status.success(),
@@ -294,7 +294,7 @@ fn an_empty_payload_writes_nothing() {
         "blankpayload",
         &blank,
         &[],
-        &format!("replace_range {} {} ```\n\n```\n", held[0], held[1]),
+        &format!("replace {},{} ```\n\n```\n", held[0], held[1]),
     );
     assert!(
         kept.status.success(),

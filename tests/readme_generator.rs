@@ -122,19 +122,19 @@ async fn generate_readme() {
     let edits = vec![
         edit::LineEdit {
             op: EditOp::InsertAfter,
-            target_id: Some(id_to_insert_after.clone()),
+            start_id: Some(id_to_insert_after.clone()),
             content: Some("    let y = 200;".to_string()),
             ..Default::default()
         },
         edit::LineEdit {
             op: EditOp::Replace,
-            target_id: Some(id_to_update.clone()),
+            start_id: Some(id_to_update.clone()),
             content: Some("    let x = 100;".to_string()),
             ..Default::default()
         },
         edit::LineEdit {
             op: EditOp::Delete,
-            target_id: Some(id_to_delete.clone()),
+            start_id: Some(id_to_delete.clone()),
             ..Default::default()
         },
     ];
@@ -213,17 +213,17 @@ async fn generate_readme() {
         "edits": [
             {
                 "op": "insert_after",
-                "target_id": id_to_insert_after,
+                "start_id": id_to_insert_after,
                 "content": "    let y = 200;"
             },
             {
                 "op": "replace",
-                "target_id": id_to_update,
+                "start_id": id_to_update,
                 "content": "    let x = 100;"
             },
             {
                 "op": "delete",
-                "target_id": id_to_delete
+                "start_id": id_to_delete
             }
         ]
     });

@@ -164,18 +164,18 @@ impl ToolDispatcher {
                                 "properties": {
                                     "op": {
                                         "type": "string",
-                                        "enum": ["replace", "insert_after", "insert_before", "delete", "replace_range", "move", "replace_substring"],
+                                        "enum": ["replace", "insert_after", "insert_before", "delete", "move", "replace_substring"],
                                         "description": "The edit operation to perform."
                                     },
-                                    "target_id": {
+                                    "start_id": {
                                         "type": "string",
-                                        "description": "Optional target line ID (e.g. 1#a5c7). Required for replace, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends)."
+                                        "description": "The first line the op acts on (e.g. 1#a5c7). Required for replace, delete, move and replace_substring. Omitted for insert_before (prepends) and insert_after (appends)."
                                     },
-                                    "end_target_id": {
+                                    "end_id": {
                                         "type": "string",
-                                        "description": "Optional ending target line ID for block range (e.g. 5#7f1c). Required for replace_range, optional for move."
+                                        "description": "The last line of the span, where the op acts on more than one (e.g. 5#7f1c). Omitted addresses the start line alone. Taken by replace, delete and move."
                                     },
-                                    "dest_target_id": {
+                                    "dest_id": {
                                         "type": "string",
                                         "description": "Optional destination target line ID (e.g. 10#e9c4). Required for move operations with 'before' or 'after' move_position."
                                     },

@@ -209,12 +209,12 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
             "description": "The new content to insert or replace with, as line-terminated text: \"\" is no lines at all, \"\\n\" is one empty line, and a trailing newline ends the last line rather than starting another. Omitted/ignored for delete, move.",
             "type": "string"
           },
-          "dest_target_id": {
+          "dest_id": {
             "description": "Optional destination target line ID (e.g. 10#e9c4). Required for move operations with 'before' or 'after' move_position.",
             "type": "string"
           },
-          "end_target_id": {
-            "description": "Optional ending target line ID for block range (e.g. 5#7f1c). Required for replace_range, optional for move.",
+          "end_id": {
+            "description": "The last line of the span, where the op acts on more than one (e.g. 5#7f1c). Omitted addresses the start line alone. Taken by replace, delete and move.",
             "type": "string"
           },
           "move_position": {
@@ -238,7 +238,6 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
               "insert_after",
               "insert_before",
               "delete",
-              "replace_range",
               "move",
               "replace_substring"
             ],
@@ -252,8 +251,8 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
             "description": "The replacement string. Required for replace_substring.",
             "type": "string"
           },
-          "target_id": {
-            "description": "Optional target line ID (e.g. 1#a5c7). Required for replace, delete, replace_range, move, replace_substring. Optional/omitted for insert_before (prepends) and insert_after (appends).",
+          "start_id": {
+            "description": "The first line the op acts on (e.g. 1#a5c7). Required for replace, delete, move and replace_substring. Omitted for insert_before (prepends) and insert_after (appends).",
             "type": "string"
           }
         },
@@ -291,16 +290,16 @@ A batch that replaces a line, inserts after it, and deletes another:
     {
       "content": "    let y = 200;",
       "op": "insert_after",
-      "target_id": "2#bcb4"
+      "start_id": "2#bcb4"
     },
     {
       "content": "    let x = 100;",
       "op": "replace",
-      "target_id": "2#bcb4"
+      "start_id": "2#bcb4"
     },
     {
       "op": "delete",
-      "target_id": "3#8d90"
+      "start_id": "3#8d90"
     }
   ],
   "filepath": "/path/to/project/create_ids.rs"
@@ -331,16 +330,16 @@ diff and the syntax result; the file and the line ids are untouched, and no
     {
       "content": "    let y = 200;",
       "op": "insert_after",
-      "target_id": "2#bcb4"
+      "start_id": "2#bcb4"
     },
     {
       "content": "    let x = 100;",
       "op": "replace",
-      "target_id": "2#bcb4"
+      "start_id": "2#bcb4"
     },
     {
       "op": "delete",
-      "target_id": "3#8d90"
+      "start_id": "3#8d90"
     }
   ],
   "filepath": "/path/to/project/create_ids.rs"

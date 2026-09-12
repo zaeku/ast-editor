@@ -147,7 +147,6 @@ pub enum EditOp {
     Prepend,
     Replace,
     Delete,
-    ReplaceRange,
     ReplaceSubstring,
     Move,
 }
@@ -165,9 +164,9 @@ pub enum MovePosition {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct LineEdit {
     pub op: EditOp,
-    pub target_id: Option<String>,
-    pub end_target_id: Option<String>,
-    pub dest_target_id: Option<String>,
+    pub start_id: Option<String>,
+    pub end_id: Option<String>,
+    pub dest_id: Option<String>,
     pub move_position: Option<MovePosition>,
     pub content: Option<String>,
     pub pattern: Option<String>,
@@ -282,9 +281,9 @@ impl LineBuffer {
     /// Resolve a target id to a position, verifying the caller's view of the
     /// line still matches. A bare hash with no sequence prefix is resolved by
     /// searching the buffer, and must match exactly one line.
-    fn position_of(&self, target_id: &str, role: &str, field: &str) -> Result<usize> {
-        if target_id.contains('#') {
-            let (seq, hash) = parse_line_id(target_id)?;
+    fn position_of(&self, start_id: &str, role: &str, field: &str) -> Result<usize> {
+        if start_id.contains('#') {
+            let (seq, hash) = parse_line_id(start_id)?;
             let idx = self
                 .lines
                 .iter()
@@ -292,7 +291,7 @@ impl LineBuffer {
                 .with_context(|| {
                     crate::tools::metadata::get_config()
                         .error_target_gone
-                        .replacen("{}", target_id, 1)
+                        .replacen("{}", start_id, 1)
                 })?;
             let actual = compute_line_hash(&self.lines[idx].content);
             if actual != hash {
@@ -303,7 +302,7 @@ impl LineBuffer {
                     "{}",
                     crate::tools::metadata::get_config()
                         .error_target_changed
-                        .replacen("{}", target_id, 1)
+                        .replacen("{}", start_id, 1)
                 );
             }
             Ok(idx)
@@ -312,13 +311,13 @@ impl LineBuffer {
                 .lines
                 .iter()
                 .enumerate()
-                .filter(|(_, l)| compute_line_hash(&l.content) == target_id)
+                .filter(|(_, l)| compute_line_hash(&l.content) == start_id)
                 .map(|(idx, _)| idx)
                 .collect();
             match matches.len() {
-                0 => bail!("CHECKSUM_ERROR: Target line hash '{}' not found in session", target_id),
+                0 => bail!("CHECKSUM_ERROR: Target line hash '{}' not found in session", start_id),
                 1 => Ok(matches[0]),
-                _ => bail!("CHECKSUM_ERROR: Target line hash '{}' is ambiguous (matches multiple lines in session)", target_id),
+                _ => bail!("CHECKSUM_ERROR: Target line hash '{}' is ambiguous (matches multiple lines in session)", start_id),
             }
         }
     }
@@ -369,7 +368,7 @@ impl LineBuffer {
             match edit.op {
                 EditOp::InsertAfter | EditOp::InsertBefore | EditOp::Append | EditOp::Prepend => {
                     let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
-                    let no_target = edit.target_id.as_ref().is_none_or(|s| s.is_empty());
+                    let no_target = edit.start_id.as_ref().is_none_or(|s| s.is_empty());
 
                     let at = if edit.op == EditOp::Append
                         || (edit.op == EditOp::InsertAfter && no_target)
@@ -380,14 +379,14 @@ impl LineBuffer {
                     {
                         0
                     } else {
-                        let target_id = edit
-                            .target_id
+                        let start_id = edit
+                            .start_id
                             .as_ref()
                             .filter(|s| !s.is_empty())
                             .with_context(|| {
-                                format!("CHECKSUM_ERROR: Missing target_id for {:?}", edit.op)
+                                format!("CHECKSUM_ERROR: Missing start_id for {:?}", edit.op)
                             })?;
-                        let idx = self.position_of(target_id, "Target", "target_id")?;
+                        let idx = self.position_of(start_id, "Start", "start_id")?;
                         if edit.op == EditOp::InsertAfter {
                             idx + 1
                         } else {
@@ -399,39 +398,54 @@ impl LineBuffer {
                 }
 
                 EditOp::Replace => {
-                    let target_id = edit
-                        .target_id
+                    let start_id = edit
+                        .start_id
                         .as_ref()
-                        .context("Missing target_id for replace op")?;
+                        .filter(|s| !s.is_empty())
+                        .context("Missing start_id for replace op")?;
                     let content = edit
                         .content
                         .as_ref()
                         .context("Missing content for replace op")?;
-                    let idx = self.position_of(target_id, "Target", "target_id")?;
-                    // A payload is the lines it has (D-01M280Y0JPPWBG), and a
-                    // replace may be given more than one. The line named keeps
-                    // its sequence number and takes the first of them; the rest
-                    // are new lines after it, minted like any other insertion.
-                    // No lines is no lines: replacing a line with nothing takes
-                    // it out, the way replace_range takes out a span.
+                    let start_idx = self.position_of(start_id, "Start", "start_id")?;
+                    let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
+                        Some(end_id) => {
+                            let idx = self.position_of(end_id, "End", "end_id")?;
+                            if start_idx > idx {
+                                bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order.");
+                            }
+                            idx
+                        }
+                        None => start_idx,
+                    };
+
+                    // A payload is the lines it has (D-01M280Y0JPPWBG), and an
+                    // address is a span of one or more. The span's first line
+                    // keeps its sequence number and takes the first of the
+                    // payload; the rest of the span goes; what is left of the
+                    // payload follows as new lines. No lines is no lines: an
+                    // empty payload takes the span out.
                     let mut contents = split_insert_content(content);
                     if contents.is_empty() {
-                        self.lines.remove(idx);
+                        self.lines.drain(start_idx..=end_idx);
                     } else {
                         let rest = contents.split_off(1);
-                        self.lines[idx].content = contents.pop().unwrap_or_default();
-                        modified.push(self.id_at(idx));
+                        self.lines[start_idx].content = contents.pop().unwrap_or_default();
+                        modified.push(self.id_at(start_idx));
+                        if end_idx > start_idx {
+                            self.lines.drain(start_idx + 1..=end_idx);
+                        }
                         if !rest.is_empty() {
-                            self.insert_at(idx + 1, rest, &mut modified);
+                            self.insert_at(start_idx + 1, rest, &mut modified);
                         }
                     }
                 }
 
                 EditOp::ReplaceSubstring => {
-                    let target_id = edit
-                        .target_id
+                    let start_id = edit
+                        .start_id
                         .as_ref()
-                        .context("Missing target_id for replace_substring op")?;
+                        .context("Missing start_id for replace_substring op")?;
                     let pattern = edit
                         .pattern
                         .as_ref()
@@ -444,7 +458,7 @@ impl LineBuffer {
                     if occurrence < 1 {
                         bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
                     }
-                    let idx = self.position_of(target_id, "Target", "target_id")?;
+                    let idx = self.position_of(start_id, "Start", "start_id")?;
 
                     let current = &self.lines[idx].content;
                     let start = current.match_indices(pattern.as_str()).nth(occurrence - 1)
@@ -463,12 +477,22 @@ impl LineBuffer {
                 }
 
                 EditOp::Delete => {
-                    let target_id = edit
-                        .target_id
+                    let start_id = edit
+                        .start_id
                         .as_ref()
-                        .context("Missing target_id for delete op")?;
-                    let idx = self.position_of(target_id, "Target", "target_id")?;
-                    self.lines.remove(idx);
+                        .context("Missing start_id for delete op")?;
+                    let idx = self.position_of(start_id, "Start", "start_id")?;
+                    let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
+                        Some(end_id) => {
+                            let last = self.position_of(end_id, "End", "end_id")?;
+                            if idx > last {
+                                bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order.");
+                            }
+                            last
+                        }
+                        None => idx,
+                    };
+                    self.lines.drain(idx..=end_idx);
 
                     // Report the line now nearest the hole, so the agent has a
                     // live id to anchor its next edit on.
@@ -482,42 +506,21 @@ impl LineBuffer {
                     }
                 }
 
-                EditOp::ReplaceRange => {
-                    let start_id = edit.target_id.as_ref().filter(|s| !s.is_empty()).context(
-                        "CHECKSUM_ERROR: Missing target_id (start_id) for replace_range op",
-                    )?;
-                    let end_id = edit
-                        .end_target_id
-                        .as_ref()
-                        .filter(|s| !s.is_empty())
-                        .context("CHECKSUM_ERROR: Missing end_target_id for replace_range op")?;
-
-                    let start_idx = self.position_of(start_id, "Start", "target_id")?;
-                    let end_idx = self.position_of(end_id, "End", "end_target_id")?;
-                    if start_idx > end_idx {
-                        bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for replace_range.");
-                    }
-
-                    let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
-                    self.lines.drain(start_idx..=end_idx);
-                    self.insert_at(start_idx, contents, &mut modified);
-                }
-
                 EditOp::Move => {
                     let start_id = edit
-                        .target_id
+                        .start_id
                         .as_ref()
                         .filter(|s| !s.is_empty())
-                        .context("CHECKSUM_ERROR: Missing target_id (start_id) for move op")?;
+                        .context("CHECKSUM_ERROR: Missing start_id (start_id) for move op")?;
                     let end_id = edit
-                        .end_target_id
+                        .end_id
                         .as_ref()
                         .filter(|s| !s.is_empty())
                         .unwrap_or(start_id);
                     let move_pos = edit.move_position.unwrap_or(MovePosition::After);
 
-                    let start_idx = self.position_of(start_id, "Start", "target_id")?;
-                    let end_idx = self.position_of(end_id, "End", "end_target_id")?;
+                    let start_idx = self.position_of(start_id, "Start", "start_id")?;
+                    let end_idx = self.position_of(end_id, "End", "end_id")?;
                     if start_idx > end_idx {
                         bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
                     }
@@ -527,11 +530,12 @@ impl LineBuffer {
                     let dest_idx = match move_pos {
                         MovePosition::Prepend | MovePosition::Append => None,
                         MovePosition::Before | MovePosition::After => {
-                            let dest_id = edit.dest_target_id.as_ref().filter(|s| !s.is_empty())
-                                .context("CHECKSUM_ERROR: Missing dest_target_id for move before/after operation")?;
-                            let idx = self.position_of(dest_id, "Destination", "dest_target_id")?;
+                            let dest_id = edit.dest_id.as_ref().filter(|s| !s.is_empty()).context(
+                                "CHECKSUM_ERROR: Missing dest_id for move before/after operation",
+                            )?;
+                            let idx = self.position_of(dest_id, "Destination", "dest_id")?;
                             if idx >= start_idx && idx <= end_idx {
-                                bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_target_id lies within source range).");
+                                bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_id lies within source range).");
                             }
                             Some(idx)
                         }
@@ -672,7 +676,7 @@ pub trait SessionRepository: Send + Sync {
     fn get_session_crlf(&self, session_id: &str) -> Result<bool>;
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>>;
     fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>>;
-    fn smart_resync(&self, filepath: &str, session_id: &str, target_ids: &[String]) -> Result<()>;
+    fn smart_resync(&self, filepath: &str, session_id: &str, start_ids: &[String]) -> Result<()>;
     fn create_preview(&self, filepath: &str, edits: &[LineEdit]) -> Result<String>;
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
 }
@@ -911,9 +915,9 @@ impl SessionRepository for SqliteSessionRepository {
         }
     }
 
-    fn smart_resync(&self, filepath: &str, session_id: &str, target_ids: &[String]) -> Result<()> {
+    fn smart_resync(&self, filepath: &str, session_id: &str, start_ids: &[String]) -> Result<()> {
         let mut conn = get_db_connection()?;
-        reconcile_index(&mut conn, session_id, filepath, target_ids).map(|_| ())
+        reconcile_index(&mut conn, session_id, filepath, start_ids).map(|_| ())
     }
 }
 
@@ -925,14 +929,14 @@ impl SessionRepository for SqliteSessionRepository {
 /// duplicates (`}`, blank lines) that a plain longest-common-subsequence
 /// mis-pairs.
 ///
-/// `target_ids` name lines the caller is about to edit. If any of them did not
+/// `start_ids` name lines the caller is about to edit. If any of them did not
 /// survive, the edit cannot be applied safely and this fails instead of
 /// guessing which line was meant.
 fn reconcile_index(
     conn: &mut Connection,
     session_id: &str,
     filepath: &str,
-    target_ids: &[String],
+    start_ids: &[String],
 ) -> Result<usize> {
     let current: Option<(String, i64, usize)> = conn.query_row(
         "SELECT file_hash, mtime, (SELECT COUNT(*) FROM lines WHERE session_id = ?1) FROM sessions WHERE session_id = ?1",
@@ -947,7 +951,7 @@ fn reconcile_index(
     let disk_file_hash = compute_sha256(filepath)?;
 
     let mut targeted = Vec::new();
-    for id in target_ids {
+    for id in start_ids {
         if !id.is_empty() {
             targeted.push(resolve_line_id(conn, session_id, id)?);
         }

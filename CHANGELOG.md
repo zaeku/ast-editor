@@ -4,6 +4,17 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.2.1 — 2026-09-12
+
+### Fixed
+
+- **A `replace` given several lines answers with all of them.** It wrote them
+  all and reported one, and the id it reported named no line: the sequence
+  number the edit had just retired, carrying the hash of the whole payload. A
+  following edit addressed with it was refused — "That line is gone" — about a
+  line that was there under a different id. `replace_range` and the insert
+  operations were unaffected.
+
 ## 0.2.0 — 2026-09-12
 
 A minor release rather than a patch because several answers changed shape, and

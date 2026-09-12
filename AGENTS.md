@@ -28,6 +28,11 @@ one never drags the others along. The rhythms are the reason: a rule that had to
 be committed alongside the code it governs would be revised whenever the code
 was, which is exactly the coupling the split exists to prevent.
 
+Neither of the others is published with this repository. A clone is the code
+layer alone, so a `D-…` id in a comment names a rule the reader cannot look up:
+it marks that the line answers to one, and the sentence around it has to carry
+the reason by itself.
+
 ## Where code goes
 
 `src/main.rs` dispatches, `src/cli.rs` declares the command line, `src/skill.rs`

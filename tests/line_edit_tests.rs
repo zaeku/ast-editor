@@ -86,7 +86,7 @@ fn view_range(
             lines.push(serde_json::json!([current_id, current_n, current_content]));
         }
     } else {
-        for id_entry in ids_val["ids"].as_array().unwrap() {
+        for id_entry in ids_val["lines"].as_array().unwrap() {
             let id_arr = id_entry.as_array().unwrap();
             let id = id_arr[0].as_str().unwrap();
             let n = id_arr[1].as_u64().unwrap() as usize;
@@ -266,7 +266,7 @@ async fn test_edit_operations_and_ast_validation() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&edit_res).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert!(content.contains("let a = 2;"));
@@ -324,7 +324,7 @@ async fn test_transactional_deletes_and_inserts() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&edit_preview).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     // The final file should be:
     // fn main() {
@@ -372,7 +372,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
     let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
-    assert!(edit_res.contains("modified_ids"), "{}", edit_res);
+    assert!(edit_res.contains("modified_lines"), "{}", edit_res);
 
     // Verify disk content includes both the external change and our update
     let content = fs::read_to_string(file.path_str()).unwrap();
@@ -401,7 +401,7 @@ async fn test_integration_append_operation() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert!(content.contains("fn main() {\n    let a = 1;\n}\nfn additional() {\n}\n"));
@@ -449,7 +449,7 @@ async fn test_integration_advanced_operations() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     let content = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content, "fn main() {\n    let val = 100;\n}\n");
@@ -481,7 +481,7 @@ async fn test_integration_advanced_operations() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview_move).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     let content_move = fs::read_to_string(file.path_str()).unwrap();
     assert_eq!(content_move, "    let val = 100;\nfn main() {\n}\n");
@@ -511,7 +511,7 @@ async fn test_integration_insert_without_target_id() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview1).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     let content1 = fs::read_to_string(file.path_str()).unwrap();
     assert!(
@@ -533,7 +533,7 @@ async fn test_integration_insert_without_target_id() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview2).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     let content2 = fs::read_to_string(file.path_str()).unwrap();
     assert!(
@@ -567,7 +567,7 @@ async fn test_integration_create_lines_flow() {
     assert!(val["status"].is_null(), "success is the exit code: {}", val);
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
     assert!(val["total_bytes"].as_u64().is_some());
-    let ids = val["ids"].as_array().unwrap();
+    let ids = val["lines"].as_array().unwrap();
     assert_eq!(ids.len(), 3);
 
     // 2. Assert that the returned line IDs are correct
@@ -599,7 +599,7 @@ async fn test_integration_create_lines_flow() {
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&edit_res).unwrap();
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    assert!(!res["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!res["modified_lines"].as_array().unwrap().is_empty());
 
     // Verify modified contents on disk
     let disk_content = fs::read_to_string(&filepath_str).unwrap();
@@ -650,7 +650,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
     let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
-    assert!(edit_res.contains("modified_ids"), "{}", edit_res);
+    assert!(edit_res.contains("modified_lines"), "{}", edit_res);
 
     let disk_content = std::fs::read_to_string(file.path_str()).unwrap();
     assert!(disk_content.contains("bbbbbaaaaa"));
@@ -706,7 +706,7 @@ async fn test_integration_create_lines_return_ids_false() {
     assert!(val["status"].is_null(), "success is the exit code: {}", val);
     assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
     assert!(val["total_bytes"].as_u64().is_some());
-    assert!(val["ids"].is_null());
+    assert!(val["lines"].is_null());
 
     let _ = fs::remove_file(&temp_file_path);
 }
@@ -758,7 +758,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
         .unwrap();
     let preview: serde_json::Value = serde_json::from_str(&res.report).unwrap();
     assert_eq!(preview["syntax_valid"], true);
-    assert!(preview["modified_ids"].is_null());
+    assert!(preview["modified_lines"].is_null());
     let diff = &res.diff;
     assert!(
         diff.contains("-    let a = 1;"),
@@ -944,7 +944,7 @@ async fn test_preview_id_applies_the_validated_batch() {
         "success is the exit code: {}",
         applied
     );
-    assert!(!applied["modified_ids"].as_array().unwrap().is_empty());
+    assert!(!applied["modified_lines"].as_array().unwrap().is_empty());
     assert_eq!(
         fs::read_to_string(file.path_str()).unwrap(),
         "fn main() {\n    let a = 2;\n}\n"
@@ -1308,7 +1308,7 @@ async fn test_a_deleted_id_is_never_reissued() {
     .await
     .unwrap();
     let val: serde_json::Value = serde_json::from_str(&res).unwrap();
-    let minted = val["modified_ids"][0][0].as_str().unwrap();
+    let minted = val["modified_lines"][0][0].as_str().unwrap();
     let minted_seq = i64::from_str_radix(minted.split('#').next().unwrap(), 16).unwrap();
     assert_ne!(minted_seq, retired, "id {} was handed out twice", retired);
 }
@@ -1339,7 +1339,7 @@ async fn test_repeated_insertion_between_the_same_pair() {
         .await
         .unwrap();
         let val: serde_json::Value = serde_json::from_str(&res).unwrap();
-        let minted = val["modified_ids"][0][0]
+        let minted = val["modified_lines"][0][0]
             .as_str()
             .unwrap()
             .split('#')

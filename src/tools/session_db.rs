@@ -785,8 +785,8 @@ impl SessionRepository for SqliteSessionRepository {
     ) -> Result<(LineBuffer, Vec<String>)> {
         let mut conn = get_db_connection()?;
         let mut buffer = load_buffer(&mut conn, session_id)?;
-        let modified_ids = buffer.apply(edits)?;
-        Ok((buffer, modified_ids))
+        let modified_lines = buffer.apply(edits)?;
+        Ok((buffer, modified_lines))
     }
 
     fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()> {
@@ -1553,7 +1553,7 @@ mod tests {
                 ]));
             }
         } else {
-            for id_entry in ids_val["ids"].as_array().unwrap() {
+            for id_entry in ids_val["lines"].as_array().unwrap() {
                 let id_arr = id_entry.as_array().unwrap();
                 let id = id_arr[0].as_str().unwrap();
                 let n = id_arr[1].as_u64().unwrap() as usize;

@@ -18,10 +18,12 @@ one of them changes what an identical script does.
   rather than starting another. The JSON form reads it the same way. **This is
   the one change that alters what an existing script does without saying so** —
   a script that relied on an empty fence to leave a blank line now deletes.
-- **`modified_ids` carries the line each id is on**: `[["2#9639",2],
-  ["4#b7a3",3]]` rather than `["2#9639", "4#b7a3"]`. `create` answers the same
-  way, and `view --only-ids` already did. The list is in file order, and an id a
-  batch touched twice appears once.
+- **`modified_ids` is `modified_lines`, and `view --only-ids` answers with
+  `lines` rather than `ids`.** Each entry is a line as `[id, line number]`:
+  `[["2#9639",2], ["4#b7a3",3]]` where `edit` used to answer `["2#9639",
+  "4#b7a3"]`. The name says the shape, so nothing has to be read elsewhere to
+  know it. The list is in file order, and an id a batch touched twice appears
+  once.
 - **A refused edit says what to do next**, and the two refusals differ because
   the remedies do: an id naming no line says the line is gone and there is
   nothing to re-read for it; a line that changed says to read that line again.

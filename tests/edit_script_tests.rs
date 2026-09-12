@@ -68,7 +68,7 @@ fn ids(test: &str, file: &std::path::Path) -> Vec<String> {
         .output()
         .unwrap();
     let meta = json_block(&out.stdout);
-    meta["ids"]
+    meta["lines"]
         .as_array()
         .unwrap()
         .iter()

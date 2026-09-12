@@ -161,7 +161,7 @@ Creates a brand-new file with initial content, JIT-initializes its database edit
 ###### Output
 ```json
 {
-  "ids": [
+  "lines": [
     ["1#77cf",1], ["2#bcb4",2], ["3#c2b7",3]
   ],
   "total_bytes": 30,
@@ -209,7 +209,7 @@ Retrieves a range of lines for any text file along with their persistent line ID
       "type": "boolean"
     },
     "only_ids": {
-      "description": "If true, only returns Line IDs and line numbers, omitting text content.",
+      "description": "If true, answers with [id, line number] pairs instead of the lines themselves.",
       "type": "boolean"
     },
     "query": {
@@ -273,7 +273,7 @@ Retrieves a range of lines for any text file along with their persistent line ID
 ```json
 {
   "enclosing_contexts": [],
-  "ids": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
+  "lines": [["1#77cf",1],["2#bcb4",2],["3#c2b7",3]],
   "showing_end": 3,
   "showing_start": 1,
   "total_bytes": 30,
@@ -292,7 +292,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
 {
   "properties": {
     "apply": {
-      "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_ids. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it.",
+      "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_lines. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it.",
       "type": "string"
     },
     "dry_run": {
@@ -408,7 +408,7 @@ Applies a transactional batch of operations to lines using their unique IDs.
 ###### Output
 ```json
 {
-  "modified_ids": [
+  "modified_lines": [
     ["2#9639",2], ["4#b7a3",3]
   ],
   "syntax_valid": null,

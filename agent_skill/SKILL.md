@@ -81,6 +81,10 @@ past a validation it failed; `syntax_valid` is `null` where no grammar covers
 the file, so the edit was written without being checked at all; and a
 `message` or a `warnings` array carries what was worth saying.
 
+A `lines` or `modified_lines` array holds one entry per line, `[id, line
+number]`, in file order — so the id and where it landed arrive together and a
+following edit needs no second read.
+
 **A response is a sequence of fenced blocks**, named by what they hold: the
 file's own language for code, `diff` for a diff, `json` for the data. So code
 arrives unescaped and the data is still machine-readable:

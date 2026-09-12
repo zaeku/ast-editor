@@ -111,7 +111,7 @@ async fn generate_readme() {
 
     // Parse the returned line ID for `let x = 42;` (line 2)
     let val_create_ids: serde_json::Value = serde_json::from_str(&out_create_ids).unwrap();
-    let ids = val_create_ids["ids"].as_array().unwrap();
+    let ids = val_create_ids["lines"].as_array().unwrap();
     // Each entry is [id, line] (card #5).
     let id_to_update = ids[1][0].as_str().unwrap().to_string();
     let id_to_insert_after = ids[1][0].as_str().unwrap().to_string();

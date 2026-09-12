@@ -143,7 +143,7 @@ impl ToolDispatcher {
                         },
                         "only_ids": {
                             "type": "boolean",
-                            "description": "If true, only returns Line IDs and line numbers, omitting text content."
+                            "description": "If true, answers with [id, line number] pairs instead of the lines themselves."
                         },
                         "query": {
                             "type": "string",
@@ -231,7 +231,7 @@ impl ToolDispatcher {
                         },
                         "apply": {
                             "type": "string",
-                            "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_ids. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it."
+                            "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_lines. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it."
                         }
                     },
                     "required": ["filepath"]

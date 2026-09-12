@@ -183,7 +183,7 @@ pub fn retrieve_and_format_lines(
 /// shape `view --only-ids` already answers with. An id alone does not say
 /// where its line went, so a caller wanting the line beside it had to read the
 /// file again (card #5).
-pub fn format_modified_ids(ids: &[(String, usize)], wrap_trigger_length: usize) -> String {
+pub fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) -> String {
     if ids.is_empty() {
         return "[]".to_string();
     }
@@ -438,25 +438,25 @@ mod tests {
     }
 
     #[test]
-    fn test_format_modified_ids_empty() {
+    fn test_format_lines_empty() {
         let ids: Vec<(String, usize)> = vec![];
-        assert_eq!(format_modified_ids(&ids, 80), "[]");
+        assert_eq!(format_lines(&ids, 80), "[]");
     }
 
     #[test]
-    fn test_format_modified_ids_wrap() {
+    fn test_format_lines_wrap() {
         let ids = vec![
             ("1#77cf".to_string(), 1),
             ("2#bcb4".to_string(), 2),
             ("3#c2b7".to_string(), 3),
         ];
         // small trigger -> wraps
-        let res_wrap = format_modified_ids(&ids, 15);
+        let res_wrap = format_lines(&ids, 15);
         let expected_wrap = "[\n  [\"1#77cf\",1],\n  [\"2#bcb4\",2],\n  [\"3#c2b7\",3]\n]";
         assert_eq!(res_wrap, expected_wrap);
 
         // large trigger -> no wrap
-        let res_no_wrap = format_modified_ids(&ids, 100);
+        let res_no_wrap = format_lines(&ids, 100);
         let expected_no_wrap = "[\n  [\"1#77cf\",1], [\"2#bcb4\",2], [\"3#c2b7\",3]\n]";
         assert_eq!(res_no_wrap, expected_no_wrap);
     }

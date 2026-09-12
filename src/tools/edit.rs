@@ -407,10 +407,10 @@ pub async fn edit_lines_with_validation(
 
     // Plan the batch without persisting it. Nothing is committed until the
     // content it produces has been accepted, so a rejected edit needs no undo.
-    let (buffer, newly_modified_ids) = repository.plan_line_edits(&session_id, &edits)?;
+    let (buffer, newly_modified_lines) = repository.plan_line_edits(&session_id, &edits)?;
     // Each id with the line it is now, walked off the planned buffer: an id
     // alone does not say where its line went (card #5).
-    let newly_modified_ids = buffer.locate(&newly_modified_ids);
+    let newly_modified_lines = buffer.locate(&newly_modified_lines);
     let final_content = buffer.join(line_ending);
 
     // Validate syntax
@@ -461,8 +461,8 @@ pub async fn edit_lines_with_validation(
 
                 let config = crate::tools::metadata::get_config();
                 let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
-                let formatted_ids = crate::tools::formatter::format_modified_ids(
-                    &newly_modified_ids,
+                let formatted_ids = crate::tools::formatter::format_lines(
+                    &newly_modified_lines,
                     only_ids_wrap_trigger_length,
                 );
                 let mut indented_ids = String::new();
@@ -485,7 +485,7 @@ pub async fn edit_lines_with_validation(
                 }
 
                 let output = format!(
-                    "{{\n  \"status\": \"saved_with_errors\",\n  \"modified_ids\": {},\n  \"syntax_valid\": false,\n  \"diagnostics\": {}\n}}",
+                    "{{\n  \"status\": \"saved_with_errors\",\n  \"modified_lines\": {},\n  \"syntax_valid\": false,\n  \"diagnostics\": {}\n}}",
                     indented_ids,
                     serde_json::to_string_pretty(&diagnostics)?
                 );
@@ -513,8 +513,8 @@ pub async fn edit_lines_with_validation(
 
                 let config = crate::tools::metadata::get_config();
                 let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
-                let formatted_ids = crate::tools::formatter::format_modified_ids(
-                    &newly_modified_ids,
+                let formatted_ids = crate::tools::formatter::format_lines(
+                    &newly_modified_lines,
                     only_ids_wrap_trigger_length,
                 );
                 let mut indented_ids = String::new();
@@ -532,7 +532,7 @@ pub async fn edit_lines_with_validation(
                     reason
                 ))?;
                 let output = format!(
-                    "{{\n  \"status\": \"saved\",\n  \"modified_ids\": {},\n  \"message\": {}\n}}",
+                    "{{\n  \"status\": \"saved\",\n  \"modified_lines\": {},\n  \"message\": {}\n}}",
                     indented_ids, message
                 );
                 return Ok(output);
@@ -549,10 +549,8 @@ pub async fn edit_lines_with_validation(
 
     let config = crate::tools::metadata::get_config();
     let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
-    let formatted_ids = crate::tools::formatter::format_modified_ids(
-        &newly_modified_ids,
-        only_ids_wrap_trigger_length,
-    );
+    let formatted_ids =
+        crate::tools::formatter::format_lines(&newly_modified_lines, only_ids_wrap_trigger_length);
     let mut indented_ids = String::new();
     for (i, line) in formatted_ids.lines().enumerate() {
         if i == 0 {
@@ -565,7 +563,7 @@ pub async fn edit_lines_with_validation(
 
     // A field appears when it has something to say: an edit that parsed says
     // nothing, and one nothing could read says so (card #1).
-    let mut fields = vec![format!("\"modified_ids\": {}", indented_ids)];
+    let mut fields = vec![format!("\"modified_lines\": {}", indented_ids)];
     if let Some(warns) = warnings {
         fields.push(format!("\"warnings\": {}", serde_json::to_string(&warns)?));
     }
@@ -687,7 +685,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         let (seq, _) = parse_line_id(&target_id)?;
         let expected_prefix = format!("{:x}#", seq);
         // Each entry is [id, line] (card #5).
@@ -715,7 +713,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "fn main() {\n    let a = 42;\n    let b = 2;\n}\n"
@@ -770,7 +768,7 @@ mod tests {
         }];
 
         let res = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(res.contains("modified_ids"), "{}", res);
+        assert!(res.contains("modified_lines"), "{}", res);
 
         // Verify disk content includes both the external change and our new edit!
         let content = fs::read_to_string(&file_path)?;
@@ -914,7 +912,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "fn main() {\n}\n");
 
@@ -954,7 +952,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
 
         let disk_content = fs::read_to_string(&file_path)?;
@@ -988,7 +986,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(fs::read_to_string(&file_path)?, "pub fn foo() {}\n");
 
@@ -1018,7 +1016,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -1079,7 +1077,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -1120,7 +1118,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -1165,7 +1163,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
         assert_eq!(
             fs::read_to_string(&file_path)?,
@@ -1199,7 +1197,7 @@ mod tests {
         let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
-        let modified = res["modified_ids"].as_array().unwrap();
+        let modified = res["modified_lines"].as_array().unwrap();
         assert!(!modified.is_empty());
 
         let content = fs::read_to_string(&file_path)?;
@@ -1248,7 +1246,7 @@ mod tests {
         }];
 
         let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
-        assert!(result.contains("modified_ids"), "{}", result);
+        assert!(result.contains("modified_lines"), "{}", result);
 
         // Verify that the file content was updated on disk
         let disk_content = fs::read_to_string(&file_path)?;
@@ -1507,11 +1505,11 @@ fn main() {
 
         let val: serde_json::Value = serde_json::from_str(&result)?;
         assert!(val["status"].is_null(), "success is the exit code: {}", val);
-        let modified_ids = val["modified_ids"].as_array().unwrap();
-        assert_eq!(modified_ids.len(), 1);
-        let new_id = modified_ids[0][0].as_str().unwrap();
+        let modified_lines = val["modified_lines"].as_array().unwrap();
+        assert_eq!(modified_lines.len(), 1);
+        let new_id = modified_lines[0][0].as_str().unwrap();
         assert_eq!(
-            modified_ids[0][1].as_u64().unwrap(),
+            modified_lines[0][1].as_u64().unwrap(),
             1,
             "the id says which line it is: {}",
             val
@@ -1520,7 +1518,10 @@ fn main() {
         let (new_seq, _) = crate::tools::session_db::parse_line_id(new_id)?;
         assert_eq!(old_seq, new_seq);
 
-        let expected_json = format!("{{\n  \"modified_ids\": [\n    [\"{}\",1]\n  ]\n}}", new_id);
+        let expected_json = format!(
+            "{{\n  \"modified_lines\": [\n    [\"{}\",1]\n  ]\n}}",
+            new_id
+        );
         assert_eq!(result, expected_json);
 
         fs::remove_dir_all(&env.dir)?;

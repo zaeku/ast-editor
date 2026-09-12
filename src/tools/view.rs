@@ -225,7 +225,7 @@ pub fn view_lines(
         serde_json::to_string(&enclosing_list)?
     ));
     if only_ids_bool {
-        parts.push(format!("  \"ids\": {}", serde_json::to_value(&all_ids)?));
+        parts.push(format!("  \"lines\": {}", serde_json::to_value(&all_ids)?));
     }
     if let Some(msg) = message {
         parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
@@ -332,13 +332,13 @@ pub fn create_lines(
                             .collect()
                     })
                     .unwrap_or_default();
-                let formatted_ids = crate::tools::formatter::format_modified_ids(
+                let formatted_ids = crate::tools::formatter::format_lines(
                     &ids,
                     config.only_ids_wrap_trigger_length,
                 );
                 let indented_ids = formatted_ids.replace("\n", "\n  ");
                 format!(
-                    "{{\n  \"ids\": {},{}\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
+                    "{{\n  \"lines\": {},{}\n  \"total_bytes\": {},\n  \"total_lines\": {}\n}}",
                     indented_ids,
                     warning_field(&message)?,
                     total_bytes,
@@ -429,7 +429,7 @@ mod tests {
                 lines.push(serde_json::json!([current_id, current_n, current_content]));
             }
         } else {
-            for id_entry in ids_val["ids"].as_array().unwrap() {
+            for id_entry in ids_val["lines"].as_array().unwrap() {
                 let id_arr = id_entry.as_array().unwrap();
                 let id = id_arr[0].as_str().unwrap();
                 let n = id_arr[1].as_u64().unwrap() as usize;
@@ -470,9 +470,9 @@ mod tests {
             "nothing was wrong, so nothing is said"
         );
         assert!(val["columns"].is_null());
-        assert!(val["lines"].is_null());
 
-        let ids = val["ids"].as_array().unwrap();
+        // Each entry is a line as [id, number]: no text comes back.
+        let ids = val["lines"].as_array().unwrap();
         assert_eq!(ids.len(), 3);
         for (index, entry) in ids.iter().enumerate() {
             assert!(entry[0]
@@ -513,7 +513,7 @@ mod tests {
             val["message"].is_null(),
             "nothing was wrong, so nothing is said"
         );
-        assert!(val["ids"].is_null());
+        assert!(val["lines"].is_null());
         assert_eq!(val["total_lines"].as_u64().unwrap(), 3);
         assert_eq!(val["total_bytes"].as_u64().unwrap(), content.len() as u64);
 

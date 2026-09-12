@@ -86,7 +86,7 @@ fn test_an_edit_reaches_the_file() {
         String::from_utf8_lossy(&ids.stderr)
     );
     let meta = json_block(&ids.stdout);
-    let target = meta["ids"][1][0].as_str().unwrap().to_string();
+    let target = meta["lines"][1][0].as_str().unwrap().to_string();
 
     let edit = ast_editor(
         "edited",
@@ -250,7 +250,7 @@ fn test_the_json_form_a_program_would_send_still_works() {
     );
     let meta = json_block(&flagged.stdout);
     assert!(
-        meta["ids"].is_array(),
+        meta["lines"].is_array(),
         "{}",
         String::from_utf8_lossy(&flagged.stdout)
     );

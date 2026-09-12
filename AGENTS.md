@@ -84,10 +84,19 @@ inside the tree.
 
 ## Version control
 
-This layer is Git, on `master`. `decisions/` and `kanban/` are Jujutsu colocated
-with Git, so `jj` and `git` both work inside them. Read the
+All three layers are Jujutsu colocated with Git, so `jj` and `git` both work in
+each. Read the
 [`use-jujutsu-safely`](https://github.com/zaeku/skills/tree/main/plugins/version-control/skills/use-jujutsu-safely)
 skill before an unfamiliar `jj` command.
+
+**Commit unsigned and sign before pushing.** `master` on the remote requires a
+signature, and signing each commit as it is made puts a hardware approval in the
+middle of every change. `jj sign` signs what `revsets.sign` names, which is what
+is still mutable — everything not yet pushed. Then `jj git push`.
+
+**Do not sign what is already pushed.** The remote refuses a non-fast-forward,
+so a re-signed commit that is already there cannot land. `mutable()` excludes
+them for the same reason, so a bare `jj sign` is already the safe one.
 
 **Write a change description from what the change does, not from what it was
 for.** A description is true of the diff or it is false, and whoever reads one

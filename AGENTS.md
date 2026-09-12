@@ -102,12 +102,8 @@ for the code drifting into it.
 
 ## Generated documents
 
-Do not edit `README.md` or `agent_skill/references/api_specification.md` by
-hand. `just doc` renders them from `agent_skill/doc_templates/*.tpl.md` and
-discards any hand edit. Put the sentence in the template.
-
-`ast-editor skill` prints the skill document from the binary, and
-`just install-skill` writes that output to the installed location.
+`just doc` renders `README.md` and `agent_skill/references/api_specification.md`
+from `agent_skill/doc_templates/*.tpl.md`. Edit the template.
 
 ## Toolchain
 

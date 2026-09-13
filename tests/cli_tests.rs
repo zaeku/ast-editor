@@ -45,8 +45,12 @@ fn test_help_lists_the_tools() {
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("ast-editor <tool>"), "{}", text);
-    for tool in ["view", "edit", "inspect"] {
-        assert!(text.contains(tool), "{} missing from help: {}", tool, text);
+    let listed = text
+        .lines()
+        .find(|line| line.starts_with("Tools:"))
+        .unwrap_or_else(|| panic!("no Tools: line in help: {}", text));
+    for tool in ["outline", "view", "inspect", "edit", "create"] {
+        assert!(listed.contains(tool), "{} missing from {:?}", tool, listed);
     }
 }
 

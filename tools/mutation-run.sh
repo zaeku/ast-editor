@@ -35,6 +35,11 @@ CLI_PYTHON=$(dirname "$(readlink -f "$(command -v colab)")")/python
 # An assignment whose local record is gone is unreachable by name and still
 # holds a slot, so the next allocation fails with TooManyAssignments.
 reap() {
+    # A reap releases every assignment no local record names, which is another
+    # shard's session during the seconds between its allocation and its record.
+    # A launcher running shards side by side reaps once for all of them and
+    # sets REAP=0 here.
+    [ "${REAP:-1}" = 1 ] || return 0
     "$CLI_PYTHON" - <<'PY' 2>/dev/null || true
 from colab_cli.common import state
 sessions, assignments = state.sync_sessions()
@@ -199,6 +204,9 @@ done
 
 pull /content/mutants.log "$OUT/mutants.log" || true
 pull /content/commit.txt "$OUT/commit.txt" || true
+# Which phase decided each mutant, and which test spoke. The four lists say what
+# the verdict was; this is the only thing that says why.
+pull "$REMOTE/mutants.out/outcomes.json" "$OUT/outcomes.json" || true
 for name in caught missed timeout unviable; do
     pull "$REMOTE/mutants.out/$name.txt" "$OUT/$name.txt" || true
 done

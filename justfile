@@ -72,3 +72,10 @@ uninstall:
     rm -f '{{bin_dir}}/ast-editor'
     rm -rf '{{skill_dir}}'
     @echo 'removed {{bin_dir}}/ast-editor and {{skill_dir}}'
+
+# The suite runs on a rented Colab session rather than here, because a full run
+# is 873 mutants. Needs the `colab` CLI; SESSION, HARDWARE and JOBS override it.
+
+# Measure what the tests would catch, and print what survived.
+mutants:
+    ./tools/mutation-run.sh

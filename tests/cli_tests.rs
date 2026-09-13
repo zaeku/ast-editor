@@ -441,9 +441,7 @@ fn a_tool_answers_its_own_help() {
     }
 }
 
-/// The help is read by piping it to `head`, which closes the pipe partway
-/// through: that used to panic, and the first thirty lines are budgeted for
-/// exactly that reader.
+/// The first thirty lines are budgeted for a reader who stops there.
 #[test]
 fn the_first_thirty_lines_of_help_stand_alone() {
     let out = ast_editor("helphead", &["--help"]);
@@ -465,6 +463,74 @@ fn the_first_thirty_lines_of_help_stand_alone() {
             "the first thirty lines do not carry {needed:?}:\n{head}"
         );
     }
+}
+
+/// A reader that stops reading closes the pipe under the writer, and the write
+/// that lands on it used to panic. One response cannot reach that write: the
+/// formatter caps a response at 45,000 bytes and a pipe buffers 64K, so the
+/// whole of it fits and the writer never blocks. Four paths in one call is four
+/// responses, which does not fit.
+#[test]
+fn a_reader_that_stops_does_not_break_the_writer() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    let long: String = (0..4000).map(|n| format!("let line{n} = {n};\n")).collect();
+    let path = scratch("long_enough_to_fill_a_pipe.rs", &long);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args([
+            "view",
+            path.to_str().unwrap(),
+            path.to_str().unwrap(),
+            path.to_str().unwrap(),
+            path.to_str().unwrap(),
+        ])
+        .env("AST_EDITOR_CACHE_DIR", store_for("stopped-reader"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to run ast-editor");
+
+    {
+        let mut reader = BufReader::new(child.stdout.take().expect("stdout was piped"));
+        let mut first = String::new();
+        reader.read_line(&mut first).expect("the first line");
+    }
+
+    let out = child
+        .wait_with_output()
+        .expect("failed to wait for ast-editor");
+    assert!(
+        out.status.success(),
+        "exited {:?} when its reader stopped: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A broken pipe is the one write failure that means the reader left on
+/// purpose, and it alone is a clean exit. Any other one means the answer did
+/// not arrive and the call has to say so (D-01M28HCSAMTEFS). `/dev/full` is how
+/// a write is made to fail without a pipe, and only Linux has it.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_write_that_fails_for_any_other_reason_exits_non_zero() {
+    let full = std::fs::File::create("/dev/full").expect("/dev/full");
+    let out = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .arg("--help")
+        .env("AST_EDITOR_CACHE_DIR", store_for("full-device"))
+        .stdout(full)
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .expect("failed to run ast-editor");
+
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a write that failed left the exit code at {:?}: {}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Silence used to mean two things: the file parsed, or nothing could read it.

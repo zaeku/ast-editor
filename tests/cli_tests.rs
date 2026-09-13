@@ -764,3 +764,95 @@ fn several_files_in_one_call() {
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("/nonexistent/file.rs"));
 }
+
+/// `move` is arithmetic over indexes that shift under it. The block is drained
+/// before the destination is resolved, so a destination past the block moves
+/// back by the block's length and one before it does not; `after` is one past
+/// `before`; and a block goes in in its own order. One line in one direction
+/// exercises none of that.
+#[test]
+fn a_move_lands_where_it_was_addressed() {
+    let start = "one\ntwo\nthree\nfour\nfive\nsix\n";
+    let cases = [
+        (vec![0], "after", 3, "two\nthree\nfour\none\nfive\nsix\n"),
+        (vec![4], "before", 1, "one\nfive\ntwo\nthree\nfour\nsix\n"),
+        (vec![0, 1], "after", 4, "three\nfour\nfive\none\ntwo\nsix\n"),
+        (
+            vec![3, 4],
+            "before",
+            0,
+            "four\nfive\none\ntwo\nthree\nsix\n",
+        ),
+    ];
+
+    for (n, (block, position, dest, want)) in cases.iter().enumerate() {
+        let test = format!("move{n}");
+        let file = scratch(&format!("move{n}.rs"), start);
+        let ids = ast_editor(&test, &["view", file.to_str().unwrap(), "--only-ids"]);
+        assert!(
+            ids.status.success(),
+            "{}",
+            String::from_utf8_lossy(&ids.stderr)
+        );
+        let meta = json_block(&ids.stdout);
+        let id = |row: usize| meta["lines"][row][0].as_str().unwrap().to_string();
+
+        let address = match block[..] {
+            [only] => id(only),
+            [first, last] => format!("{},{}", id(first), id(last)),
+            _ => unreachable!("a case addresses one line or a span"),
+        };
+        let script = format!("move {address} {position} {}\n", id(*dest));
+
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+            .args(["edit", file.to_str().unwrap()])
+            .env("AST_EDITOR_CACHE_DIR", store_for(&test))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to run ast-editor");
+        {
+            use std::io::Write;
+            child
+                .stdin
+                .take()
+                .expect("stdin was piped")
+                .write_all(script.as_bytes())
+                .expect("failed to write the script");
+        }
+        let out = child.wait_with_output().expect("failed to wait");
+        assert!(
+            out.status.success(),
+            "{script}exited {:?}: {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            *want,
+            "after {script}"
+        );
+
+        // The answer is addressed to the next edit, so the ids it names have to
+        // be the lines that moved, where they now are.
+        let moved = json_block(&out.stdout);
+        let named: Vec<&str> = moved["modified_lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| pair[0].as_str().unwrap())
+            .collect();
+        let after = ast_editor(&test, &["view", file.to_str().unwrap(), "--only-ids"]);
+        let rows = json_block(&after.stdout);
+        let landed: Vec<String> = (0..block.len())
+            .map(|offset| {
+                let row = want
+                    .lines()
+                    .position(|l| l == start.lines().nth(block[offset]).unwrap());
+                rows["lines"][row.unwrap()][0].as_str().unwrap().to_string()
+            })
+            .collect();
+        assert_eq!(named, landed, "modified_lines after {script}");
+    }
+}

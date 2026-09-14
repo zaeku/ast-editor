@@ -229,50 +229,6 @@ pub fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) -> Stri
     result
 }
 
-pub fn format_definition_json(
-    repository: &impl SessionRepository,
-    session_id: &str,
-    start_line: usize,
-    end_line: usize,
-) -> Result<String> {
-    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
-
-    let mut items = Vec::new();
-    for (current_idx, (seq_id, line_hash_opt, content)) in (start_line..).zip(lines) {
-        let line_hash = line_hash_opt.unwrap_or_else(|| compute_line_hash(&content));
-        let line_id = format!("{:x}#{}", seq_id, line_hash);
-        let content_escaped = serde_json::to_string(&content)?;
-        items.push(format!(
-            "[\"{}\", {}, {}]",
-            line_id, current_idx, content_escaped
-        ));
-    }
-
-    let mut lines_json = String::new();
-    lines_json.push('[');
-    if !items.is_empty() {
-        lines_json.push('\n');
-        for (i, item) in items.iter().enumerate() {
-            lines_json.push_str("  ");
-            lines_json.push_str(item);
-            if i < items.len() - 1 {
-                lines_json.push_str(",\n");
-            } else {
-                lines_json.push('\n');
-            }
-        }
-        lines_json.push_str("  ]");
-    } else {
-        lines_json.push(']');
-    }
-
-    let output = format!(
-        "{{\n  \"columns\": [\n    \"id\",\n    \"n\",\n    \"content\"\n  ],\n  \"lines\": {}\n}}",
-        lines_json
-    );
-    Ok(output)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1553,3 +1553,72 @@ fn every_template_finds_what_it_names() {
         );
     }
 }
+
+/// A line too long for one row is broken onto continuation rows that join back
+/// to it exactly: the pieces concatenate to the line, the text of every row
+/// starts in the same column so the block reads as one line, and the last row
+/// is marked differently from the ones before it so a reader can see where the
+/// line ends.
+#[test]
+fn a_long_line_is_broken_into_rows_that_join_back_to_it() {
+    let long = "x".repeat(1000);
+    let file = scratch("wrapped.rs", &format!("let a = 1;\n{long}\nlet b = 2;\n"));
+    let out = ast_editor("wrapped", &["view", file.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    let block: Vec<&str> = text
+        .lines()
+        .skip_while(|line| !line.starts_with("```"))
+        .skip(1)
+        .take_while(|line| !line.starts_with("```"))
+        .collect();
+
+    // The head row for the long line, and every continuation under it.
+    let head = block
+        .iter()
+        .position(|row| row.contains("|2: "))
+        .expect("no row for line 2");
+    let rows: Vec<&str> = block[head..]
+        .iter()
+        .take_while(|row| row.contains("|2: ") || row.contains("│: ") || row.contains("└: "))
+        .copied()
+        .collect();
+    // At least three, so that there is a row between the first and the last:
+    // how wide a row is is a display choice and not what this checks.
+    assert!(
+        rows.len() >= 3,
+        "a 1000-character line made {} rows",
+        rows.len()
+    );
+
+    // The pieces are the line.
+    // In characters, not bytes: the box-drawing marker is three bytes wide and
+    // one column, and it is the column that has to line up.
+    let column = rows[0][..rows[0].find("|2: ").unwrap() + "|2: ".len()]
+        .chars()
+        .count();
+    let mut joined = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        let marker = if n == 0 {
+            "|2: "
+        } else if n == rows.len() - 1 {
+            "└: "
+        } else {
+            "│: "
+        };
+        let at = row.find(marker).unwrap_or_else(|| {
+            panic!("row {n} is not marked {marker:?}: {row:?}");
+        });
+        assert_eq!(
+            row[..at + marker.len()].chars().count(),
+            column,
+            "row {n} starts its text in a different column: {row:?}"
+        );
+        joined.push_str(&row[at + marker.len()..]);
+    }
+    assert_eq!(joined, long, "the rows do not join back to the line");
+}

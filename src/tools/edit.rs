@@ -93,10 +93,10 @@ fn lint_markdown(content: &str) -> Vec<String> {
                     let config = crate::tools::metadata::get_config();
                     let msg = config
                         .warning_header_hierarchy
-                        .replace("{}", &(line_num + 1).to_string())
-                        .replace("{}", &level.to_string())
-                        .replace("{}", &last_level.to_string())
-                        .replace("{}", &(last_level + 1).to_string());
+                        .replacen("{}", &(line_num + 1).to_string(), 1)
+                        .replacen("{}", &level.to_string(), 1)
+                        .replacen("{}", &last_level.to_string(), 1)
+                        .replacen("{}", &(last_level + 1).to_string(), 1);
                     warnings.push(msg);
                 }
                 last_level = level;
@@ -109,7 +109,7 @@ fn lint_markdown(content: &str) -> Vec<String> {
             let config = crate::tools::metadata::get_config();
             let msg = config
                 .warning_malformed_link
-                .replace("{}", &(line_num + 1).to_string());
+                .replacen("{}", &(line_num + 1).to_string(), 1);
             warnings.push(msg);
         }
     }

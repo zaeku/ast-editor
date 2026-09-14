@@ -1622,3 +1622,147 @@ fn a_long_line_is_broken_into_rows_that_join_back_to_it() {
     }
     assert_eq!(joined, long, "the rows do not join back to the line");
 }
+
+/// A match answers with the text of the node, which begins where the node
+/// begins: a nested list item starts at its bullet and not at the whitespace
+/// indenting it. The file is written in multi-byte characters because the text
+/// is cut by byte offset, and a cut inside a character is not a string.
+#[test]
+fn a_match_answers_with_the_text_of_the_node() {
+    let file = scratch(
+        "nested.md",
+        "# 제목\n\n- 한글 항목\n  - 중첩 항목\n    - 더 깊은 항목\n",
+    );
+
+    let heading = ast_editor(
+        "nodetext",
+        &["inspect", file.to_str().unwrap(), "--query", "Heading"],
+    );
+    assert!(
+        heading.status.success(),
+        "{}",
+        String::from_utf8_lossy(&heading.stderr)
+    );
+    let found = json_block(&heading.stdout);
+    assert_eq!(
+        found["matches"][0]["text"].as_str().unwrap(),
+        "# 제목",
+        "a heading of multi-byte characters came back cut"
+    );
+
+    let lists = ast_editor(
+        "nodetext2",
+        &["inspect", file.to_str().unwrap(), "--query", "List"],
+    );
+    assert!(
+        lists.status.success(),
+        "{}",
+        String::from_utf8_lossy(&lists.stderr)
+    );
+    let found = json_block(&lists.stdout);
+    let texts: Vec<&str> = found["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["text"].as_str().unwrap())
+        .collect();
+    assert!(
+        texts.len() >= 3,
+        "three nested lists matched {} times",
+        texts.len()
+    );
+    for text in &texts {
+        assert!(
+            text.starts_with("- "),
+            "a list's text began before the list did: {text:?}"
+        );
+    }
+}
+
+/// An edit to markdown warns about a heading that skips a level, and the
+/// warning names which levels: the one found, the one before it, and the one
+/// missing between them. A warning whose numbers are wrong sends a reader to
+/// the wrong heading.
+#[test]
+fn a_skipped_heading_level_is_named_by_the_levels_involved() {
+    let file = scratch("headings.md", "# One\n\n### Three\n");
+    let out = run_script("headings", &file, "append ```\ntext\n```\n");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let warnings = json_block(&out.stdout)["warnings"].clone();
+    let said = warnings[0].as_str().unwrap_or("");
+    assert!(
+        said.contains("line 3")
+            && said.contains("H3")
+            && said.contains("H1")
+            && said.contains("H2"),
+        "the warning did not name the line and the three levels: {said:?}"
+    );
+
+    // A level at a time is not a skip, and the first heading has nothing above
+    // it to skip from, however deep it is.
+    for (name, content) in [
+        ("steps.md", "# One\n\n## Two\n\n### Three\n"),
+        ("deep_first.md", "### Three\n\n#### Four\n"),
+    ] {
+        let file = scratch(name, content);
+        let out = run_script(&format!("h_{name}"), &file, "append ```\ntext\n```\n");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let warnings = json_block(&out.stdout)["warnings"].clone();
+        let hierarchy: Vec<&str> = warnings
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|w| w.as_str())
+                    .filter(|w| w.contains("Header hierarchy"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            hierarchy.is_empty(),
+            "{name} warned about a hierarchy it keeps: {hierarchy:?}"
+        );
+    }
+}
+
+/// The same edit warns about a bracket that was opened and not closed, and
+/// names the line it is on. A line with a whole link is not that.
+#[test]
+fn an_unclosed_bracket_is_named_by_its_line() {
+    let file = scratch(
+        "links.md",
+        "# Title\n\nA whole [link](https://example.com) here.\n\nA broken [link(https://example.com) here.\n",
+    );
+    let out = run_script("links", &file, "append ```\ntext\n```\n");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let warnings = json_block(&out.stdout)["warnings"].clone();
+    let said: Vec<&str> = warnings
+        .as_array()
+        .map(|a| a.iter().filter_map(|w| w.as_str()).collect())
+        .unwrap_or_default();
+    let about_links: Vec<&&str> = said
+        .iter()
+        .filter(|w| w.contains("malformed link"))
+        .collect();
+    assert_eq!(
+        about_links.len(),
+        1,
+        "the whole link and the broken one were not told apart: {said:?}"
+    );
+    assert!(
+        about_links[0].contains("line 5"),
+        "the warning named the wrong line: {:?}",
+        about_links[0]
+    );
+}

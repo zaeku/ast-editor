@@ -4,6 +4,17 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.5 — 2026-09-14
+
+### Fixed
+
+- **The heading-hierarchy warning names the levels it is about.** It said
+  `found H3 after H3 without H3` for a document going from `#` to `###`: the
+  message has four places to fill and each was filled with the same value,
+  because `str::replace` replaces every occurrence and the code called it four
+  times rather than filling one place at a time. It now reads `found H3 after
+  H1 without H2`. Every other message in the tool already filled one at a time.
+
 ## 0.3.4 — 2026-09-14
 
 ### Fixed

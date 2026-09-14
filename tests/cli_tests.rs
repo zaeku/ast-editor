@@ -1155,3 +1155,93 @@ fn an_insert_acts_at_the_line_it_names() {
         );
     }
 }
+
+/// A read is capped at 800 lines, and the cap is where a read stops being what
+/// was asked for: the answer has to say so, and it has to stop in the right
+/// place. The boundary is the whole subject here — 800 lines is a full answer
+/// and 801 is a capped one.
+#[test]
+fn a_read_past_the_cap_stops_at_it_and_says_so() {
+    let long: String = (1..=1000)
+        .map(|n| format!("let line{n} = {n};\n"))
+        .collect();
+    let file = scratch("thousand.rs", &long);
+    let cap = 800;
+
+    let read = |test: &str, range: Option<&str>| {
+        let mut args = vec!["view", file.to_str().unwrap()];
+        if let Some(range) = range {
+            args.push(range);
+        }
+        args.push("--only-ids");
+        let out = ast_editor(test, &args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let block = json_block(&out.stdout);
+        let rows: Vec<u64> = block["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| pair[1].as_u64().unwrap())
+            .collect();
+        let said = block["message"].as_str().unwrap_or("").to_string();
+        (rows, said)
+    };
+
+    // The whole file, which is more than the cap.
+    let (rows, said) = read("capall", None);
+    assert_eq!(rows.len(), cap, "the whole file was not capped");
+    assert_eq!((rows[0], rows[cap - 1]), (1, cap as u64));
+    assert!(said.contains("800"), "a capped read said nothing: {said:?}");
+
+    // Exactly the cap, which is not capped.
+    let (rows, said) = read("capexact", Some("101,900"));
+    assert_eq!(rows.len(), cap, "exactly the cap should be answered whole");
+    assert_eq!((rows[0], rows[cap - 1]), (101, 900));
+    assert!(said.is_empty(), "a full answer warned anyway: {said:?}");
+
+    // One past the cap, which is.
+    let (rows, said) = read("capover", Some("101,901"));
+    assert_eq!(rows.len(), cap, "one past the cap was not capped");
+    assert_eq!(
+        (rows[0], rows[cap - 1]),
+        (101, 900),
+        "the cap did not start where the request did"
+    );
+    assert!(said.contains("800"), "a capped read said nothing: {said:?}");
+
+    // A range well inside the cap is untouched.
+    let (rows, said) = read("capunder", Some("400,500"));
+    assert_eq!(rows.len(), 101);
+    assert_eq!((rows[0], rows[100]), (400, 500));
+    assert!(said.is_empty(), "an uncapped read warned: {said:?}");
+}
+
+/// The warning is about lines withheld, not about the size of the request. A
+/// file exactly as long as the cap is answered whole however wide the range
+/// asked for was, so there is nothing to warn about.
+#[test]
+fn a_file_exactly_the_cap_is_answered_without_a_warning() {
+    let cap = 800;
+    let exact: String = (1..=cap).map(|n| format!("let line{n} = {n};\n")).collect();
+    let file = scratch("eight_hundred.rs", &exact);
+    let out = ast_editor(
+        "capfile",
+        &["view", file.to_str().unwrap(), "1,900", "--only-ids"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let block = json_block(&out.stdout);
+    assert_eq!(block["lines"].as_array().unwrap().len(), cap);
+    assert_eq!(
+        block["message"].as_str().unwrap_or(""),
+        "",
+        "nothing was withheld and it warned anyway"
+    );
+}

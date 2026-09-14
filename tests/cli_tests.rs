@@ -1420,3 +1420,58 @@ fn the_line_that_closes_a_function_is_inside_it() {
         .collect();
     assert_eq!(names, vec!["fn:alpha"]);
 }
+
+/// A path in the scratch directory that nothing has written, for `create`,
+/// which refuses a file that exists.
+fn unwritten(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("ast-editor-cli-files-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    let _ = std::fs::remove_file(&path);
+    path
+}
+
+/// `create` answers with the new file's ids when asked, and the same 800-line
+/// cap applies to that answer: past it the ids stop and the message says they
+/// were cut. A file exactly as long as the cap is answered whole and has
+/// nothing to report, and a file with no lines has no ids to give.
+#[test]
+fn create_caps_the_ids_it_answers_with() {
+    let cap = 800;
+    let make = |test: &str, name: &str, lines: usize| {
+        let content: String = (1..=lines)
+            .map(|n| format!("let line{n} = {n};\n"))
+            .collect();
+        let path = unwritten(name);
+        let json = format!(
+            r#"{{"filepath":"{}","content":{},"return_ids":true}}"#,
+            path.display(),
+            serde_json::to_string(&content).unwrap()
+        );
+        let out = ast_editor(test, &["create", "--json", &json]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let block = json_block(&out.stdout);
+        let rows = block["lines"].as_array().map(|a| a.len()).unwrap_or(0);
+        let said = block["message"].as_str().unwrap_or("").to_string();
+        (rows, said)
+    };
+
+    let (rows, said) = make("createover", "over_cap.rs", 1000);
+    assert_eq!(rows, cap, "a long file's ids were not capped");
+    assert!(
+        said.contains("800"),
+        "a capped answer said nothing: {said:?}"
+    );
+
+    let (rows, said) = make("createexact", "at_cap.rs", cap);
+    assert_eq!(rows, cap);
+    assert!(said.is_empty(), "a whole answer warned anyway: {said:?}");
+
+    let (rows, said) = make("createempty", "no_lines.rs", 0);
+    assert_eq!(rows, 0, "an empty file answered with ids");
+    assert!(said.is_empty(), "an empty file warned: {said:?}");
+}

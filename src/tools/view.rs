@@ -128,13 +128,10 @@ pub fn view_lines(
                 end
             );
         }
-        let requested_len = if end >= start { end - start + 1 } else { 0 };
-        let capped_end = if requested_len > formatter::LINE_CAP {
-            start.saturating_add(formatter::LINE_CAP - 1)
-        } else {
-            end
-        };
-        intervals.push((start, capped_end));
+        // The range goes to the formatter as asked for. It applies the line cap
+        // while printing, and narrowing here as well left that one unable to
+        // fail: a cap that never decides makes the cap that does untestable.
+        intervals.push((start, end));
     }
 
     let only_ids_bool = only_ids.unwrap_or(false);

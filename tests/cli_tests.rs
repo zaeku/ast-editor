@@ -1245,3 +1245,178 @@ fn a_file_exactly_the_cap_is_answered_without_a_warning() {
         "nothing was withheld and it warned anyway"
     );
 }
+
+/// A query answers with a window around each match, and the windows are merged
+/// where they meet. What that arithmetic gets wrong is the edges: a window that
+/// would start before the first line, one that would end past the last, and
+/// whether two windows a single line apart are one answer or two.
+#[test]
+fn a_query_answers_with_merged_windows_around_its_matches() {
+    let twenty: String = (1..=20).map(|n| format!("let line{n} = {n};\n")).collect();
+    let file = scratch("twenty.rs", &twenty);
+
+    let rows = |test: &str, query: &str, context: &str| -> Vec<u64> {
+        let out = ast_editor(
+            test,
+            &[
+                "view",
+                file.to_str().unwrap(),
+                "--query",
+                query,
+                "--context-lines",
+                context,
+                "--only-ids",
+            ],
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        json_block(&out.stdout)["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| pair[1].as_u64().unwrap())
+            .collect()
+    };
+
+    // Far apart: two windows, and the gap between them is not answered.
+    assert_eq!(
+        rows("qfar", "line3 |line12 ", "1"),
+        vec![2, 3, 4, 11, 12, 13]
+    );
+
+    // One line apart: the windows touch and become one run.
+    assert_eq!(rows("qtouch", "line3 |line6 ", "1"), vec![2, 3, 4, 5, 6, 7]);
+
+    // Two lines apart: they do not.
+    assert_eq!(rows("qapart", "line3 |line8 ", "1"), vec![2, 3, 4, 7, 8, 9]);
+
+    // A window that would begin before the first line begins at it.
+    assert_eq!(rows("qhead", "line1 ", "1"), vec![1, 2]);
+    assert_eq!(rows("qhead3", "line3 ", "3"), vec![1, 2, 3, 4, 5, 6]);
+
+    // A window that would end past the last line ends at it.
+    assert_eq!(rows("qtail", "line20 ", "1"), vec![19, 20]);
+}
+
+/// Windows that meet are one run and windows with a gap are two, and the
+/// difference is visible only in the text: the same lines come back either way,
+/// separated by an elision or not. So the elision is what says whether
+/// anything was skipped between them.
+#[test]
+fn an_elision_marks_the_lines_a_query_skipped() {
+    let file = scratch(
+        "elide.rs",
+        "fn alpha() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n",
+    );
+
+    let text = |test: &str, query: &str| -> String {
+        let out = ast_editor(
+            test,
+            &[
+                "view",
+                file.to_str().unwrap(),
+                "--query",
+                query,
+                "--context-lines",
+                "0",
+            ],
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+
+    let touching = text("elidenone", "let a|let b");
+    assert!(
+        !touching.contains("\n...\n"),
+        "consecutive matches were separated: {touching}"
+    );
+
+    let gapped = text("elidegap", "let a|let c");
+    assert!(
+        gapped.contains("\n...\n"),
+        "a skipped line was not marked: {gapped}"
+    );
+}
+
+/// A read answers with what encloses the lines it printed, so a caller sees
+/// which function it is looking into without reading around the window. The
+/// range is the enclosing node's own, not the window's, and a function no
+/// printed line falls inside is not named.
+#[test]
+fn a_read_names_what_encloses_the_lines_it_printed() {
+    let file = scratch(
+        "enclosed.rs",
+        "fn alpha() {\n    let a = 1;\n    let b = 2;\n}\n\nfn beta() {\n    let c = 3;\n}\n",
+    );
+    let out = ast_editor(
+        "enclosing",
+        &[
+            "view",
+            file.to_str().unwrap(),
+            "--query",
+            "let b",
+            "--context-lines",
+            "0",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let contexts = json_block(&out.stdout)["enclosing_contexts"].clone();
+    assert_eq!(
+        contexts,
+        serde_json::json!([{"name": "fn:alpha", "start": 1, "end": 4}]),
+        "the enclosing range was not alpha's own"
+    );
+}
+
+/// The line that closes a function is still inside it, and what follows the
+/// function is not. A read of that one line names the function and nothing
+/// else, which is the difference between asking what encloses a line and
+/// asking what encloses the line after it.
+#[test]
+fn the_line_that_closes_a_function_is_inside_it() {
+    let file = scratch(
+        "closing.rs",
+        "fn alpha() {\n    let a = 1;\n}\nconst X: u8 = 1;\n",
+    );
+    let out = ast_editor(
+        "closing",
+        &[
+            "view",
+            file.to_str().unwrap(),
+            "--query",
+            r"^\}",
+            "--context-lines",
+            "0",
+            "--only-ids",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let block = json_block(&out.stdout);
+    assert_eq!(
+        block["lines"].as_array().unwrap().len(),
+        1,
+        "more than the closing line was printed"
+    );
+    let names: Vec<&str> = block["enclosing_contexts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|ctx| ctx["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["fn:alpha"]);
+}

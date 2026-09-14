@@ -1945,3 +1945,142 @@ fn a_script_naming_replace_substring_is_sent_to_the_json_form() {
         "an operation the tool serves was called unknown: {said}"
     );
 }
+
+/// `<tool> --help` is the only place a caller reads what an option means, and
+/// it carries each description whole. The text is broken across lines to fit
+/// beside the flag column, so the check is on the words rather than on the
+/// layout: every description in the schema appears in the help, unbroken once
+/// the wrapping is undone.
+#[test]
+fn a_tool_help_carries_each_option_description_whole() {
+    let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for tool in ast_editor::tools::ToolDispatcher::new().list_tools() {
+        let name = tool["name"].as_str().unwrap().to_string();
+        let out = ast_editor(&format!("desc_{name}"), &[&name, "--help"]);
+        assert!(
+            out.status.success(),
+            "{name} --help failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let help = flat(&String::from_utf8_lossy(&out.stdout));
+
+        let properties = tool["inputSchema"]["properties"].as_object().unwrap();
+        let mut checked = 0;
+        for (field, property) in properties {
+            let Some(description) = property["description"].as_str() else {
+                continue;
+            };
+            assert!(
+                help.contains(&flat(description)),
+                "{name} --help does not carry {field}'s description whole:\n  \
+                 wanted {:?}\n  in {help:?}",
+                flat(description)
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "{name} has no described options to check");
+    }
+}
+
+/// A boolean option is true by being named, and there are three other ways to
+/// say it: `--flag true`, `--flag false`, and `--no-flag`. The word after the
+/// flag is consumed when it is one of those, and left alone when it is not —
+/// otherwise the next argument would be read as the flag's value.
+#[test]
+fn a_boolean_option_is_written_four_ways() {
+    let file = scratch("bools.rs", "fn main() {\n    let a = 1;\n}\n");
+    let path = file.to_str().unwrap().to_string();
+    let ids_shown = |test: &str, args: &[&str]| -> bool {
+        let mut all = vec!["view", path.as_str()];
+        all.extend_from_slice(args);
+        let out = ast_editor(test, &all);
+        assert!(
+            out.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // only_ids answers with the ids alone and no line text.
+        json_block(&out.stdout).get("lines").is_some()
+    };
+
+    assert!(
+        ids_shown("bool_bare", &["--only-ids"]),
+        "a named flag was not taken as true"
+    );
+    assert!(
+        ids_shown("bool_true", &["--only-ids", "true"]),
+        "--only-ids true was not true"
+    );
+    assert!(
+        !ids_shown("bool_false", &["--only-ids", "false"]),
+        "--only-ids false was not false"
+    );
+    assert!(
+        !ids_shown("bool_no", &["--no-only-ids"]),
+        "--no-only-ids was not false"
+    );
+
+    // A word that is not true or false belongs to whatever comes next, and here
+    // there is nothing next, so it is a path and the call fails on it.
+    let out = ast_editor("bool_other", &["view", &path, "--only-ids", "maybe"]);
+    assert!(
+        !out.status.success(),
+        "'maybe' was swallowed as the flag's value"
+    );
+
+    // `--no-` on something that is not an option is not a negation.
+    let out = ast_editor("bool_nonsense", &["view", &path, "--no-such-thing"]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--no-such-thing"),
+        "the error did not name the option: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A range after the path is read the way `sed -n '40,80p'` reads one, and what
+/// is not a range is a path. A number on its own is a start rather than a
+/// single line. Line numbers begin at one, so `0,2` is not a range at all, and
+/// the tool looks for a file by that name rather than reading from a line that
+/// cannot exist.
+#[test]
+fn what_is_not_a_range_is_a_path() {
+    let file = scratch("ranged.rs", "a\nb\nc\nd\ne\n");
+    let rows = |test: &str, arg: &str| -> Vec<u64> {
+        let out = ast_editor(test, &["view", file.to_str().unwrap(), arg, "--only-ids"]);
+        assert!(
+            out.status.success(),
+            "{arg:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        json_block(&out.stdout)["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pair| pair[1].as_u64().unwrap())
+            .collect()
+    };
+
+    assert_eq!(rows("range_both", "2,4"), vec![2, 3, 4]);
+    assert_eq!(rows("range_from", "3,"), vec![3, 4, 5]);
+    assert_eq!(rows("range_to", ",2"), vec![1, 2]);
+    // A number on its own is a start, so it says the same as `4,`.
+    assert_eq!(rows("range_one", "4"), vec![4, 5]);
+
+    for not_a_range in ["0,2", "2,0", "x,2"] {
+        let out = ast_editor(
+            &format!("nr_{not_a_range}"),
+            &["view", file.to_str().unwrap(), not_a_range],
+        );
+        assert!(
+            !out.status.success(),
+            "{not_a_range:?} was read as a range rather than a path"
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(not_a_range),
+            "{not_a_range:?} was not named as the path it was taken for: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

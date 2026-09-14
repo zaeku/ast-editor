@@ -47,6 +47,7 @@ lists can be passed as one. A tool is named by any unambiguous prefix. Paths
 are relative to the working directory:
 
     ast-editor view src/main.rs 40,80        the way sed takes a range
+    ast-editor view src/main.rs 40           a start on its own, so 40 to the end
     ast-editor view src/*.rs                 one block per file
     ast-editor inspect src/main.rs --template functions
     ast-editor edit src/main.rs --apply p1f

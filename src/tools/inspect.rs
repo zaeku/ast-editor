@@ -148,9 +148,10 @@ fn template_query(lang: &str, template: &str) -> Option<String> {
 
         // C / C++
         ("c" | "cpp", "functions") => Some("(function_definition) @function".to_string()),
-        ("c" | "cpp", "classes") => {
-            Some("[(struct_specifier) (class_specifier)] @class".to_string())
-        }
+        // C has no class_specifier, and naming a node a grammar does not have
+        // is a query that will not compile rather than one that finds nothing.
+        ("c", "classes") => Some("(struct_specifier) @class".to_string()),
+        ("cpp", "classes") => Some("[(struct_specifier) (class_specifier)] @class".to_string()),
         ("c" | "cpp", "imports") => Some("(preproc_include) @import".to_string()),
         ("c" | "cpp", "macros") => {
             Some("[(preproc_def) (preproc_function_def)] @macro".to_string())

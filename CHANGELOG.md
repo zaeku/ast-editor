@@ -4,6 +4,17 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.4 — 2026-09-14
+
+### Fixed
+
+- **`inspect --template classes` works on a `.c` file.** It answered `Invalid
+  Tree-sitter query`, because the template it sent named `class_specifier`,
+  which the C grammar does not have — the query was written for C++ and both
+  languages were served the same one. C now gets `(struct_specifier)` and C++
+  keeps both. Every other template pair the tool serves is now covered by a
+  test that runs it against a file in that language.
+
 ## 0.3.3 — 2026-09-14
 
 ### Fixed

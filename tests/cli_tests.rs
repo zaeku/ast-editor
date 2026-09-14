@@ -1478,3 +1478,78 @@ fn create_answers_with_every_line_it_wrote() {
     assert!(rows.is_empty(), "an empty file answered with ids");
     assert!(said.is_empty(), "an empty file warned: {said:?}");
 }
+
+/// Every template the tool serves, against a file in the language it is for.
+/// A template is a query the tool wrote, so a template that does not compile is
+/// the tool shipping a broken query, and one that compiles but matches nothing
+/// is a query for a node the grammar does not call that.
+#[test]
+fn every_template_finds_what_it_names() {
+    let rust = "use a::b;\nstruct S;\ntrait T {}\nimpl S {}\nfn f() {}\n";
+    let python =
+        "import os\n\n\nclass C:\n    def m(self):\n        pass\n\n\ndef f():\n    pass\n";
+    let go = "package main\n\nimport \"fmt\"\n\ntype S struct{ a int }\n\ntype I interface{ M() }\n\nfunc f() {}\n\nfunc (s S) m() {}\n";
+    let ts = "import { a } from \"b\";\n\nclass C {\n    m() {}\n}\n\nfunction f() {}\n\nconst g = () => {};\n";
+    let java = "import java.util.List;\n\nclass C {\n    void m() {}\n}\n\ninterface I {\n    void n();\n}\n";
+    let c = "#include <stdio.h>\n#define M 1\n#define F(x) (x)\nstruct S { int a; };\nint f(void) { return 0; }\n";
+    let cpp =
+        "#include <stdio.h>\nclass C { int a; };\nstruct S { int b; };\nint f() { return 0; }\n";
+    let swift = "import Foundation\n\nclass C {\n    func m() {}\n}\n\nfunc f() {}\n";
+    let bash = "f() {\n  echo hi\n}\n";
+
+    // (file name, source, template, matches expected)
+    let cases: &[(&str, &str, &str, usize)] = &[
+        ("t.rs", rust, "functions", 1),
+        ("t.rs", rust, "classes", 1),
+        ("t.rs", rust, "imports", 1),
+        ("t.rs", rust, "traits", 1),
+        ("t.rs", rust, "impls", 1),
+        ("t.py", python, "functions", 2),
+        ("t.py", python, "classes", 1),
+        ("t.py", python, "imports", 1),
+        ("t.go", go, "functions", 2),
+        ("t.go", go, "classes", 2),
+        ("t.go", go, "imports", 1),
+        ("t.go", go, "interfaces", 1),
+        ("t.go", go, "structs", 1),
+        ("t.ts", ts, "functions", 3),
+        ("t.ts", ts, "classes", 1),
+        ("t.ts", ts, "imports", 1),
+        ("T.java", java, "functions", 2),
+        ("T.java", java, "classes", 2),
+        ("T.java", java, "imports", 1),
+        ("t.c", c, "functions", 1),
+        ("t.c", c, "classes", 1),
+        ("t.c", c, "imports", 1),
+        ("t.c", c, "macros", 2),
+        ("t.cpp", cpp, "functions", 1),
+        ("t.cpp", cpp, "classes", 2),
+        ("t.cpp", cpp, "imports", 1),
+        ("t.swift", swift, "functions", 2),
+        ("t.swift", swift, "classes", 1),
+        ("t.swift", swift, "imports", 1),
+        ("t.sh", bash, "functions", 1),
+    ];
+
+    for (name, source, template, want) in cases {
+        let file = scratch(name, source);
+        let test = format!("tpl_{name}_{template}");
+        let out = ast_editor(
+            &test,
+            &["inspect", file.to_str().unwrap(), "--template", template],
+        );
+        assert!(
+            out.status.success(),
+            "--template {template} on {name} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let block = json_block(&out.stdout);
+        assert_eq!(
+            block["match_count"].as_u64().unwrap() as usize,
+            *want,
+            "--template {template} on {name} used {} and matched {} of {want}",
+            block["query"].as_str().unwrap_or("?"),
+            block["match_count"]
+        );
+    }
+}

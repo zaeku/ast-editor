@@ -856,3 +856,302 @@ fn a_move_lands_where_it_was_addressed() {
         assert_eq!(named, landed, "modified_lines after {script}");
     }
 }
+
+/// `replace_substring` is published in the schema and reachable only as JSON.
+/// It cuts a line at the nth occurrence of a pattern and rejoins it around the
+/// replacement, so what it gets wrong is which occurrence and where the tail
+/// resumes, and an occurrence it cannot find has to be refused rather than
+/// guessed at.
+#[test]
+fn replace_substring_takes_the_occurrence_it_was_given() {
+    let start = "let a = foo(foo(1));\nlet b = 2;\n";
+    let cases = [
+        // (occurrence, expected first line, or None when the edit is refused)
+        (None, Some("let a = bar(foo(1));")),
+        (Some(1), Some("let a = bar(foo(1));")),
+        (Some(2), Some("let a = foo(bar(1));")),
+        (Some(3), None),
+        (Some(0), None),
+    ];
+
+    for (n, (occurrence, want)) in cases.iter().enumerate() {
+        let test = format!("substr{n}");
+        let file = scratch(&format!("substr{n}.rs"), start);
+        let ids = ast_editor(&test, &["view", file.to_str().unwrap(), "--only-ids"]);
+        let id = json_block(&ids.stdout)["lines"][0][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let occurrence_field = match occurrence {
+            Some(k) => format!(r#","occurrence":{k}"#),
+            None => String::new(),
+        };
+        let json = format!(
+            r#"{{"edits":[{{"op":"replace_substring","start_id":"{id}","pattern":"foo","replacement":"bar"{occurrence_field}}}]}}"#
+        );
+        let out = ast_editor(&test, &["edit", file.to_str().unwrap(), "--json", &json]);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        match want {
+            Some(line) => {
+                assert!(
+                    out.status.success(),
+                    "occurrence {occurrence:?} was refused: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                assert_eq!(content, format!("{line}\nlet b = 2;\n"));
+            }
+            None => {
+                assert!(
+                    !out.status.success(),
+                    "occurrence {occurrence:?} was accepted and wrote: {content}"
+                );
+                assert_eq!(content, start, "a refused edit wrote to the file");
+            }
+        }
+    }
+}
+
+/// An edit script through stdin, which is how `edit` is driven from a shell.
+fn run_script(test: &str, file: &std::path::Path, script: &str) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["edit", file.to_str().unwrap()])
+        .env("AST_EDITOR_CACHE_DIR", store_for(test))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to run ast-editor");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .expect("stdin was piped")
+            .write_all(script.as_bytes())
+            .expect("failed to write the script");
+    }
+    child.wait_with_output().expect("failed to wait")
+}
+
+/// The ids of a file's lines, in order.
+fn line_ids(test: &str, file: &std::path::Path) -> Vec<String> {
+    let out = ast_editor(test, &["view", file.to_str().unwrap(), "--only-ids"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    json_block(&out.stdout)["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pair| pair[0].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// A span runs from its first line to its last. Addressed the other way round
+/// it is refused rather than quietly reversed or emptied, and a destination
+/// inside the block a `move` is lifting is refused for the same reason: there
+/// is no answer to give, and writing one would be a guess at what was meant.
+#[test]
+fn a_span_addressed_backwards_is_refused() {
+    let start = "one\ntwo\nthree\nfour\n";
+    let scripts = [
+        "replace {1},{0} ```\nX\n```",
+        "delete {2},{1}",
+        "move {2},{1} after {3}",
+        "move {0},{1} after {1}",
+    ];
+
+    for (n, shape) in scripts.iter().enumerate() {
+        let test = format!("backwards{n}");
+        let file = scratch(&format!("backwards{n}.rs"), start);
+        let ids = line_ids(&test, &file);
+        let script = shape
+            .replace("{0}", &ids[0])
+            .replace("{1}", &ids[1])
+            .replace("{2}", &ids[2])
+            .replace("{3}", &ids[3]);
+        let out = run_script(&test, &file, &format!("{script}\n"));
+        assert!(
+            !out.status.success(),
+            "accepted {script:?} and wrote: {}",
+            std::fs::read_to_string(&file).unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            start,
+            "a refused edit wrote to the file: {script:?}"
+        );
+    }
+}
+
+/// A span of one line is one line, however it was spelled: the same id at both
+/// ends, or an `end_id` that is present and empty. An empty string is not an
+/// address, so it means the same as saying nothing.
+#[test]
+fn a_span_of_one_line_is_one_line() {
+    let start = "one\ntwo\nthree\nfour\n";
+
+    let file = scratch("span_same_id.rs", start);
+    let ids = line_ids("spansame", &file);
+    let out = run_script(
+        "spansame",
+        &file,
+        &format!("replace {},{} ```\nX\n```\n", ids[1], ids[1]),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "one\nX\nthree\nfour\n"
+    );
+
+    for (n, op) in ["delete", "move"].iter().enumerate() {
+        let test = format!("spanempty{n}");
+        let file = scratch(&format!("span_empty_end{n}.rs"), start);
+        let ids = line_ids(&test, &file);
+        let extra = if *op == "move" {
+            format!(r#","dest_id":"{}","move_position":"after""#, ids[3])
+        } else {
+            String::new()
+        };
+        let json = format!(
+            r#"{{"edits":[{{"op":"{op}","start_id":"{}","end_id":""{extra}}}]}}"#,
+            ids[1]
+        );
+        let out = ast_editor(&test, &["edit", file.to_str().unwrap(), "--json", &json]);
+        assert!(
+            out.status.success(),
+            "{op} with an empty end_id was refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let want = if *op == "move" {
+            "one\nthree\nfour\ntwo\n"
+        } else {
+            "one\nthree\nfour\n"
+        };
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), want, "after {op}");
+    }
+}
+
+/// A delete answers with the line now nearest the hole, so the next edit has a
+/// live id to anchor on. Taking the last line out leaves the hole past the end,
+/// and the nearest line is then the one before it.
+#[test]
+fn deleting_the_last_line_answers_with_the_new_last_line() {
+    let file = scratch("delete_tail.rs", "one\ntwo\nthree\n");
+    let ids = line_ids("deltail", &file);
+    let out = run_script("deltail", &file, &format!("delete {}\n", ids[2]));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\ntwo\n");
+
+    let named = json_block(&out.stdout)["modified_lines"][0][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(named, ids[1], "the answer did not name the new last line");
+}
+
+/// Deleting a line in the middle leaves the hole where that line was, so the
+/// line now nearest it is the one that moved up into the gap — not the last
+/// line of the file, which is only nearest when the hole is past the end.
+#[test]
+fn deleting_a_line_answers_with_the_line_that_took_its_place() {
+    let file = scratch("delete_middle.rs", "one\ntwo\nthree\nfour\n");
+    let before = line_ids("delmid", &file);
+    let out = run_script("delmid", &file, &format!("delete {}\n", before[1]));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "one\nthree\nfour\n"
+    );
+
+    let named = json_block(&out.stdout)["modified_lines"][0][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(named, before[2], "the answer did not name the line below");
+}
+
+/// `delete a,a` addresses one line twice, which is a span of one and not an
+/// error: the ends of a span may meet.
+#[test]
+fn a_span_may_begin_and_end_on_the_same_line() {
+    let file = scratch("span_meets.rs", "one\ntwo\nthree\n");
+    let ids = line_ids("spanmeet", &file);
+    let out = run_script(
+        "spanmeet",
+        &file,
+        &format!("delete {},{}\n", ids[1], ids[1]),
+    );
+    assert!(
+        out.status.success(),
+        "delete refused a span of one: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\nthree\n");
+}
+
+/// An insert with no line to act on has one place to go, and which end it is
+/// depends on the direction the caller asked for. `insert_before` with nothing
+/// named puts the content at the top.
+#[test]
+fn an_insert_with_no_line_named_goes_to_the_end_it_faces() {
+    for (op, want) in [
+        ("insert_before", "X\none\ntwo\n"),
+        ("insert_after", "one\ntwo\nX\n"),
+    ] {
+        let test = format!("notarget_{op}");
+        let file = scratch(&format!("no_target_{op}.rs"), "one\ntwo\n");
+        let json = format!(r#"{{"edits":[{{"op":"{op}","content":"X\n"}}]}}"#);
+        let out = ast_editor(&test, &["edit", file.to_str().unwrap(), "--json", &json]);
+        assert!(
+            out.status.success(),
+            "{op} with no start_id was refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), want, "after {op}");
+    }
+}
+
+/// An insert that names a line acts at that line, and the two directions put
+/// the content on either side of it. Nothing about the file's ends is involved.
+#[test]
+fn an_insert_acts_at_the_line_it_names() {
+    for (directive, want) in [
+        ("insert_before", "one\nX\ntwo\nthree\n"),
+        ("insert_after", "one\ntwo\nX\nthree\n"),
+    ] {
+        let test = format!("at_line_{directive}");
+        let file = scratch(&format!("at_line_{directive}.rs"), "one\ntwo\nthree\n");
+        let ids = line_ids(&test, &file);
+        let out = run_script(
+            &test,
+            &file,
+            &format!("{directive} {} ```\nX\n```\n", ids[1]),
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            want,
+            "after {directive}"
+        );
+    }
+}

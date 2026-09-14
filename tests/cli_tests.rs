@@ -1804,3 +1804,144 @@ fn a_move_takes_each_of_its_four_positions() {
         );
     }
 }
+
+/// A directive given the wrong number of arguments is told which directive it
+/// was and how that one is spelled. The usage line is the whole of the help a
+/// script gets, so a wrong one sends the writer to the wrong shape.
+#[test]
+fn a_misused_directive_is_shown_its_own_usage() {
+    let cases = [
+        ("replace a b ```\nX\n```", "replace", "replace <id>"),
+        (
+            "insert_after a b ```\nX\n```",
+            "insert_after",
+            "insert_after <id>",
+        ),
+        (
+            "insert_before a b ```\nX\n```",
+            "insert_before",
+            "insert_before <id>",
+        ),
+        ("append x ```\nX\n```", "append", "append ```"),
+        ("prepend x ```\nX\n```", "prepend", "prepend ```"),
+        ("delete a b", "delete", "delete <id>"),
+        ("move a", "move", "move <start_id>"),
+    ];
+
+    for (n, (script, directive, usage)) in cases.iter().enumerate() {
+        let file = scratch(&format!("usage{n}.txt"), "one\ntwo\n");
+        let out = run_script(&format!("usage{n}"), &file, &format!("{script}\n"));
+        assert!(
+            !out.status.success(),
+            "{directive:?} misused was accepted: {}",
+            std::fs::read_to_string(&file).unwrap()
+        );
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            said.contains(&format!("'{directive}'")),
+            "the error did not name {directive:?}: {said}"
+        );
+        assert!(
+            said.contains(usage),
+            "the error did not carry {directive:?}'s usage {usage:?}: {said}"
+        );
+    }
+}
+
+/// A directive nobody serves is named as unknown rather than as a known one
+/// used wrongly, and the answer lists what is known. The two messages send a
+/// writer to different places: one to the spelling of an operation, the other
+/// to the list of them.
+#[test]
+fn an_unknown_directive_is_named_as_unknown() {
+    let file = scratch("unknown.txt", "one\ntwo\n");
+    let out = run_script("unknown", &file, "zzz a\n");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("unknown operation 'zzz'"),
+        "an unserved directive was not named as unknown: {said}"
+    );
+    assert!(
+        said.contains("replace") && said.contains("move"),
+        "the answer did not list what is known: {said}"
+    );
+}
+
+/// An address is one id or two separated by one comma. Anything else is
+/// refused: a span with an end and no start, a start and no end, or more
+/// commas than an address has places for.
+#[test]
+fn a_malformed_address_is_refused() {
+    for (n, address) in [",2#abcd", "1#abcd,", "1#abcd,2#abcd,3#abcd"]
+        .iter()
+        .enumerate()
+    {
+        let file = scratch(&format!("addr{n}.txt"), "one\ntwo\n");
+        let out = run_script(&format!("addr{n}"), &file, &format!("delete {address}\n"));
+        assert!(
+            !out.status.success(),
+            "{address:?} was accepted as an address: {}",
+            std::fs::read_to_string(&file).unwrap()
+        );
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("as an address"),
+            "{address:?} was refused for some other reason: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+/// A script is directives and payloads, and a blank line or a comment is
+/// neither: they are skipped rather than read as an operation.
+#[test]
+fn a_script_skips_blank_lines_and_comments() {
+    let file = scratch("commented.txt", "one\ntwo\n");
+    let ids = line_ids("commented", &file);
+    let script = format!(
+        "# what this does\n\ndelete {}\n\n# and nothing after it\n",
+        ids[0]
+    );
+    let out = run_script("commented", &file, &script);
+    assert!(
+        out.status.success(),
+        "a comment or a blank line was read as a directive: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "two\n");
+}
+
+/// `prepend` puts its payload at the top of the file, which is the only thing
+/// that distinguishes it from `append`.
+#[test]
+fn prepend_puts_its_payload_at_the_top() {
+    let file = scratch("prepended.txt", "one\ntwo\n");
+    let out = run_script("prepended", &file, "prepend ```\nzero\n```\n");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "zero\none\ntwo\n");
+}
+
+/// `replace_substring` is an operation the tool serves and the script format
+/// cannot carry, since it takes a pattern and a replacement rather than a
+/// payload. A script naming it is told where to find it rather than told it
+/// does not exist: one of those sends the writer to the JSON form and the
+/// other sends them looking for a typo.
+#[test]
+fn a_script_naming_replace_substring_is_sent_to_the_json_form() {
+    let file = scratch("substr_script.txt", "one\ntwo\n");
+    let out = run_script("substrscript", &file, "replace_substring 1#abcd foo bar\n");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("'replace_substring'") && said.contains("JSON"),
+        "a script naming replace_substring was not sent to the JSON form: {said}"
+    );
+    assert!(
+        !said.contains("unknown operation"),
+        "an operation the tool serves was called unknown: {said}"
+    );
+}

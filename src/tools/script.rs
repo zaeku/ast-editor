@@ -182,18 +182,15 @@ fn directive_to_edit(
              cannot carry. Use the JSON form for it.",
             line
         ),
-        (op, _) if is_known(op) => bail!(
+        // Anything unknown was named as unknown before the payload was read, and
+        // replace_substring has the arm above, so what is left here is a known
+        // operation given the wrong number of arguments.
+        (op, _) => bail!(
             "line {}: '{}' was given {} argument(s). {}",
             line,
             op,
             args.len(),
             usage_of(op)
-        ),
-        (op, _) => bail!(
-            "line {}: unknown operation '{}'. Known: replace, insert_after, \
-             insert_before, append, prepend, delete, move.",
-            line,
-            op
         ),
     };
 

@@ -165,6 +165,20 @@ with open("/content/mutants.done", "w") as out:
     out.write(f"rc={code} wall={int(time.time()-start)}s\n")
 PY
 
+# The clone is of a pushed revision, so anything not committed yet would not be
+# measured — which reads as a test that killed nothing. Send the working copy's
+# own changes over it unless told not to.
+if [ "${LOCAL:-1}" = 1 ]; then
+    changed=$(jj diff --summary 2>/dev/null | sed -n 's/^[AM] //p')
+    for path in $changed; do
+        [ -f "$path" ] || continue
+        colab upload -s "$SESSION" "$path" "$REMOTE/$path" >/dev/null 2>&1 ||
+            fail "could not send $path to the session"
+        note "sent $path from the working copy"
+    done
+    [ -n "$changed" ] || note "the working copy matches the clone"
+fi
+
 note "starting the run in the kernel"
 colab exec -s "$SESSION" -f "$WORK/run.py" >"$WORK/exec.log" 2>&1 &
 EXEC_PID=$!

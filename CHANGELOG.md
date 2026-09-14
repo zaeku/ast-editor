@@ -4,6 +4,17 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.3 — 2026-09-14
+
+### Fixed
+
+- **`create` with `return_ids` answers with every line it wrote.** It stopped at
+  800, so the ids for a longer file had to be read back out of a file the caller
+  had just written — the re-read the ids exist to remove. The 800-line cap is
+  for a read that was given no bounds; a call that wrote the content stated its
+  own amount. `create` no longer reports a line-count warning either, because
+  nothing is withheld. The cap on `view` is unchanged.
+
 ## 0.3.2 — 2026-09-12
 
 ### Changed

@@ -125,11 +125,14 @@ Each line is printed as `<id>|<line>: <text>`; a line too long for one row is
 broken at a fixed character count onto `│:` and `└:` rows that join back to it
 exactly. A range can follow the path the way `sed -n '40,80p'` takes one.
 
-* A range is capped at 800 lines per call.
+* A range is capped at 800 lines per call. A read given no bounds is a
+  range of the whole file and is capped the same way.
 * Returned text is capped at 45,000 bytes.
 * A long line counts against the line cap in 2048-character units,
   so a call answers with fewer rows when the lines are long. The wrapping width
   is a display choice and does not change what a call costs.
+* `create` with `return_ids` is not capped. It answers with the ids of every
+  line it wrote, so a file it has just written needs no read to be edited.
 
 ```bash
 ast-editor view src/main.rs 1,3

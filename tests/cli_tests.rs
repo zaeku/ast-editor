@@ -1431,13 +1431,12 @@ fn unwritten(name: &str) -> std::path::PathBuf {
     path
 }
 
-/// `create` answers with the new file's ids when asked, and the same 800-line
-/// cap applies to that answer: past it the ids stop and the message says they
-/// were cut. A file exactly as long as the cap is answered whole and has
-/// nothing to report, and a file with no lines has no ids to give.
+/// `create` answers with the ids of every line it wrote, however many that is
+/// (D-01M2ATRFAMMMXD). The 800-line cap is for a read given no bounds; a caller
+/// that just wrote the content and asked for its ids stated the amount, and
+/// capping the answer would send it to read back a file it had just written.
 #[test]
-fn create_caps_the_ids_it_answers_with() {
-    let cap = 800;
+fn create_answers_with_every_line_it_wrote() {
     let make = |test: &str, name: &str, lines: usize| {
         let content: String = (1..=lines)
             .map(|n| format!("let line{n} = {n};\n"))
@@ -1455,23 +1454,27 @@ fn create_caps_the_ids_it_answers_with() {
             String::from_utf8_lossy(&out.stderr)
         );
         let block = json_block(&out.stdout);
-        let rows = block["lines"].as_array().map(|a| a.len()).unwrap_or(0);
+        let rows: Vec<u64> = block["lines"]
+            .as_array()
+            .map(|a| a.iter().map(|p| p[1].as_u64().unwrap()).collect())
+            .unwrap_or_default();
         let said = block["message"].as_str().unwrap_or("").to_string();
         (rows, said)
     };
 
-    let (rows, said) = make("createover", "over_cap.rs", 1000);
-    assert_eq!(rows, cap, "a long file's ids were not capped");
-    assert!(
-        said.contains("800"),
-        "a capped answer said nothing: {said:?}"
-    );
-
-    let (rows, said) = make("createexact", "at_cap.rs", cap);
-    assert_eq!(rows, cap);
+    // Past the read cap, which has nothing to do with this answer.
+    let (rows, said) = make("createlong", "long_create.rs", 1000);
+    assert_eq!(rows.len(), 1000, "the ids stopped short of the file");
+    assert_eq!((rows[0], rows[999]), (1, 1000));
     assert!(said.is_empty(), "a whole answer warned anyway: {said:?}");
 
+    // At the read cap.
+    let (rows, said) = make("createexact", "at_cap_create.rs", 800);
+    assert_eq!(rows.len(), 800);
+    assert!(said.is_empty(), "a whole answer warned anyway: {said:?}");
+
+    // No lines, no ids.
     let (rows, said) = make("createempty", "no_lines.rs", 0);
-    assert_eq!(rows, 0, "an empty file answered with ids");
+    assert!(rows.is_empty(), "an empty file answered with ids");
     assert!(said.is_empty(), "an empty file warned: {said:?}");
 }

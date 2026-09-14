@@ -514,6 +514,7 @@ fn definition_lines(
         end_line,
         false,
         crate::tools::metadata::get_config().only_ids_wrap_trigger_length,
+        crate::tools::formatter::LINE_CAP,
     )?;
     Ok(formatted.lines_text.unwrap_or_default())
 }

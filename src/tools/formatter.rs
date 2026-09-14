@@ -16,6 +16,11 @@ pub const SEGMENT_LENGTH: usize = 2048;
 pub const LINE_CAP: usize = 800;
 pub const RESPONSE_BYTE_CAP: usize = 45_000;
 
+/// For a caller that stated how much it wanted. The cap is for a read given no
+/// bounds; a call answering for lines it just wrote has nothing to guard
+/// against (`D-01M2ATRFAMMMXD`).
+pub const NO_LINE_CAP: usize = usize::MAX;
+
 pub struct FormattedLinesResult {
     pub lines_text: Option<String>,
     pub ids_json: String,
@@ -30,6 +35,7 @@ pub fn retrieve_and_format_lines(
     end_line: usize,
     only_ids: bool,
     wrap_trigger_length: usize,
+    line_cap: usize,
 ) -> Result<FormattedLinesResult> {
     let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
     let mut id_items = Vec::new();
@@ -59,8 +65,8 @@ pub fn retrieve_and_format_lines(
         }
 
         let mut segments_to_add = segments.len();
-        if segment_count + segments_to_add > LINE_CAP {
-            segments_to_add = LINE_CAP - segment_count;
+        if segment_count + segments_to_add > line_cap {
+            segments_to_add = line_cap - segment_count;
             line_cap_reached = true;
         }
 
@@ -293,7 +299,7 @@ mod tests {
         let session_id = &meta.session_id;
 
         // Test with a small wrap_trigger_length to force wrapping
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 30)?;
+        let res = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 30, LINE_CAP)?;
         assert_eq!(res.actual_end_line, 4);
         assert!(res.warning_msg.is_none());
         assert!(res.lines_text.is_none());
@@ -315,7 +321,8 @@ mod tests {
         assert_eq!(*lines.last().unwrap(), "  ]");
 
         // Test with large wrap_trigger_length so everything is on one line
-        let res_no_wrap = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 1000)?;
+        let res_no_wrap =
+            retrieve_and_format_lines(&repository, session_id, 1, 4, true, 1000, LINE_CAP)?;
         let lines_no_wrap: Vec<&str> = res_no_wrap.ids_json.lines().collect();
         assert_eq!(lines_no_wrap.len(), 3);
         assert_eq!(lines_no_wrap[0], "[");
@@ -343,7 +350,7 @@ mod tests {
         let meta = repository.init_session(filepath_str, false)?;
         let session_id = &meta.session_id;
 
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 2, false, 1000)?;
+        let res = retrieve_and_format_lines(&repository, session_id, 1, 2, false, 1000, LINE_CAP)?;
         assert_eq!(res.actual_end_line, 2);
         assert!(res.warning_msg.is_none());
 
@@ -379,7 +386,7 @@ mod tests {
         let meta = repository.init_session(filepath_str, false)?;
         let session_id = &meta.session_id;
 
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 1, false, 1000)?;
+        let res = retrieve_and_format_lines(&repository, session_id, 1, 1, false, 1000, LINE_CAP)?;
         let text = res.lines_text.as_ref().unwrap();
         assert!(text.contains("|1: "));
         assert!(text.contains("│: "));
@@ -427,7 +434,7 @@ mod tests {
 
         // 44, not 45: the id each line carries is part of the response, so it
         // is counted against the 45,000 bytes.
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 50, false, 1000)?;
+        let res = retrieve_and_format_lines(&repository, session_id, 1, 50, false, 1000, LINE_CAP)?;
         assert_eq!(res.actual_end_line, 44);
         assert_eq!(
             res.warning_msg.as_deref(),

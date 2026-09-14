@@ -154,6 +154,7 @@ pub fn view_lines(
             *end,
             only_ids_bool,
             config.only_ids_wrap_trigger_length,
+            formatter::LINE_CAP,
         )?;
 
         if actual_start.is_none() {
@@ -276,19 +277,15 @@ pub fn create_lines(
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if return_ids_bool {
             if meta.total_lines > 0 {
-                let end_line = if meta.total_lines > formatter::LINE_CAP {
-                    formatter::LINE_CAP
-                } else {
-                    meta.total_lines
-                };
                 let config = crate::tools::metadata::get_config();
                 let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
                     repository,
                     &meta.session_id,
                     1,
-                    end_line,
+                    meta.total_lines,
                     true,
                     config.only_ids_wrap_trigger_length,
+                    formatter::NO_LINE_CAP,
                 )?;
                 Ok((
                     Some(formatted_res.ids_json),
@@ -307,7 +304,10 @@ pub fn create_lines(
     match setup_db_and_fetch() {
         Ok((items_opt, capacity_warning, total_lines, total_bytes)) => {
             let config = crate::tools::metadata::get_config();
-            let line_count_capped = return_ids_bool && total_lines > formatter::LINE_CAP;
+            // A create answers for every line it wrote (`D-01M2ATRFAMMMXD`), so
+            // there is no line count to report as capped. What is left is the
+            // byte cap, which arrives as capacity_warning below.
+            let line_count_capped = false;
             let mut warning_parts = Vec::new();
             if line_count_capped {
                 warning_parts.push(config.warning_line_limit_exceeded.as_str());

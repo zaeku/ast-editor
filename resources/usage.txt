@@ -27,6 +27,7 @@ An address is one id, or <start_id>,<end_id> for a span of lines.
     with a payload:  replace <id> · insert_after <id> · insert_before <id>
                      append · prepend
     without one:     delete <id> · move <id> before|after <dest>
+                     move <id> prepend|append
 
 A response is fenced blocks: what the tool printed, then a ```json block
 carrying the data. Failures go to stderr and exit non-zero, so a response that

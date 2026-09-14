@@ -1766,3 +1766,41 @@ fn an_unclosed_bracket_is_named_by_its_line() {
         about_links[0]
     );
 }
+
+/// `move` takes four positions. Two of them name a destination and two of them
+/// name an end of the file, so those two take no destination at all.
+#[test]
+fn a_move_takes_each_of_its_four_positions() {
+    let start = "one\ntwo\nthree\nfour\n";
+    let cases = [
+        (2, "after 3", "one\ntwo\nfour\nthree\n"),
+        (2, "before 0", "three\none\ntwo\nfour\n"),
+        (2, "prepend", "three\none\ntwo\nfour\n"),
+        (2, "append", "one\ntwo\nfour\nthree\n"),
+    ];
+
+    for (n, (block, tail, want)) in cases.iter().enumerate() {
+        let test = format!("pos{n}");
+        let file = scratch(&format!("pos{n}.rs"), start);
+        let ids = line_ids(&test, &file);
+        let script = tail
+            .split(' ')
+            .map(|word| match word.parse::<usize>() {
+                Ok(row) => ids[row].clone(),
+                Err(_) => word.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let out = run_script(&test, &file, &format!("move {} {script}\n", ids[*block]));
+        assert!(
+            out.status.success(),
+            "move {tail} was refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            *want,
+            "after move {tail}"
+        );
+    }
+}

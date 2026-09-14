@@ -8,9 +8,11 @@
 set -euo pipefail
 
 SESSION=${SESSION:-mutants}
-# 44 vCPU, which is the only size on offer that finishes a full run inside the
-# hour at which every session on record has died. Empty means a CPU runtime.
-HARDWARE=${HARDWARE-tpu v6e1}
+# Measured 2026-09-14: a mutant costs about 4.8 seconds at 12 vCPU and about 50
+# at 2, so a CPU runtime is for smoke tests and nothing else. A100 has allocated
+# on the first attempt every time; tpu v6e1 is the widest on offer at 44 vCPU
+# and the one that most often will not allocate at all. Empty means CPU.
+HARDWARE=${HARDWARE-gpu A100}
 REPO=${REPO:-https://github.com/zaeku/ast-editor.git}
 REF=${REF:-}
 JOBS=${JOBS:-8}

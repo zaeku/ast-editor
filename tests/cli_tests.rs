@@ -2269,3 +2269,130 @@ fn a_hash_with_no_number_is_not_an_address() {
         "an address with no number and an id whose line is gone were refused alike"
     );
 }
+
+/// `outline --sexp` answers with the parse tree as text, for writing a query
+/// against a grammar whose node names are not known yet. It stops at a fixed
+/// depth and says so where it stopped, names the field a child sits under, and
+/// carries a token's own text — which is what makes the dump readable as a
+/// guide to the node names.
+#[test]
+fn an_sexp_dump_stops_at_its_depth_and_says_where() {
+    let file = scratch("dumped.rs", "fn f() {\n    let a = 1 + 2;\n}\n");
+    let out = ast_editor("sexp", &["outline", file.to_str().unwrap(), "--sexp"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+
+    // The header says which node was dumped and how far it reaches. The root of
+    // a three-line file ends at the start of the fourth, which is where the
+    // tree itself ends rather than a count of lines.
+    assert!(
+        text.contains("Target Node Type: source_file"),
+        "the header does not name the node dumped:\n{text}"
+    );
+    assert!(
+        text.contains("Target Node Line Range: 1-4"),
+        "the header does not carry the root's own range:\n{text}"
+    );
+
+    // The root, and a node at each level under it, with its line range.
+    for wanted in [
+        "source_file [1:0",
+        "  function_item [1:0",
+        "    fn [1:0 - 1:2] \"fn\"",
+        "    name: identifier",
+        "      let_declaration [2:4",
+    ] {
+        assert!(
+            text.contains(wanted),
+            "the dump does not carry {wanted:?}:\n{text}"
+        );
+    }
+
+    // The depth limit is announced where it bites, under the node whose
+    // children were not printed, and not under a token that has none.
+    assert!(
+        text.contains("... (depth limit reached)"),
+        "a tree deeper than the limit was printed without saying so:\n{text}"
+    );
+    assert!(
+        !text.contains("integer_literal"),
+        "the dump went past its own limit:\n{text}"
+    );
+    // In this file exactly one node at the limit has children, and the marker
+    // sits directly under it. The tokens beside it have none and get no marker.
+    let lines: Vec<&str> = text.lines().collect();
+    let at = lines
+        .iter()
+        .position(|line| line.contains("let_declaration ["))
+        .expect("no let_declaration in the dump");
+    assert!(
+        lines[at + 1].contains("... (depth limit reached)"),
+        "the marker is not under the node whose children were dropped:\n{text}"
+    );
+    assert_eq!(
+        text.matches("... (depth limit reached)").count(),
+        1,
+        "a token with no children was marked as cut short:\n{text}"
+    );
+}
+
+/// A read says what encloses the lines it printed, and the name carries the
+/// kind as well as the identifier: a line inside a struct is inside
+/// `struct:S`, not inside something unnamed. The kinds are spelled per
+/// language, so each needs a language that has it.
+#[test]
+fn an_enclosing_context_names_the_kind_it_is() {
+    // (file, source, the line to read, what should enclose it)
+    let cases: &[(&str, &str, &str, &str)] = &[
+        ("ctx_fn.rs", "fn f() {\n    let a = 1;\n}\n", "2,2", "fn:f"),
+        (
+            "ctx_struct.rs",
+            "struct S {\n    a: u8,\n}\n",
+            "2,2",
+            "struct:S",
+        ),
+        (
+            "ctx_trait.rs",
+            "trait T {\n    fn m(&self);\n}\n",
+            "2,2",
+            "trait:T",
+        ),
+        // A line in the class body rather than in a method: a line is given the
+        // innermost context that names it, and a method is inside the class.
+        ("ctx_class.py", "class C:\n    x = 1\n", "2,2", "class:C"),
+        (
+            "ctx_method.py",
+            "class C:\n    def m(self):\n        pass\n",
+            "3,3",
+            "fn:m",
+        ),
+    ];
+
+    for (name, source, range, wanted) in cases {
+        let file = scratch(name, source);
+        let out = ast_editor(
+            &format!("ctx_{name}"),
+            &["view", file.to_str().unwrap(), range, "--only-ids"],
+        );
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let block = json_block(&out.stdout);
+        let names: Vec<&str> = block["enclosing_contexts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|ctx| ctx["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(wanted),
+            "{name} line {range} is inside {wanted:?} and the answer said {names:?}"
+        );
+    }
+}

@@ -14,7 +14,7 @@ pub fn get_db_path() -> Result<PathBuf> {
     } else if cfg!(test) {
         // Only reaches unit tests: the tests/ crate links this library built
         // without the flag, so integration tests set the variable above.
-        std::env::temp_dir().join("line-editor-test")
+        crate::tools::test_temp_dir("line-editor-test")
     } else {
         dirs::cache_dir()
             .context("Failed to get cache directory")?
@@ -1549,7 +1549,7 @@ mod tests {
         let path = get_db_path()?;
         assert!(path.to_string_lossy().contains("sessions.db"));
 
-        let temp_dir = std::env::temp_dir().join("line-editor-test");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test");
         assert!(path.starts_with(&temp_dir));
 
         if path.exists() {
@@ -1564,7 +1564,7 @@ mod tests {
 
     #[test]
     fn test_is_binary_file() -> Result<()> {
-        let temp_dir = std::env::temp_dir().join("line-editor-test-binary");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-binary");
         fs::create_dir_all(&temp_dir)?;
 
         let text_path = temp_dir.join("text.txt");
@@ -1602,7 +1602,7 @@ mod tests {
 
     #[test]
     fn test_compute_sha256() -> Result<()> {
-        let temp_dir = std::env::temp_dir().join("line-editor-test-sha");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-sha");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("test.txt");
         fs::write(&file_path, "hello")?;
@@ -1655,7 +1655,7 @@ mod tests {
     #[test]
     fn test_init_edit_session_nonexistent_file() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-init-nonexistent");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-nonexistent");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -1677,7 +1677,7 @@ mod tests {
     #[test]
     fn test_init_edit_session_binary_file() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-init-binary");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-binary");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("binary.bin");
         fs::write(&file_path, b"Hello\x00world")?;
@@ -1694,7 +1694,7 @@ mod tests {
     #[test]
     fn test_init_edit_session_unsupported_language() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-init-unsupported");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-unsupported");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("unsupported.txt");
         fs::write(&file_path, "Hello\nworld")?;
@@ -1711,7 +1711,7 @@ mod tests {
     #[test]
     fn test_init_edit_session_lifecycle() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-init-lifecycle");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-lifecycle");
         fs::create_dir_all(&temp_dir)?;
         let file_path = temp_dir.join("code.rs");
         fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
@@ -1799,7 +1799,7 @@ mod tests {
     #[tokio::test]
     async fn test_view_lines() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-view");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-view");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -1872,7 +1872,7 @@ mod tests {
     #[tokio::test]
     async fn test_view_lines_jit_initialization() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-jit-view");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-jit-view");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }

@@ -13,6 +13,25 @@ use std::sync::Arc;
 
 use crate::parser::ParserManager;
 
+/// A temporary directory for a test, named so that no two processes share one.
+/// A mutation run builds and tests many copies of this library at once, and
+/// every copy resolves the same names; a directory they had in common made one
+/// test's cleanup another test's failure, and the run read that failure as the
+/// mutant being caught. The process id alone is reused, so the time goes in
+/// beside it.
+pub(crate) fn test_temp_dir(name: &str) -> std::path::PathBuf {
+    use std::sync::OnceLock;
+    static SUFFIX: OnceLock<String> = OnceLock::new();
+    let suffix = SUFFIX.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        format!("{}-{}", std::process::id(), nanos)
+    });
+    std::env::temp_dir().join(format!("{name}-{suffix}"))
+}
+
 /// One block of a response, fenced and named by what it holds, so a reader —
 /// or an `awk` one-liner — can tell the code from the data without knowing
 /// which tool answered.

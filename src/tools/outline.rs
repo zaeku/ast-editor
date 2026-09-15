@@ -201,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_the_sexp_form_dumps_the_markdown_tree() {
-        let temp_dir = std::env::temp_dir().join("ast-editor-markdown-tests");
+        let temp_dir = crate::tools::test_temp_dir("ast-editor-markdown-tests");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 

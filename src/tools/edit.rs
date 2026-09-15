@@ -599,7 +599,7 @@ mod tests {
 
     impl TestEnvironment {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("tree_sitter_edit_tests_{}", name));
+            let dir = crate::tools::test_temp_dir(&format!("tree_sitter_edit_tests_{name}"));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
             Self {

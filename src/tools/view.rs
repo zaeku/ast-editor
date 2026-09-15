@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn test_create_lines_success() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-create-success");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-create-success");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn test_create_lines_return_ids_false() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-create-return-ids-false");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-create-return-ids-false");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn test_create_lines_already_exists() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-create-exists");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-create-exists");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -557,7 +557,7 @@ mod tests {
     #[test]
     fn test_create_lines_db_failure_rollback() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-create-rollback");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-create-rollback");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -584,7 +584,7 @@ mod tests {
     #[test]
     fn test_view_lines_capping() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-capping");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-capping");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn test_view_lines_truncation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-truncation");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-truncation");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn test_view_lines_capacity() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-capacity");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-capacity");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -724,7 +724,7 @@ mod tests {
     #[tokio::test]
     async fn test_enclosing_contexts_and_query_filtering() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-contexts-query");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-contexts-query");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -795,7 +795,7 @@ fn helper_func() {
     #[tokio::test]
     async fn test_markdown_parent_contexts() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-markdown-contexts");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-markdown-contexts");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }

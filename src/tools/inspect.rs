@@ -828,7 +828,7 @@ fn main() {}
         let _lock = crate::tools::TEST_DB_LOCK
             .lock()
             .unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("test_inspect_templates_all_languages");
+        let temp_dir = crate::tools::test_temp_dir("test_inspect_templates_all_languages");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
@@ -984,7 +984,7 @@ fn main() {}
         let _lock = crate::tools::TEST_DB_LOCK
             .lock()
             .unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("test_inspect_nix_custom_query");
+        let temp_dir = crate::tools::test_temp_dir("test_inspect_nix_custom_query");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 

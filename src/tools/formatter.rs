@@ -239,7 +239,7 @@ mod tests {
     #[test]
     fn test_retrieve_and_format_lines_only_ids() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-ids");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-formatter-ids");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn test_retrieve_and_format_lines_full() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-full");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-formatter-full");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn test_retrieve_and_format_lines_truncation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-trunc");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-formatter-trunc");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }
@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn test_retrieve_and_format_lines_capacity() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-        let temp_dir = std::env::temp_dir().join("line-editor-test-formatter-cap");
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-formatter-cap");
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir)?;
         }

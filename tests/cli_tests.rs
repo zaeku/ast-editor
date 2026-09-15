@@ -2133,3 +2133,75 @@ fn an_unclosed_code_fence_is_told_apart_from_a_closed_one() {
         );
     }
 }
+
+/// Markdown has templates of its own, spelled two ways where the name is
+/// ambiguous, and each finds the thing it is named for. Four of the kinds carry
+/// a definition block with a hash of their text and the rest carry none: a
+/// heading or a table is a structure an edit can be addressed against, and a
+/// link inside a sentence is not.
+#[test]
+fn a_markdown_template_finds_its_kind_and_says_which_are_structures() {
+    let body = "# Head\n\ntext with a [link](http://e.com) in it.\n\n```\ncode\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- one\n- two\n";
+    let file = scratch("kinds.md", body);
+
+    let found = |test: &str, args: &[&str]| -> serde_json::Value {
+        let mut all = vec!["inspect", file.to_str().unwrap()];
+        all.extend_from_slice(args);
+        let out = ast_editor(test, &all);
+        assert!(
+            out.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        json_block(&out.stdout)
+    };
+
+    // (template, the kind it answers with, whether that kind is a structure)
+    let templates: &[(&str, &str, bool)] = &[
+        ("headings", "Heading", true),
+        ("headers", "Heading", true),
+        ("codeblocks", "CodeBlock", true),
+        ("code_blocks", "CodeBlock", true),
+        ("tables", "Table", true),
+        ("lists", "List", true),
+        ("links", "Link", false),
+    ];
+
+    for (template, kind, structural) in templates {
+        let block = found(&format!("mdt_{template}"), &["--template", template]);
+        assert_eq!(
+            block["match_count"].as_u64().unwrap(),
+            1,
+            "--template {template} found nothing in a file with one {kind}"
+        );
+        let first = &block["matches"][0];
+        assert_eq!(first["capture_name"].as_str().unwrap(), *kind);
+        let definition = &first["definition"];
+        assert_eq!(
+            !definition.is_null(),
+            *structural,
+            "{kind}: definition is {definition:?} and it {} a structure",
+            if *structural { "is" } else { "is not" }
+        );
+        if *structural {
+            assert_eq!(definition["type"].as_str().unwrap(), *kind);
+            assert!(
+                definition["block_hash"]
+                    .as_str()
+                    .is_some_and(|h| !h.is_empty()),
+                "{kind}'s definition carries no hash of its text"
+            );
+        }
+    }
+
+    // A query names a kind, and only the letters of it count: the punctuation
+    // and case a caller writes are dropped before the names are compared.
+    for spelling in ["CodeBlock", "code_block", "code-block", "CODEBLOCK"] {
+        let block = found(&format!("mdq_{spelling}"), &["--query", spelling]);
+        assert_eq!(
+            block["match_count"].as_u64().unwrap(),
+            1,
+            "--query {spelling:?} did not reach CodeBlock"
+        );
+    }
+}

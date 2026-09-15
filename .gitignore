@@ -8,3 +8,6 @@ decisions/
 /.agents/
 /.superpowers/
 /mutants.*/
+
+# CodeGraph's index: a build product of the source beside it.
+.codegraph/

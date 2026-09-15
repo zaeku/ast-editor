@@ -4,6 +4,19 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.7 — 2026-09-15
+
+### Changed
+
+- **A hash with no line number in front of it is refused.** `replace 11f6` was
+  taken as an address and resolved against whatever line carried that content,
+  which is editing by quoted text — the failure the ids exist to remove. A
+  caller holding `1#11f6` for a line that has since gone is told the line is
+  gone; the same hash without the number edited a different line that had
+  picked up the old content. The form was in no document, so nothing was told
+  it existed. `ast-editor skill usage` says what an address is, and the
+  refusal now says it too.
+
 ## 0.3.6 — 2026-09-15
 
 ### Changed

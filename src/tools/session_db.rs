@@ -232,31 +232,12 @@ pub fn resolve_line_id(
     session_id: &str,
     id_str: &str,
 ) -> Result<(i64, String)> {
-    if id_str.contains('#') {
-        parse_line_id(id_str)
-    } else {
-        // The id carries the surfaced prefix of the stored hash.
-        let mut stmt = db_conn.prepare(
-            "SELECT sequence_id, substr(line_hash, 1, 4) FROM lines WHERE session_id = ?1 AND substr(line_hash, 1, 4) = ?2"
-        )?;
-        let mut rows = stmt.query(rusqlite::params![session_id, id_str])?;
-        let mut matches = Vec::new();
-        while let Some(row) = rows.next()? {
-            let seq: i64 = row.get(0)?;
-            let hash: String = row.get(1)?;
-            matches.push((seq, hash));
-        }
-        if matches.is_empty() {
-            anyhow::bail!(
-                "CHECKSUM_ERROR: Target line hash '{}' not found in session",
-                id_str
-            );
-        } else if matches.len() > 1 {
-            anyhow::bail!("CHECKSUM_ERROR: Target line hash '{}' is ambiguous (matches multiple lines in session)", id_str);
-        } else {
-            Ok(matches.remove(0))
-        }
+    if !id_str.contains('#') {
+        anyhow::bail!(crate::tools::metadata::get_config()
+            .error_address_needs_a_number
+            .replacen("{}", id_str, 1));
     }
+    parse_line_id(id_str)
 }
 
 /// One line of a file being edited, paired with the sequence number that
@@ -326,45 +307,35 @@ impl LineBuffer {
     /// line still matches. A bare hash with no sequence prefix is resolved by
     /// searching the buffer, and must match exactly one line.
     fn position_of(&self, start_id: &str, role: &str, field: &str) -> Result<usize> {
-        if start_id.contains('#') {
-            let (seq, hash) = parse_line_id(start_id)?;
-            let idx = self
-                .lines
-                .iter()
-                .position(|l| l.seq == seq)
-                .with_context(|| {
-                    crate::tools::metadata::get_config()
-                        .error_target_gone
-                        .replacen("{}", &format!("{field} {start_id}"), 1)
-                })?;
-            let actual = compute_line_hash(&self.lines[idx].content);
-            if actual != hash {
-                // Which rejection this is decides what the caller should do, so
-                // each says it (card #6). A batch carries several ids, so which
-                // field this one came in under is part of locating it.
-                let _ = role;
-                bail!(
-                    "{}",
-                    crate::tools::metadata::get_config()
-                        .error_target_changed
-                        .replacen("{}", &format!("{field} {start_id}"), 1)
-                );
-            }
-            Ok(idx)
-        } else {
-            let matches: Vec<usize> = self
-                .lines
-                .iter()
-                .enumerate()
-                .filter(|(_, l)| compute_line_hash(&l.content) == start_id)
-                .map(|(idx, _)| idx)
-                .collect();
-            match matches.len() {
-                0 => bail!("CHECKSUM_ERROR: Target line hash '{}' not found in session", start_id),
-                1 => Ok(matches[0]),
-                _ => bail!("CHECKSUM_ERROR: Target line hash '{}' is ambiguous (matches multiple lines in session)", start_id),
-            }
+        if !start_id.contains('#') {
+            bail!(crate::tools::metadata::get_config()
+                .error_address_needs_a_number
+                .replacen("{}", start_id, 1));
         }
+        let (seq, hash) = parse_line_id(start_id)?;
+        let idx = self
+            .lines
+            .iter()
+            .position(|l| l.seq == seq)
+            .with_context(|| {
+                crate::tools::metadata::get_config()
+                    .error_target_gone
+                    .replacen("{}", &format!("{field} {start_id}"), 1)
+            })?;
+        let actual = compute_line_hash(&self.lines[idx].content);
+        if actual != hash {
+            // Which rejection this is decides what the caller should do, so
+            // each says it (card #6). A batch carries several ids, so which
+            // field this one came in under is part of locating it.
+            let _ = role;
+            bail!(
+                "{}",
+                crate::tools::metadata::get_config()
+                    .error_target_changed
+                    .replacen("{}", &format!("{field} {start_id}"), 1)
+            );
+        }
+        Ok(idx)
     }
 
     /// Each of `ids` with the 1-indexed line it now sits on, in file order.

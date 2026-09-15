@@ -18,6 +18,7 @@
   "error_strict_unevaluable": "The syntax check could not run: {}. Nothing was written. The batch is kept: ast-editor edit {} --apply {}",
   "message_not_checked": "No grammar covers this file type, so the result was written without a syntax check.",
   "error_target_gone": "No line here is {}. That line is gone — nothing to re-read for it; the ids you hold for other lines are unaffected.",
+  "error_address_needs_a_number": "'{}' is a hash with no line number. An address is <number>#<hash>, and the number is what names the line: a hash on its own would land on whatever carries that content now. Read the line again for its id.",
   "error_target_changed": "Line {} changed since you read it. Read that line again for its current id; the ids you hold for other lines are unaffected.",
   "error_target_changed_outside": "Line {} changed outside this tool since you read it. Read that range again; the ids you hold for other lines are unaffected.",
   "error_edit_missing_field": "The '{}' op needs {}, and this one carries {}. `ast-editor skill api` lists what each op takes."

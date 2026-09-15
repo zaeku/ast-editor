@@ -13,7 +13,7 @@ include!(concat!(env!("OUT_DIR"), "/grammar_versions.rs"));
 
 /// A language the tool reads: what it is called, what parses it, and which
 /// crate the parser came from.
-pub struct Grammar {
+pub(crate) struct Grammar {
     pub name: &'static str,
     pub extensions: &'static [&'static str],
     pub crate_name: &'static str,
@@ -23,12 +23,12 @@ pub struct Grammar {
 impl Grammar {
     /// The parser for this language, or `None` where the language has one that
     /// is not a tree-sitter grammar.
-    pub fn language(&self) -> Option<Language> {
+    pub(crate) fn language(&self) -> Option<Language> {
         self.language.map(Language::from)
     }
 
     /// The version of the grammar crate compiled in, as Cargo.lock pinned it.
-    pub fn version(&self) -> &'static str {
+    pub(crate) fn version(&self) -> &'static str {
         GRAMMAR_VERSIONS
             .iter()
             .find(|(package, _)| *package == self.crate_name)
@@ -39,7 +39,7 @@ impl Grammar {
 
 /// One table, so that the language a file is read as and the parser that reads
 /// it cannot disagree. Markdown is here without a grammar: comrak parses it.
-pub static GRAMMARS: &[Grammar] = &[
+pub(crate) static GRAMMARS: &[Grammar] = &[
     Grammar {
         name: "bash",
         extensions: &["sh", "bash", "zsh", "ksh"],

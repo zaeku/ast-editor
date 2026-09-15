@@ -17,7 +17,7 @@ use crate::config;
 /// The language a kept parser is set to, the parser, and the grammar it holds.
 type ActiveSession = Option<(&'static str, Parser, Language)>;
 
-pub struct ParserManager {
+pub(crate) struct ParserManager {
     active_session: Arc<TokioMutex<ActiveSession>>,
 }
 
@@ -30,13 +30,17 @@ impl Default for ParserManager {
 }
 
 impl ParserManager {
-    pub fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         Ok(Self::default())
     }
 
     /// Parse `code` with the grammar for `ext`, reusing the parser when the
     /// language has not changed.
-    pub async fn parse_code(&self, ext: &str, code: &str) -> Result<(tree_sitter::Tree, Language)> {
+    pub(crate) async fn parse_code(
+        &self,
+        ext: &str,
+        code: &str,
+    ) -> Result<(tree_sitter::Tree, Language)> {
         let grammar = config::grammar_for_extension(ext)
             .with_context(|| format!("Unsupported file extension: {}", ext))?;
         let language = grammar

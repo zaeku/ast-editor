@@ -141,7 +141,7 @@ pub(crate) struct SessionMetadata {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum EditOp {
+pub(crate) enum EditOp {
     #[default]
     InsertAfter,
     InsertBefore,
@@ -155,7 +155,7 @@ pub enum EditOp {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum MovePosition {
+pub(crate) enum MovePosition {
     Prepend,
     Append,
     Before,
@@ -164,7 +164,7 @@ pub enum MovePosition {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct LineEdit {
+pub(crate) struct LineEdit {
     pub op: EditOp,
     pub start_id: Option<String>,
     pub end_id: Option<String>,

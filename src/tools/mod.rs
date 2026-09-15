@@ -5,7 +5,7 @@ pub(crate) mod inspect;
 pub(crate) mod metadata;
 pub(crate) mod outline;
 pub(crate) mod repository;
-pub mod script;
+pub(crate) mod script;
 pub(crate) mod session_db;
 pub(crate) mod view;
 
@@ -50,7 +50,7 @@ pub(crate) fn test_temp_dir(name: &str) -> std::path::PathBuf {
 /// for a fence. Bounding it that way is what keeps the length predictable: no
 /// line of pretty-printed JSON can begin with a backtick, so a `json` block
 /// is always fenced with exactly three and `^```json$` matches it exactly.
-pub fn fenced(language: &str, body: &str) -> String {
+pub(crate) fn fenced(language: &str, body: &str) -> String {
     let longest = body
         .lines()
         .map(|line| line.len() - line.trim_start_matches('`').len())
@@ -61,7 +61,7 @@ pub fn fenced(language: &str, body: &str) -> String {
 }
 
 /// What a block of this file's lines is called on its fence.
-pub fn fence_language(filepath: &str) -> &'static str {
+pub(crate) fn fence_language(filepath: &str) -> &'static str {
     let ext = std::path::Path::new(filepath)
         .extension()
         .and_then(|e| e.to_str())
@@ -69,10 +69,10 @@ pub fn fence_language(filepath: &str) -> &'static str {
     crate::config::language_for_extension(ext).unwrap_or("text")
 }
 
-pub struct ToolDispatcher;
+pub(crate) struct ToolDispatcher;
 
 impl ToolDispatcher {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 }
@@ -85,7 +85,7 @@ impl Default for ToolDispatcher {
 
 impl ToolDispatcher {
     /// Returns the JSON schema array of available tools.
-    pub fn list_tools(&self) -> Vec<Value> {
+    pub(crate) fn list_tools(&self) -> Vec<Value> {
         vec![
             serde_json::json!({
                 "name": "inspect",
@@ -278,7 +278,7 @@ impl ToolDispatcher {
 
     /// Invokes the appropriate tool based on name and deserialized arguments.
     /// Run one tool and return the text it prints.
-    pub async fn call_tool(
+    pub(crate) async fn call_tool(
         &self,
         name: &str,
         arguments: Value,

@@ -57,7 +57,7 @@ const REFERENCES: &[(&str, &str)] = &[
 ];
 
 /// Every topic `ast-editor skill <topic>` accepts, in the order it lists them.
-pub fn topics() -> Vec<&'static str> {
+pub(crate) fn topics() -> Vec<&'static str> {
     let mut names = vec!["api"];
     names.extend(REFERENCES.iter().map(|(name, _)| *name));
     names.sort_unstable();
@@ -65,7 +65,7 @@ pub fn topics() -> Vec<&'static str> {
 }
 
 /// The document for a topic, or the hub when no topic is given.
-pub fn document(topic: Option<&str>) -> anyhow::Result<String> {
+pub(crate) fn document(topic: Option<&str>) -> anyhow::Result<String> {
     match topic {
         None => Ok(SKILL.to_string()),
         Some("api") => Ok(render_api()),

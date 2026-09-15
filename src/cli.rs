@@ -18,7 +18,7 @@ use crate::tools::ToolDispatcher;
 /// already says these are about a syntax tree, so the `_lines` and `_ast`
 /// suffixes carry nothing: any unambiguous prefix names the tool, and `view`
 /// is `view`.
-pub fn resolve(tool: &str) -> Result<String> {
+pub(crate) fn resolve(tool: &str) -> Result<String> {
     let names: Vec<String> = ToolDispatcher::new()
         .list_tools()
         .iter()
@@ -66,7 +66,7 @@ pub(crate) fn absolute(path: &str) -> Result<String> {
 }
 
 /// Build a tool's arguments from what followed its name on the command line.
-pub fn arguments(tool: &str, args: &[String]) -> Result<Value> {
+pub(crate) fn arguments(tool: &str, args: &[String]) -> Result<Value> {
     let schema = schema_of(tool)?;
     let empty = Map::new();
     let properties = schema["properties"].as_object().unwrap_or(&empty);
@@ -261,7 +261,7 @@ fn coerce(raw: &str, field: &Value, flag: &str) -> Result<Value> {
 /// What one tool takes, rendered from its own schema: the same list the error
 /// for an unknown option prints, with each parameter's type and description, so
 /// that asking is not a mistake a caller has to make before they learn.
-pub fn help_for(tool: &str) -> Result<String> {
+pub(crate) fn help_for(tool: &str) -> Result<String> {
     let name = resolve(tool)?;
     let schema = schema_of(&name)?;
     let empty = Map::new();

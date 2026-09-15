@@ -10,7 +10,7 @@ use anyhow::{bail, Result};
 use crate::tools::session_db::{EditOp, LineEdit, MovePosition};
 
 /// Parse a script into the batch it describes.
-pub fn parse(script: &str) -> Result<Vec<LineEdit>> {
+pub(crate) fn parse(script: &str) -> Result<Vec<LineEdit>> {
     let lines: Vec<&str> = script.lines().collect();
     let mut edits = Vec::new();
     let mut idx = 0;

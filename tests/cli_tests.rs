@@ -2352,6 +2352,52 @@ fn an_sexp_dump_stops_at_its_depth_and_says_where() {
     );
 }
 
+/// A markdown file has no tree-sitter grammar behind it, so `--sexp` dumps the
+/// CommonMark tree instead. The dump has to read as a guide to the same two
+/// things: the node names, and the text a leaf carries — including the text of
+/// an inline code span, which is a node of its own rather than part of the
+/// paragraph's words.
+#[test]
+fn a_markdown_dump_carries_the_node_names_and_the_text_at_the_leaves() {
+    let file = scratch(
+        "dumped.md",
+        "# Title\n\nA line with `inline code` in it.\n\n- item one\n- item two\n",
+    );
+    let out = ast_editor("mdsexp", &["outline", file.to_str().unwrap(), "--sexp"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+
+    // A node at each level, indented by its depth. The root is at the margin,
+    // so a child that is not indented is a child the dump lost track of.
+    for wanted in [
+        "Document [1:1",
+        "  Heading [1:1 - 1:7]",
+        "    Text [1:3 - 1:7] \"Title\"",
+        "  Paragraph [3:1",
+        "    Code [3:14 - 3:24] \"inline code\"",
+    ] {
+        assert!(
+            text.contains(wanted),
+            "the dump does not carry {wanted:?}:\n{text}"
+        );
+    }
+
+    // The limit bites at the paragraph inside a list item, which is the only
+    // node here deep enough to have children it may not print.
+    assert!(
+        text.contains("... (depth limit reached)"),
+        "a tree deeper than the limit was printed without saying so:\n{text}"
+    );
+    assert!(
+        !text.contains("\"item one\""),
+        "the dump went past its own limit:\n{text}"
+    );
+}
+
 /// A read says what encloses the lines it printed, and the name carries the
 /// kind as well as the identifier: a line inside a struct is inside
 /// `struct:S`, not inside something unnamed. The kinds are spelled per
@@ -2513,7 +2559,7 @@ fn a_tool_help_lays_its_prose_in_one_column() {
         assert!(!flags.is_empty(), "{name} --help lists no flags:\n{text}");
         let longest_flag = flags
             .iter()
-            .map(|line| line.trim_end().split_whitespace().next().unwrap().len())
+            .map(|line| line.split_whitespace().next().unwrap().len())
             .max()
             .unwrap();
 
@@ -2573,7 +2619,7 @@ fn a_tool_help_lays_its_prose_in_one_column() {
         for group in &groups {
             for pair in group.windows(2) {
                 let (this, next) = (pair[0], pair[1]);
-                let word = next.trim_start().split_whitespace().next().unwrap_or("");
+                let word = next.split_whitespace().next().unwrap_or("");
                 if word.is_empty() {
                     continue;
                 }

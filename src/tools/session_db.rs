@@ -220,24 +220,16 @@ fn missing_field(edit: &LineEdit, needs: &str) -> anyhow::Error {
 
 pub fn parse_line_id(id_str: &str) -> Result<(i64, String)> {
     let parts: Vec<&str> = id_str.split('#').collect();
+    if parts.len() == 1 {
+        anyhow::bail!(crate::tools::metadata::get_config()
+            .error_address_needs_a_number
+            .replacen("{}", id_str, 1));
+    }
     if parts.len() != 2 {
         anyhow::bail!("Invalid Line ID format: {}", id_str);
     }
     let seq = i64::from_str_radix(parts[0], 16).context("Failed to parse sequence ID hex")?;
     Ok((seq, parts[1].to_string()))
-}
-
-pub fn resolve_line_id(
-    db_conn: &rusqlite::Connection,
-    session_id: &str,
-    id_str: &str,
-) -> Result<(i64, String)> {
-    if !id_str.contains('#') {
-        anyhow::bail!(crate::tools::metadata::get_config()
-            .error_address_needs_a_number
-            .replacen("{}", id_str, 1));
-    }
-    parse_line_id(id_str)
 }
 
 /// One line of a file being edited, paired with the sequence number that
@@ -304,14 +296,8 @@ impl LineBuffer {
     }
 
     /// Resolve a target id to a position, verifying the caller's view of the
-    /// line still matches. A bare hash with no sequence prefix is resolved by
-    /// searching the buffer, and must match exactly one line.
+    /// line still matches.
     fn position_of(&self, start_id: &str, role: &str, field: &str) -> Result<usize> {
-        if !start_id.contains('#') {
-            bail!(crate::tools::metadata::get_config()
-                .error_address_needs_a_number
-                .replacen("{}", start_id, 1));
-        }
         let (seq, hash) = parse_line_id(start_id)?;
         let idx = self
             .lines
@@ -932,7 +918,7 @@ fn reconcile_index(
     let mut targeted = Vec::new();
     for id in start_ids {
         if !id.is_empty() {
-            targeted.push(resolve_line_id(conn, session_id, id)?);
+            targeted.push(parse_line_id(id)?);
         }
     }
 

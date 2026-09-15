@@ -69,7 +69,7 @@ install: install-bin install-skill
 
 # Cut a release: LEVEL is patch, minor, major or a version; EXECUTE=1 to carry it out.
 release LEVEL='patch' EXECUTE='':
-    #!/usr/bin/env bash
+    #!/usr/bin/env -S nix develop -c bash
     set -euo pipefail
     if [ -z '{{EXECUTE}}' ]; then
         echo 'A release, in order:'

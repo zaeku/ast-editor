@@ -1,6 +1,7 @@
 use ast_editor::parser::ParserManager;
 use ast_editor::tools::edit;
-use ast_editor::tools::session_db::{EditOp, SqliteSessionRepository};
+use ast_editor::tools::repository::SqliteSessionRepository;
+use ast_editor::tools::session_db::EditOp;
 use ast_editor::tools::view;
 use ast_editor::tools::ToolDispatcher;
 use std::fs;

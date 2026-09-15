@@ -1,5 +1,6 @@
+use crate::tools::repository::SessionRepository;
+use crate::tools::session_db::check_language_supported;
 pub use crate::tools::session_db::LineEdit;
-use crate::tools::session_db::{check_language_supported, SessionRepository};
 use anyhow::Result;
 use std::fs;
 
@@ -570,9 +571,8 @@ pub async fn edit_lines(
 mod tests {
     use super::*;
     use crate::parser::ParserManager;
-    use crate::tools::session_db::{
-        init_edit_session, parse_line_id, EditOp, MovePosition, SqliteSessionRepository,
-    };
+    use crate::tools::repository::SqliteSessionRepository;
+    use crate::tools::session_db::{init_edit_session, parse_line_id, EditOp, MovePosition};
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
 
     /// A temporary directory to put fixtures in. The grammars are compiled in
@@ -618,7 +618,7 @@ mod tests {
     }
 
     fn test_view_lines(
-        repository: &impl crate::tools::session_db::SessionRepository,
+        repository: &impl crate::tools::repository::SessionRepository,
         filepath: &str,
         start_line: usize,
         end_line: usize,

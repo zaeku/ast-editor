@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tree_sitter::{Query, QueryCursor, StreamingIterator};
 
 use crate::parser::ParserManager;
-use crate::tools::session_db::{SessionRepository, SqliteSessionRepository};
+use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
 
 #[derive(Debug, Deserialize)]
 pub struct InspectArgs {
@@ -503,7 +503,7 @@ pub async fn run_inspect(
 /// The lines of a definition, rendered the way `view` renders them, so a
 /// block read here and a block read there are the same thing.
 fn definition_lines(
-    repository: &impl crate::tools::session_db::SessionRepository,
+    repository: &impl crate::tools::repository::SessionRepository,
     session_id: &str,
     start_line: usize,
     end_line: usize,
@@ -726,7 +726,7 @@ fn safe_byte_slice(s: &str, mut start: usize, mut end: usize) -> &str {
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
-    use crate::tools::session_db::SqliteSessionRepository;
+    use crate::tools::repository::SqliteSessionRepository;
 
     /// `extract_text` indexes `lines[l - 1]`, so a line number of zero or one
     /// past the end is an out-of-bounds read rather than an empty answer. The

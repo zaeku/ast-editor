@@ -1,4 +1,5 @@
-use crate::tools::session_db::{compute_line_hash, SessionRepository};
+use crate::tools::repository::SessionRepository;
+use crate::tools::session_db::compute_line_hash;
 use anyhow::Result;
 
 /// Where a line is broken for display. The break is at a fixed count of
@@ -218,7 +219,7 @@ pub fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::session_db::SqliteSessionRepository;
+    use crate::tools::repository::SqliteSessionRepository;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
 

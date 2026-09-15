@@ -1,5 +1,5 @@
 use crate::tools::formatter;
-use crate::tools::session_db::SessionRepository;
+use crate::tools::repository::SessionRepository;
 use anyhow::Result;
 
 pub struct ViewLinesOutput {
@@ -356,7 +356,7 @@ fn warning_field(message: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::session_db::SqliteSessionRepository;
+    use crate::tools::repository::SqliteSessionRepository;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
 

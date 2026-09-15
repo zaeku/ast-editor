@@ -1,10 +1,10 @@
 #![allow(clippy::await_holding_lock)]
 use ast_editor::parser::ParserManager;
 use ast_editor::tools::edit;
+use ast_editor::tools::repository;
+use ast_editor::tools::repository::{SessionRepository, SqliteSessionRepository};
 use ast_editor::tools::session_db;
-use ast_editor::tools::session_db::{
-    EditOp, MovePosition, SessionRepository, SqliteSessionRepository,
-};
+use ast_editor::tools::session_db::{EditOp, MovePosition};
 use ast_editor::tools::view;
 use std::fs;
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ impl Drop for TestFile {
 }
 
 fn view_range(
-    repository: &impl session_db::SessionRepository,
+    repository: &impl repository::SessionRepository,
     filepath: &str,
     start_line: usize,
     end_line: usize,

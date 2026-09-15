@@ -1,8 +1,10 @@
+pub mod buffer;
 pub mod edit;
 pub mod formatter;
 pub mod inspect;
 pub mod metadata;
 pub mod outline;
+pub mod repository;
 pub mod script;
 pub mod session_db;
 pub mod view;
@@ -326,7 +328,7 @@ impl ToolDispatcher {
                     paths.extend(more.iter().filter_map(|v| v.as_str()).map(str::to_string));
                 }
 
-                let repository = session_db::SqliteSessionRepository;
+                let repository = repository::SqliteSessionRepository;
                 let mut blocks = Vec::new();
                 let mut per_file = Vec::new();
 
@@ -382,7 +384,7 @@ impl ToolDispatcher {
                     .get("dry_run")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let repository = session_db::SqliteSessionRepository;
+                let repository = repository::SqliteSessionRepository;
 
                 let text = if let Some(preview_id) = arguments.get("apply").and_then(|v| v.as_str())
                 {
@@ -431,7 +433,7 @@ impl ToolDispatcher {
                     .and_then(|v| v.as_str())
                     .context("Missing content")?;
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
-                let repository = session_db::SqliteSessionRepository;
+                let repository = repository::SqliteSessionRepository;
                 let text = view::create_lines(&repository, filepath, content, return_ids)?;
                 Ok(fenced("json", &text))
             }

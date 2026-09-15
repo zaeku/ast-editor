@@ -26,10 +26,16 @@ an id to carry its reason by itself.
 
 ## Where code goes
 
-New work joins the file whose subject it already is. Three files under
-`src/tools/` are shared: `session_db.rs` owns the line-id store, `formatter.rs`
-owns what output looks like, and `metadata.rs` owns every string the binary
-prints.
+New work joins the file whose subject it already is. Five files under
+`src/tools/` are shared: `session_db.rs` owns the line-id store and everything
+keyed on it, `buffer.rs` owns a file's lines in memory and the edits applied to
+them, `repository.rs` owns the trait every tool reaches the store through,
+`formatter.rs` owns what output looks like, and `metadata.rs` owns every string
+the binary prints.
+
+Those first three depend in one direction — `repository.rs` on `buffer.rs` on
+`session_db.rs` — and a use that points back is a sign the new work belongs in
+the file it wanted to reach up to.
 
 ## Decision layer
 

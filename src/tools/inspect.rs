@@ -728,6 +728,20 @@ mod tests {
     use super::*;
     use crate::tools::session_db::SqliteSessionRepository;
 
+    /// `extract_text` indexes `lines[l - 1]`, so a line number of zero or one
+    /// past the end is an out-of-bounds read rather than an empty answer. The
+    /// numbers come from comrak, which counts from one and never reports past
+    /// the end — this is the contract with comrak written down, so that a
+    /// version of it that breaks the contract is caught here rather than in a
+    /// panic somewhere else.
+    #[test]
+    fn extract_text_refuses_a_line_outside_the_file() {
+        let code = "one\ntwo\nthree";
+        assert_eq!(extract_text(code, 0, 1, 1, 3), "");
+        assert_eq!(extract_text(code, 4, 1, 4, 3), "");
+        assert_eq!(extract_text(code, 3, 1, 3, 5), "three");
+    }
+
     #[test]
     fn test_markdown_inspect_templates() {
         let md_content = r#"# Heading 1

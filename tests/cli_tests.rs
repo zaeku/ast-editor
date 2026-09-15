@@ -1510,6 +1510,17 @@ fn every_template_finds_what_it_names() {
         "#include <stdio.h>\nclass C { int a; };\nstruct S { int b; };\nint f() { return 0; }\n";
     let swift = "import Foundation\n\nclass C {\n    func m() {}\n}\n\nfunc f() {}\n";
     let bash = "f() {\n  echo hi\n}\n";
+    // Markdown has no grammar behind it, so its templates are a separate list
+    // and a template off that list is answered with a warning rather than a
+    // match of zero.
+    let markdown = concat!(
+        "# Title\n\n",
+        "Text with a [link](http://x).\n\n",
+        "## Second\n\n",
+        "| a | b |\n|---|---|\n| 1 | 2 |\n\n",
+        "- a\n- b\n\n",
+        "```rust\nfn f() {}\n```\n",
+    );
 
     // (file name, source, template, matches expected)
     let cases: &[(&str, &str, &str, usize)] = &[
@@ -1543,6 +1554,13 @@ fn every_template_finds_what_it_names() {
         ("t.swift", swift, "classes", 1),
         ("t.swift", swift, "imports", 1),
         ("t.sh", bash, "functions", 1),
+        ("t.md", markdown, "headings", 2),
+        ("t.md", markdown, "headers", 2),
+        ("t.md", markdown, "codeblocks", 1),
+        ("t.md", markdown, "code_blocks", 1),
+        ("t.md", markdown, "links", 1),
+        ("t.md", markdown, "tables", 1),
+        ("t.md", markdown, "lists", 1),
     ];
 
     for (name, source, template, want) in cases {
@@ -1565,7 +1583,76 @@ fn every_template_finds_what_it_names() {
             block["query"].as_str().unwrap_or("?"),
             block["match_count"]
         );
+        assert!(
+            block.get("hint").is_none() && block.get("status").is_none(),
+            "--template {template} on {name} is supported and still warned: {block}"
+        );
     }
+
+    // A template this language has no answer for is a warning that names the
+    // ones it does, not an empty match list a caller would read as an absence.
+    let file = scratch("t.md", markdown);
+    let out = ast_editor(
+        "tpl_md_unsupported",
+        &["inspect", file.to_str().unwrap(), "--template", "functions"],
+    );
+    let block = json_block(&out.stdout);
+    assert_eq!(block["status"], "warning", "{block}");
+    let hint = block["hint"].as_str().unwrap_or("");
+    for named in ["headings", "codeblocks", "links", "tables", "lists"] {
+        assert!(
+            hint.contains(named),
+            "the hint does not name {named:?} as supported: {hint}"
+        );
+    }
+}
+
+/// A definition spans lines, and both tools that report one report where it
+/// ends as well as where it begins: `outline` for everything a file declares,
+/// and `inspect` for the one kind asked about. The range is what `view` is
+/// given next, so a definition that reports its own first line as its last is
+/// a read of one line out of a block.
+#[test]
+fn a_definition_reports_the_lines_it_spans() {
+    let source = "struct Point {\n    x: u8,\n    y: u8,\n}\n\nfn main() {\n    let p = 1;\n}\n";
+    let file = scratch("spans.rs", source);
+
+    let out = ast_editor("spans_outline", &["outline", file.to_str().unwrap()]);
+    let block = json_block(&out.stdout);
+    let outline = block["outline"].as_array().unwrap();
+    let ranges: Vec<(u64, u64)> = outline
+        .iter()
+        .map(|e| {
+            (
+                e["start_line"].as_u64().unwrap(),
+                e["end_line"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        ranges,
+        vec![(1, 4), (6, 8)],
+        "the outline does not span the definitions it found: {block}"
+    );
+
+    // The same two numbers again from `inspect`, and again inside the
+    // definition it reports beside them, which is what names the block of code
+    // the answer carries.
+    let out = ast_editor(
+        "spans_inspect",
+        &["inspect", file.to_str().unwrap(), "--template", "classes"],
+    );
+    let block = json_block(&out.stdout);
+    let m = &block["matches"][0];
+    assert_eq!(m["start_line"], 1, "{block}");
+    assert_eq!(m["end_line"], 4, "{block}");
+    let definition = &m["definition"];
+    assert!(
+        !definition.is_null(),
+        "a class match carries no definition: {block}"
+    );
+    assert_eq!(definition["start_line"], 1, "{block}");
+    assert_eq!(definition["end_line"], 4, "{block}");
 }
 
 /// A line too long for one row is broken onto continuation rows that join back

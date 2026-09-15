@@ -232,6 +232,48 @@ fn a_store_that_will_not_open_leaves_the_read_standing_and_says_why() {
     );
 }
 
+/// `--no-x` turns a switch off, and the three shapes it can take are answered
+/// differently: a switch is negated, an option that carries a value is refused
+/// by name because there is nothing to negate, and a flag no tool has is the
+/// unknown-option refusal that lists the ones it has.
+#[test]
+fn a_switch_is_turned_off_by_name_and_only_a_switch_is() {
+    let file = scratch("negated.rs", "fn a() {}\nfn b() {}\n");
+    let path = file.to_str().unwrap();
+
+    // The last word wins, in both directions, so the flag is read rather than
+    // its presence counted.
+    let off = ast_editor("negoff", &["view", path, "--only-ids", "--no-only-ids"]);
+    assert!(
+        String::from_utf8_lossy(&off.stdout).contains("fn a() {}"),
+        "--no-only-ids did not turn the switch off: {}",
+        String::from_utf8_lossy(&off.stdout)
+    );
+    let on = ast_editor("negon", &["view", path, "--no-only-ids", "--only-ids"]);
+    assert!(
+        !String::from_utf8_lossy(&on.stdout).contains("fn a() {}"),
+        "--only-ids after --no-only-ids did not turn it back on: {}",
+        String::from_utf8_lossy(&on.stdout)
+    );
+
+    // An option that takes a value has nothing to negate, and saying so names
+    // the option rather than leaving the next word to be read as its value.
+    let out = ast_editor("negvalue", &["view", path, "--no-start-line", "2"]);
+    let said = String::from_utf8_lossy(&out.stderr) + String::from_utf8_lossy(&out.stdout);
+    assert!(
+        said.contains("start-line") && said.contains("not a switch"),
+        "--no- on an option with a value was not refused: {said}"
+    );
+
+    // A flag no tool has is the other refusal, which lists what it does have.
+    let out = ast_editor("negunknown", &["view", path, "--no-nonsense"]);
+    let said = String::from_utf8_lossy(&out.stderr) + String::from_utf8_lossy(&out.stdout);
+    assert!(
+        said.contains("--no-nonsense") && said.contains("--only-ids"),
+        "an unknown --no- flag was not refused with the options that exist: {said}"
+    );
+}
+
 /// `skill <topic>` refuses a topic it does not have by listing the ones it
 /// does, because a reader who guessed wrong has no other way to find them and
 /// the documents are compiled into the binary.
@@ -2811,6 +2853,44 @@ fn a_parse_error_carries_a_window_of_the_file_around_it() {
             written.len()
         );
     }
+
+    // Two broken lines are two diagnostics, one each, because the refusal is
+    // read to find what to fix: a line named twice is one fix reported twice,
+    // and a line not named at all is a fix nobody knows about.
+    let file = scratch("windowed_two.rs", body);
+    let ids = line_ids("window2", &file);
+    let out = run_script_with(
+        "window2",
+        &file,
+        &format!(
+            "replace {} ```\nfn b( {{\n```\nreplace {} ```\nfn e) }}\n```\n",
+            ids[1], ids[4]
+        ),
+        &["--strict"],
+    );
+    assert!(!out.status.success(), "two broken edits were accepted");
+    let diagnostics = json_block(&out.stderr)["diagnostics"]
+        .as_array()
+        .expect("no diagnostics")
+        .clone();
+    let blamed: Vec<String> = diagnostics
+        .iter()
+        .flat_map(|entry| {
+            entry["context"]
+                .as_array()
+                .expect("no context")
+                .iter()
+                .filter_map(|line| line.as_str())
+                .filter(|line| line.contains("-->"))
+                .map(|line| line.split(':').next().unwrap().trim().to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(
+        blamed,
+        vec!["2".to_string(), "5".to_string()],
+        "the refusal blames {blamed:?} rather than each broken line once"
+    );
 }
 
 /// A tool's help is a column of flags and a column of prose beside it. The

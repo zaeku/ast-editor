@@ -145,7 +145,9 @@ pub fn arguments(tool: &str, args: &[String]) -> Result<Value> {
             continue;
         }
 
-        // The old form: the whole argument object as one JSON string.
+        // The old form: the whole argument object as one JSON string. A caller
+        // that passes the object this way parses it twice when --json fails to
+        // step past its value, and lands in the same map either way.
         if arg.trim_start().starts_with('{') {
             let parsed: Value = serde_json::from_str(arg).map_err(|err| {
                 anyhow::anyhow!("Arguments are not valid JSON: {}\n  given: {}", err, arg)
@@ -245,10 +247,6 @@ fn coerce(raw: &str, field: &Value, flag: &str) -> Result<Value> {
             .parse::<i64>()
             .map(Value::from)
             .map_err(|_| anyhow::anyhow!("'{}' takes a whole number, not '{}'.", flag, raw)),
-        Some("number") => raw
-            .parse::<f64>()
-            .map(Value::from)
-            .map_err(|_| anyhow::anyhow!("'{}' takes a number, not '{}'.", flag, raw)),
         Some("array") | Some("object") => bail!(
             "'{}' takes a {}, which an option cannot carry. Pass it with --json, \
              or for edits use: ast-editor edit <file> < script",

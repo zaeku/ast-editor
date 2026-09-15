@@ -1127,6 +1127,120 @@ fn line_ids(test: &str, file: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+/// The number in a line id names the line, and a number is never handed out
+/// twice for one file. It is a counter the file carries, not a position: it
+/// keeps counting across calls, and a number that belonged to a deleted line
+/// stays spent. Handing it out again would point an id a caller still holds at
+/// a line it has never seen.
+#[test]
+fn a_line_number_is_spent_once_and_never_reissued() {
+    let seq = |id: &str| -> i64 {
+        let (number, _) = id.split_once('#').expect("an id is a number and a hash");
+        i64::from_str_radix(number, 16).expect("the number is hex")
+    };
+
+    let file = scratch("counted.txt", "one\ntwo\nthree\n");
+    let ids = line_ids("counted", &file);
+    let start: Vec<i64> = ids.iter().map(|id| seq(id)).collect();
+    assert_eq!(
+        start,
+        vec![1, 2, 3],
+        "a new file is numbered from one: {ids:?}"
+    );
+
+    // Two lines in one batch take two numbers, not one twice.
+    let out = run_script(
+        "counted",
+        &file,
+        &format!("insert_after {} ```\nA\nB\n```\n", ids[0]),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let minted: Vec<i64> = json_block(&out.stdout)["modified_lines"]
+        .as_array()
+        .expect("no modified_lines")
+        .iter()
+        .map(|pair| seq(pair[0].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        minted.len(),
+        2,
+        "two inserted lines answered with {minted:?}"
+    );
+    assert_ne!(
+        minted[0], minted[1],
+        "two lines inserted at once share a number: {minted:?}"
+    );
+    let mut spent = start.clone();
+    spent.extend(&minted);
+    for number in &minted {
+        assert!(
+            *number > 3,
+            "an inserted line took {number}, which a line of the file already had: {minted:?}"
+        );
+    }
+
+    // The counter is the file's, so it survives the call that advanced it: a
+    // second process reads it back rather than deriving it from what is there.
+    // The line deleted is the highest-numbered one, which is the only case that
+    // tells the two apart — while it is still there, the lines that survive
+    // carry the counter's value between them.
+    let gone = *minted.iter().max().expect("two numbers");
+    let ids = line_ids("counted", &file);
+    let target = ids
+        .iter()
+        .find(|id| seq(id) == gone)
+        .expect("the line just inserted")
+        .clone();
+    let out = run_script("counted", &file, &format!("delete {target}\n"));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let ids = line_ids("counted", &file);
+    let anchor = ids
+        .iter()
+        .find(|id| seq(id) == 1)
+        .expect("the first line")
+        .clone();
+    let out = run_script(
+        "counted",
+        &file,
+        &format!("insert_after {anchor} ```\nC\n```\n"),
+    );
+    let after: Vec<i64> = json_block(&out.stdout)["modified_lines"]
+        .as_array()
+        .expect("no modified_lines")
+        .iter()
+        .map(|pair| seq(pair[0].as_str().unwrap()))
+        .collect();
+    assert_eq!(after.len(), 1, "one inserted line answered with {after:?}");
+    assert!(
+        !spent.contains(&after[0]),
+        "{} was handed out again after {spent:?}",
+        after[0]
+    );
+
+    // And every number in the file is still its own.
+    let numbers: Vec<i64> = line_ids("counted", &file)
+        .iter()
+        .map(|id| seq(id))
+        .collect();
+    let mut unique = numbers.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        numbers.len(),
+        "a number names two lines: {numbers:?}"
+    );
+}
+
 /// A span runs from its first line to its last. Addressed the other way round
 /// it is refused rather than quietly reversed or emptied, and a destination
 /// inside the block a `move` is lifting is refused for the same reason: there

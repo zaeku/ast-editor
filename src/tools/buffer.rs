@@ -57,11 +57,6 @@ impl LineBuffer {
         Self { lines, next_seq }
     }
 
-    /// How far the counter has advanced, to be stored back with the file.
-    pub fn next_seq(&self) -> i64 {
-        self.next_seq
-    }
-
     fn take_seq(&mut self) -> i64 {
         let seq = self.next_seq;
         self.next_seq += 1;

@@ -182,9 +182,11 @@ pub(crate) fn compute_parent_contexts(filepath: &str, content: &str) -> Vec<Opti
                 if let Some(ref ctx_name) = next_context {
                     let start_row = node.start_position().row;
                     let end_row = node.end_position().row;
+                    // Reached through `get_mut`, so the row a node ends on
+                    // needs no comparison standing in for the bounds.
                     for r in start_row..=end_row {
-                        if r < contexts.len() {
-                            contexts[r] = Some(ctx_name.clone());
+                        if let Some(slot) = contexts.get_mut(r) {
+                            *slot = Some(ctx_name.clone());
                         }
                     }
                 }

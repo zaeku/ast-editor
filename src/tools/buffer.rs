@@ -209,9 +209,9 @@ impl LineBuffer {
                         let rest = contents.split_off(1);
                         self.lines[start_idx].content = contents.pop().unwrap_or_default();
                         modified.push(self.id_at(start_idx));
-                        if end_idx > start_idx {
-                            self.lines.drain(start_idx + 1..=end_idx);
-                        }
+                        // A one-line span drains `start_idx + 1..=start_idx`,
+                        // which is empty, so the span needs no test of its own.
+                        self.lines.drain(start_idx + 1..=end_idx);
                         if !rest.is_empty() {
                             self.insert_at(start_idx + 1, rest, &mut modified);
                         }

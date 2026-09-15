@@ -1886,6 +1886,51 @@ fn a_read_names_what_encloses_the_lines_it_printed() {
     );
 }
 
+/// Markdown has no grammar behind it, so what encloses a line is worked out
+/// from its headings. A `#` only opens a heading when a space follows it, so
+/// `#notaheading` is a word a paragraph begins with; treating it as a heading
+/// would put every line under it inside a section that CommonMark says is not
+/// there, and a read of those lines would name it.
+#[test]
+fn a_hash_with_no_space_after_it_opens_no_section() {
+    let file = scratch(
+        "headings.md",
+        "#notaheading some text\n\nbody one\n\n# Real Heading\n\nbody two\n",
+    );
+    let read = |test: &str, range: &str| -> Vec<String> {
+        let out = ast_editor(test, &["view", file.to_str().unwrap(), range]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        json_block(&out.stdout)["enclosing_contexts"]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|entry| entry["name"].as_str().unwrap_or("").to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    // The line after the word is in no section at all.
+    assert_eq!(
+        read("hd_body", "3,3"),
+        Vec::<String>::new(),
+        "a paragraph beginning with a hash opened a section"
+    );
+
+    // The line after the heading is in the heading's section, which is what
+    // says the difference is the space and not the hash.
+    assert_eq!(
+        read("hd_real", "7,7"),
+        vec!["# Real Heading".to_string()],
+        "the line under a heading is not inside it"
+    );
+}
+
 /// The line that closes a function is still inside it, and what follows the
 /// function is not. A read of that one line names the function and nothing
 /// else, which is the difference between asking what encloses a line and

@@ -4,6 +4,11 @@
 # `just install` puts it on PATH for this machine. The skill content under
 # agent_skill/ is separate — that is what a skills installer consumes.
 
+# Every recipe runs inside the devshell rather than whatever shell invoked it.
+# A caller that reaches cargo through some other PATH gets a different rustc,
+# and the artifacts the two leave in target/ do not link against each other.
+set shell := ['nix', 'develop', '-c', 'bash', '-c']
+
 prefix := env('AST_EDITOR_PREFIX', env('HOME') / '.agents')
 bin_dir := prefix / 'bin'
 skill_dir := prefix / 'skills' / 'ast-editor'

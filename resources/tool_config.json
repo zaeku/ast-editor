@@ -9,7 +9,7 @@
   "error_query_does_not_compile": "Invalid Tree-sitter query: {}\n{}",
   "error_preview_unknown": "Preview '{}' is unknown, already applied, or expired. Take a fresh one with --dry-run.",
   "error_preview_other_file": "Preview '{}' belongs to {}, not {}. Apply it against the file it was previewed on.",
-  "error_preview_stale": "PREVIEW_STALE: {} changed since preview '{}' was taken, so its diff and syntax check no longer describe the result. Take a fresh one with --dry-run.",
+  "error_preview_stale": "{} changed since preview '{}' was taken, so its diff and syntax check no longer describe the result. Take a fresh one with --dry-run.",
   "error_preview_id_shape": "Invalid preview id '{}'. A preview id looks like 'p1f'.",
   "warning_no_grammar": "No grammar for this file type, so an edit to it is not syntax-checked. Line ids, viewing and editing work as they do anywhere else.",
   "help_footer": "Pass the whole argument object instead with --json '{...}'. `ast-editor skill api` lists every tool's parameters.",

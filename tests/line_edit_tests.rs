@@ -1000,7 +1000,12 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
     let err = edit::apply_preview(&repository, file.path_str(), &preview_id, false, &pm)
         .await
         .unwrap_err();
-    assert!(format!("{}", err).contains("PREVIEW_STALE"), "{}", err);
+    // Compared against what the message is stored as, so editing that copy
+    // stays a change to resources/ rather than a change to this file too.
+    let stored = &ast_editor::tools::metadata::get_config().error_preview_stale;
+    for segment in stored.split("{}").filter(|part| !part.trim().is_empty()) {
+        assert!(format!("{}", err).contains(segment), "{}", err);
+    }
     assert_eq!(
         fs::read_to_string(file.path_str()).unwrap(),
         "fn main() {\n    let a = 99;\n}\n"

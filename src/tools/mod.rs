@@ -2,7 +2,7 @@ pub(crate) mod buffer;
 pub(crate) mod edit;
 pub mod formatter;
 pub(crate) mod inspect;
-pub mod metadata;
+pub(crate) mod metadata;
 pub(crate) mod outline;
 pub(crate) mod repository;
 pub mod script;

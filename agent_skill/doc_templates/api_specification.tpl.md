@@ -20,19 +20,19 @@ exits non-zero.
 
 {{outline_description}}
 
-{{outline_schema}}
+{{outline_parameters}}
 
 ## `inspect`
 
 {{inspect_description}}
 
-{{inspect_schema}}
+{{inspect_parameters}}
 
 ## `view`
 
 {{view_description}}
 
-{{view_schema}}
+{{view_parameters}}
 
 ### An example
 
@@ -54,7 +54,7 @@ With `only_ids`:
 
 {{edit_description}}
 
-{{edit_schema}}
+{{edit_parameters}}
 
 ### An example
 
@@ -95,7 +95,7 @@ disliked can be committed with `apply` when you judge the parser wrong.
 
 {{create_description}}
 
-{{create_schema}}
+{{create_parameters}}
 
 ### An example
 

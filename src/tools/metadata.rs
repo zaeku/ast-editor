@@ -49,7 +49,7 @@ pub(crate) fn get_config() -> &'static ToolConfig {
     &CONFIG
 }
 
-pub fn get_tool_description(name: &str) -> String {
+pub(crate) fn get_tool_description(name: &str) -> String {
     METADATA
         .get(name)
         .map(|meta| meta.description.clone())

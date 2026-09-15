@@ -1,4 +1,3 @@
-use ast_editor::tools::ToolDispatcher;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -210,55 +209,32 @@ fn generate_readme() {
         serde_json::to_string_pretty(&edit_input_dry_run_val).unwrap()
     );
 
-    // Extract schemas
-    let dispatcher = ToolDispatcher::new();
-    let tools = dispatcher.list_tools();
-
-    let create_schema = tools
-        .iter()
-        .find(|t| t["name"] == "create")
-        .and_then(|t| t.get("inputSchema"))
-        .expect("create schema not found");
-
-    let view_schema = tools
-        .iter()
-        .find(|t| t["name"] == "view")
-        .and_then(|t| t.get("inputSchema"))
-        .expect("view schema not found");
-
-    let edit_schema = tools
-        .iter()
-        .find(|t| t["name"] == "edit")
-        .and_then(|t| t.get("inputSchema"))
-        .expect("edit schema not found");
-
-    let schema_of = |name: &str| {
-        let schema = tools
-            .iter()
-            .find(|t| t["name"] == name)
-            .and_then(|t| t.get("inputSchema"))
-            .unwrap_or_else(|| panic!("{name} schema not found"));
-        format!(
-            "```json\n{}\n```",
-            serde_json::to_string_pretty(schema).unwrap()
-        )
+    // The parameters are what `skill api` prints: one table per tool, rendered
+    // from the schemas the binary serves. Rendering them a second time here
+    // gave the repository a longer, less readable copy of the same thing.
+    let api = ast_editor(&cache, &["skill", "api"]);
+    let section = |tool: &str| {
+        let heading = format!("## `{tool}`");
+        let rest = api
+            .split_once(&heading)
+            .unwrap_or_else(|| panic!("skill api prints no section for {tool}"))
+            .1;
+        rest.split("\n## ").next().unwrap().trim().to_string()
     };
-    let fmt_outline_schema = schema_of("outline");
-    let fmt_inspect_schema = schema_of("inspect");
-
-    // Format all to pretty-printed json inside markdown code blocks
-    let fmt_create_schema = format!(
-        "```json\n{}\n```",
-        serde_json::to_string_pretty(create_schema).unwrap()
-    );
-    let fmt_view_schema = format!(
-        "```json\n{}\n```",
-        serde_json::to_string_pretty(view_schema).unwrap()
-    );
-    let fmt_edit_schema = format!(
-        "```json\n{}\n```",
-        serde_json::to_string_pretty(edit_schema).unwrap()
-    );
+    // The description is the line the section opens with, and the table is the
+    // rest. README takes the first on its own.
+    let split_section = |tool: &str| {
+        let body = section(tool);
+        let (description, table) = body
+            .split_once("\n\n")
+            .unwrap_or_else(|| panic!("the {tool} section carries no table"));
+        (description.trim().to_string(), table.trim().to_string())
+    };
+    let (fmt_outline_description, fmt_outline_parameters) = split_section("outline");
+    let (fmt_inspect_description, fmt_inspect_parameters) = split_section("inspect");
+    let (fmt_view_description, fmt_view_parameters) = split_section("view");
+    let (fmt_edit_description, fmt_edit_parameters) = split_section("edit");
+    let (fmt_create_description, fmt_create_parameters) = split_section("create");
 
     // Each answer already carries the fences the command printed it in, and
     // the path it echoes is this machine's. Only the path is rewritten.
@@ -272,16 +248,6 @@ fn generate_readme() {
     let fmt_view_only_ids = doc(&out_view_only_ids);
     let fmt_edit_compact = doc(&out_edit_compact);
     let fmt_edit_dry_run = doc(&out_edit_dry_run);
-
-    // Each tool's one-line description is the one the binary prints, so the
-    // document repeats what the tool says about itself rather than a second
-    // account of it.
-    let describe = |tool: &str| ast_editor::tools::metadata::get_tool_description(tool);
-    let fmt_outline_description = describe("outline");
-    let fmt_inspect_description = describe("inspect");
-    let fmt_view_description = describe("view");
-    let fmt_edit_description = describe("edit");
-    let fmt_create_description = describe("create");
 
     // The caps, from the constants the formatter enforces.
     let fmt_line_cap = ast_editor::tools::formatter::LINE_CAP.to_string();
@@ -334,10 +300,10 @@ fn generate_readme() {
 
     // 3. Render every template from one placeholder table
     let placeholders: Vec<(&str, &str)> = vec![
-        ("{{create_schema}}", &fmt_create_schema),
+        ("{{create_parameters}}", &fmt_create_parameters),
         ("{{languages}}", &fmt_languages),
-        ("{{outline_schema}}", &fmt_outline_schema),
-        ("{{inspect_schema}}", &fmt_inspect_schema),
+        ("{{outline_parameters}}", &fmt_outline_parameters),
+        ("{{inspect_parameters}}", &fmt_inspect_parameters),
         ("{{outline_description}}", &fmt_outline_description),
         ("{{inspect_description}}", &fmt_inspect_description),
         ("{{view_description}}", &fmt_view_description),
@@ -354,12 +320,12 @@ fn generate_readme() {
         ("{{create_output_default}}", &fmt_create_default),
         ("{{create_input_ids}}", &fmt_create_input_ids),
         ("{{create_output_ids}}", &fmt_create_ids),
-        ("{{view_schema}}", &fmt_view_schema),
+        ("{{view_parameters}}", &fmt_view_parameters),
         ("{{view_input_default}}", &fmt_view_input_default),
         ("{{view_output_default}}", &fmt_view_default),
         ("{{view_input_only_ids}}", &fmt_view_input_only_ids),
         ("{{view_output_only_ids}}", &fmt_view_only_ids),
-        ("{{edit_schema}}", &fmt_edit_schema),
+        ("{{edit_parameters}}", &fmt_edit_parameters),
         ("{{edit_input_compact}}", &fmt_edit_input_compact),
         ("{{edit_output_compact}}", &fmt_edit_compact),
         ("{{edit_input_dry_run}}", &fmt_edit_input_dry_run),

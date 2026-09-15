@@ -2489,3 +2489,99 @@ fn a_parse_error_carries_a_window_of_the_file_around_it() {
         );
     }
 }
+
+/// A tool's help is a column of flags and a column of prose beside it. The
+/// prose column starts past the longest flag, every description begins in that
+/// same column, and a line is broken only when the next word would not fit —
+/// a wrap that breaks earlier than it has to costs a reader rows for nothing.
+#[test]
+fn a_tool_help_lays_its_prose_in_one_column() {
+    for tool in ast_editor::tools::ToolDispatcher::new().list_tools() {
+        let name = tool["name"].as_str().unwrap().to_string();
+        let out = ast_editor(&format!("col_{name}"), &[&name, "--help"]);
+        assert!(
+            out.status.success(),
+            "{name} --help failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+
+        let flags: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("  --"))
+            .collect();
+        assert!(!flags.is_empty(), "{name} --help lists no flags:\n{text}");
+        let longest_flag = flags
+            .iter()
+            .map(|line| line.trim_end().split_whitespace().next().unwrap().len())
+            .max()
+            .unwrap();
+
+        // Description lines are the indented ones that are not flags.
+        let prose: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("    ") && !line.starts_with("  --"))
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        assert!(!prose.is_empty(), "{name} --help carries no prose:\n{text}");
+
+        let columns: std::collections::HashSet<usize> = prose
+            .iter()
+            .map(|line| line.len() - line.trim_start().len())
+            .collect();
+        assert_eq!(
+            columns.len(),
+            1,
+            "{name}: prose begins in {} different columns: {columns:?}",
+            columns.len()
+        );
+        let column = *columns.iter().next().unwrap();
+        assert!(
+            column > longest_flag + 2,
+            "{name}: prose begins at {column} and the longest flag reaches {}",
+            longest_flag + 2
+        );
+
+        // The widest line is as wide as the wrap allows, so no earlier line of
+        // the same description had room for the word that begins the next. The
+        // lines are grouped per flag: two options' prose is two wraps, and the
+        // last line of one had no reason to reach the first line of the other.
+        let width = prose.iter().map(|line| line.len()).max().unwrap();
+        let mut group: Vec<&str> = Vec::new();
+        let mut groups: Vec<Vec<&str>> = Vec::new();
+        for line in text.lines() {
+            if line.starts_with("  --") || line.trim().is_empty() {
+                if !group.is_empty() {
+                    groups.push(std::mem::take(&mut group));
+                }
+            } else if line.starts_with("    ") {
+                group.push(line);
+            }
+        }
+        if !group.is_empty() {
+            groups.push(group);
+        }
+
+        // And the prose is wrapped at all: some option's description is longer
+        // than one line, or nothing here is doing any wrapping.
+        assert!(
+            groups.iter().any(|group| group.len() > 1),
+            "{name}: no description in this help takes more than one line, so \
+             nothing was wrapped:\n{text}"
+        );
+
+        for group in &groups {
+            for pair in group.windows(2) {
+                let (this, next) = (pair[0], pair[1]);
+                let word = next.trim_start().split_whitespace().next().unwrap_or("");
+                if word.is_empty() {
+                    continue;
+                }
+                assert!(
+                    this.len() + 1 + word.len() > width,
+                    "{name}: {this:?} had room for {word:?} and broke anyway (width {width})"
+                );
+            }
+        }
+    }
+}

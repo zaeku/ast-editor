@@ -238,12 +238,16 @@ impl LineBuffer {
                     let idx = self.position_of(start_id, "Start", "start_id")?;
 
                     let current = &self.lines[idx].content;
-                    let start = current.match_indices(pattern.as_str()).nth(occurrence - 1)
+                    let start = current
+                        .match_indices(pattern.as_str())
+                        .nth(occurrence - 1)
                         .map(|(pos, _)| pos)
-                        .with_context(|| format!(
-                            "CHECKSUM_ERROR: Pattern '{}' (occurrence {}) not found in target line.",
-                            pattern, occurrence
-                        ))?;
+                        .with_context(|| {
+                            crate::tools::metadata::get_config()
+                                .error_pattern_not_found
+                                .replacen("{}", &occurrence.to_string(), 1)
+                                .replacen("{}", pattern, 1)
+                        })?;
 
                     let mut updated = String::with_capacity(current.len());
                     updated.push_str(&current[..start]);
@@ -395,8 +399,10 @@ pub(crate) fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<Lin
         if index.len() != disk.len() {
             if reconciled {
                 bail!(
-                    "CONCURRENCY_ERROR: {} is being written while it is read; its line index could not be brought in step with it.",
-                    filepath
+                    "{}",
+                    crate::tools::metadata::get_config()
+                        .error_file_written_while_read
+                        .replacen("{}", &filepath, 1)
                 );
             }
             reconcile_index(conn, session_id, &filepath, &[])?;

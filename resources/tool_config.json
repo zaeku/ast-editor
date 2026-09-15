@@ -20,5 +20,7 @@
   "error_address_needs_a_number": "'{}' is a hash with no line number. An address is <number>#<hash>, and the number is what names the line: a hash on its own would land on whatever carries that content now. Read the line again for its id.",
   "error_target_changed": "Line {} changed since you read it. Read that line again for its current id; the ids you hold for other lines are unaffected.",
   "error_target_changed_outside": "Line {} changed outside this tool since you read it. Read that range again; the ids you hold for other lines are unaffected.",
-  "error_edit_missing_field": "The '{}' op needs {}, and this one carries {}. `ast-editor skill api` lists what each op takes."
+  "error_edit_missing_field": "The '{}' op needs {}, and this one carries {}. `ast-editor skill api` lists what each op takes.",
+  "error_pattern_not_found": "The line holds no occurrence {} of '{}'. Read the line again for its current text; nothing was written.",
+  "error_file_written_while_read": "{} is being written while it is read, so its line index could not be brought in step with it. Nothing was written. Run this again once the writer has finished."
 }

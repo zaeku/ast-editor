@@ -4,6 +4,26 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.8 — 2026-09-15
+
+### Changed
+
+- **A read that stops at the line cap says so in one wording.** Two messages
+  reported the same fact and which one arrived depended on how the range had
+  been asked for: a whole-file read was told `Line count limit (800 lines max)
+  exceeded. Output capped at 800 lines.` and a range past the cap was told
+  `Output truncated to 800 lines max.` Only the second one counted lines that
+  were actually withheld, so it is the one that is left. **A caller matching on
+  the first string will stop matching.** The number of lines answered has not
+  changed.
+
+### Fixed
+
+- Two test processes running at once shared their fixtures and their store, so
+  a build that tests in parallel could fail for reasons that had nothing to do
+  with the code. This is invisible to anyone using the binary and is why the
+  version before it was measured as better than it was.
+
 ## 0.3.7 — 2026-09-15
 
 ### Changed

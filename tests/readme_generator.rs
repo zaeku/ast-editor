@@ -249,13 +249,49 @@ fn generate_readme() {
     let fmt_edit_compact = doc(&out_edit_compact);
     let fmt_edit_dry_run = doc(&out_edit_dry_run);
 
-    // The caps, from the constants the formatter enforces.
-    let fmt_line_cap = ast_editor::tools::formatter::LINE_CAP.to_string();
-    let fmt_response_cap = {
-        let bytes = ast_editor::tools::formatter::RESPONSE_BYTE_CAP;
-        format!("{},{:03}", bytes / 1000, bytes % 1000)
+    // The caps, taken from the warnings that announce them. A number a reader
+    // is given to budget with should be the one the tool says when it stops,
+    // and `resources/` is where the tool keeps what it says.
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("tool_config.json"),
+        )
+        .expect("resources/tool_config.json is readable"),
+    )
+    .expect("resources/tool_config.json parses");
+    let numbers_in = |key: &str| -> Vec<String> {
+        let message = config[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("tool_config.json holds no {key}"));
+        let mut found = Vec::new();
+        let mut current = String::new();
+        for character in message.chars() {
+            if character.is_ascii_digit() || (character == ',' && !current.is_empty()) {
+                current.push(character);
+            } else if !current.is_empty() {
+                found.push(current.trim_end_matches(',').to_string());
+                current.clear();
+            }
+        }
+        if !current.is_empty() {
+            found.push(current.trim_end_matches(',').to_string());
+        }
+        found
     };
-    let fmt_segment_length = ast_editor::tools::formatter::SEGMENT_LENGTH.to_string();
+    let caps = numbers_in("warning_line_cap");
+    let [fmt_line_cap, fmt_segment_length] = caps.as_slice() else {
+        panic!(
+            "warning_line_cap names {} numbers, wanted 2: {caps:?}",
+            caps.len()
+        );
+    };
+    let (fmt_line_cap, fmt_segment_length) = (fmt_line_cap.clone(), fmt_segment_length.clone());
+    let fmt_response_cap = numbers_in("warning_cumulative_limit")
+        .into_iter()
+        .next()
+        .expect("warning_cumulative_limit names no number");
 
     // The version floor Cargo was given for this build.
     let fmt_msrv = env!("CARGO_PKG_RUST_VERSION").to_string();
@@ -282,19 +318,34 @@ fn generate_readme() {
     let fmt_bin_dir = evaluate("bin_dir");
     let fmt_skill_dir = evaluate("skill_dir");
 
-    // The language table is the one the binary carries, so the document cannot
+    // The language table is the one `--version` reports, so the document cannot
     // claim a grammar that is not compiled in or miss one that is.
     let fmt_languages = {
         let mut table = String::from("| Language | Extensions |\n|---|---|\n");
-        for grammar in ast_editor::config::GRAMMARS {
-            let extensions = grammar
-                .extensions
-                .iter()
-                .map(|ext| format!("`.{ext}`"))
+        let reported = ast_editor(&cache, &["--version"]);
+        let mut rows = 0;
+        for line in reported.lines() {
+            // A grammar's line is indented under the count; the first two words
+            // are its name and the version pinned for it.
+            let Some(entry) = line.strip_prefix(' ') else {
+                continue;
+            };
+            let mut words = entry.split_whitespace();
+            let (Some(name), Some(_version)) = (words.next(), words.next()) else {
+                continue;
+            };
+            let extensions = words
+                .map(|extension| format!("`{extension}`"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            table.push_str(&format!("| {} | {} |\n", grammar.name, extensions));
+            assert!(
+                !extensions.is_empty(),
+                "--version names {name} without the extensions it claims: {line:?}"
+            );
+            table.push_str(&format!("| {name} | {extensions} |\n"));
+            rows += 1;
         }
+        assert!(rows > 0, "--version reported no grammar: {reported:?}");
         table.trim_end().to_string()
     };
 

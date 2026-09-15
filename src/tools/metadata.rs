@@ -75,10 +75,17 @@ mod tests {
     fn test_config_retrieval() {
         let config = get_config();
         assert_eq!(config.only_ids_wrap_trigger_length, 1000);
-        // The warning names the cap the formatter enforces, and they drift apart
-        // silently unless something compares them.
-        assert!(config
-            .warning_line_cap
-            .contains(&crate::tools::formatter::LINE_CAP.to_string()));
+        // The warning names both numbers the formatter enforces, and they
+        // drift apart from it silently unless something compares them.
+        for number in [
+            crate::tools::formatter::LINE_CAP,
+            crate::tools::formatter::SEGMENT_LENGTH,
+        ] {
+            assert!(
+                config.warning_line_cap.contains(&number.to_string()),
+                "warning_line_cap does not name {number}: {}",
+                config.warning_line_cap
+            );
+        }
     }
 }

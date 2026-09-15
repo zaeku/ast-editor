@@ -163,10 +163,22 @@ pub(crate) fn language_for_extension(ext: &str) -> Option<&'static str> {
     grammar_for_extension(ext).map(|grammar| grammar.name)
 }
 
-/// Every language the binary carries, in the order `--version` reports them.
-pub fn describe_languages() -> Result<Vec<(String, String)>> {
+/// Every language the binary carries, in the order `--version` reports them:
+/// what it is called, the grammar's version, and the extensions it claims.
+pub(crate) fn describe_languages() -> Result<Vec<(String, String, String)>> {
     Ok(GRAMMARS
         .iter()
-        .map(|grammar| (grammar.name.to_string(), grammar.version().to_string()))
+        .map(|grammar| {
+            (
+                grammar.name.to_string(),
+                grammar.version().to_string(),
+                grammar
+                    .extensions
+                    .iter()
+                    .map(|extension| format!(".{extension}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        })
         .collect())
 }

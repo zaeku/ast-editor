@@ -1,6 +1,12 @@
+mod cli;
+mod config;
+mod parser;
+mod skill;
+mod tools;
+
+use crate::parser::ParserManager;
+use crate::tools::ToolDispatcher;
 use anyhow::Context;
-use ast_editor::parser::ParserManager;
-use ast_editor::tools::ToolDispatcher;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -43,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Some("skill") => match ast_editor::skill::document(args.get(1).map(String::as_str)) {
+        Some("skill") => match crate::skill::document(args.get(1).map(String::as_str)) {
             Ok(text) => {
                 say(&text);
                 Ok(())
@@ -60,10 +66,7 @@ async fn main() -> anyhow::Result<()> {
         Some("--help") | Some("-h") | Some("help") => {
             say(USAGE);
             say(&format!("\nTools:  {}\n", tool_names().join(", ")));
-            say(&format!(
-                "Topics: {}\n",
-                ast_editor::skill::topics().join(", ")
-            ));
+            say(&format!("Topics: {}\n", crate::skill::topics().join(", ")));
             Ok(())
         }
         None => {
@@ -100,11 +103,11 @@ fn init_tracing(level: tracing::Level) {
 /// tree it was built from.
 fn version_report() -> String {
     let mut out = format!("ast-editor {}\n", env!("CARGO_PKG_VERSION"));
-    match ast_editor::config::describe_languages() {
+    match crate::config::describe_languages() {
         Ok(languages) => {
             out.push_str(&format!("grammars {} compiled in\n", languages.len()));
-            for (name, version) in languages {
-                out.push_str(&format!("         {name} {version}\n"));
+            for (name, version, extensions) in languages {
+                out.push_str(&format!("         {name} {version}  {extensions}\n"));
             }
         }
         Err(err) => out.push_str(&format!("grammars unreadable: {:#}\n", err)),
@@ -126,7 +129,7 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     use std::io::Read;
 
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        return ast_editor::cli::help_for("edit");
+        return crate::cli::help_for("edit");
     }
     // `--strict` is how the script form has always spelled strict_validation.
     let args: Vec<String> = args
@@ -140,7 +143,7 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
         })
         .collect();
 
-    let mut arguments = ast_editor::cli::arguments("edit", &args)?;
+    let mut arguments = crate::cli::arguments("edit", &args)?;
     let given = arguments
         .as_object_mut()
         .context("edit takes options, not a bare value")?;
@@ -160,7 +163,7 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
                 "The edit script is empty. It is read from stdin, so pass it as a heredoc."
             );
         }
-        let edits = ast_editor::tools::script::parse(&script)?;
+        let edits = crate::tools::script::parse(&script)?;
         given.insert("edits".to_string(), serde_json::to_value(edits)?);
     }
 
@@ -170,13 +173,13 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
 /// Run one tool and return what it printed, so the shell sees the tool's own
 /// output rather than the JSON-RPC envelope around it.
 async fn call_once(tool: &str, args: &[String]) -> anyhow::Result<String> {
-    let tool = ast_editor::cli::resolve(tool)?;
+    let tool = crate::cli::resolve(tool)?;
     // Asking what a tool takes is a question, not a mistake: answer it rather
     // than refusing the call and listing the options in the complaint.
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        return ast_editor::cli::help_for(&tool);
+        return crate::cli::help_for(&tool);
     }
-    let arguments = ast_editor::cli::arguments(&tool, args)?;
+    let arguments = crate::cli::arguments(&tool, args)?;
     call_with(&tool, arguments).await
 }
 

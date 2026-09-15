@@ -10,12 +10,12 @@ const WRAP_WIDTH: usize = 300;
 
 /// What the caps count, which is not what a row is: lowering the display width
 /// must not make a response run out of budget ten times sooner.
-pub const SEGMENT_LENGTH: usize = 2048;
+pub(crate) const SEGMENT_LENGTH: usize = 2048;
 
 /// How much one call will answer with. The documents render both figures
 /// rather than repeating them.
-pub const LINE_CAP: usize = 800;
-pub const RESPONSE_BYTE_CAP: usize = 45_000;
+pub(crate) const LINE_CAP: usize = 800;
+pub(crate) const RESPONSE_BYTE_CAP: usize = 45_000;
 
 /// For a caller that stated how much it wanted. The cap is for a read given no
 /// bounds; a call answering for lines it just wrote has nothing to guard

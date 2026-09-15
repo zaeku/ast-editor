@@ -1,6 +1,6 @@
 pub(crate) mod buffer;
 pub(crate) mod edit;
-pub mod formatter;
+pub(crate) mod formatter;
 pub(crate) mod inspect;
 pub(crate) mod metadata;
 pub(crate) mod outline;
@@ -449,7 +449,10 @@ impl ToolDispatcher {
     }
 }
 
-pub static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serialises the tests that reach the store, which share one process and one
+/// cache directory under `cfg(test)`.
+#[cfg(test)]
+pub(crate) static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {

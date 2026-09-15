@@ -1,7 +1,7 @@
 {
   "only_ids_wrap_trigger_length": 1000,
   "warning_cumulative_limit": "Response truncated: cumulative response size limit (45,000 bytes) was reached.",
-  "warning_line_cap": "Output truncated to 800 lines max.",
+  "warning_line_cap": "Output truncated to 800 lines max. A line counts as one per 2048 characters, so a file of long lines reaches the cap in fewer rows.",
   "error_no_query_match": "No lines matched query: '{}'",
   "warning_header_hierarchy": "Header hierarchy mismatch at line {}: found H{} after H{} without H{}",
   "warning_malformed_link": "Possible malformed link syntax at line {}: unclosed parenthesis or bracket in link",

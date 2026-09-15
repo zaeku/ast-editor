@@ -16,6 +16,63 @@ fn ast_editor(test: &str, args: &[&str]) -> std::process::Output {
         .expect("failed to run ast-editor")
 }
 
+/// What `skill api` prints: one `## `name`` section per tool, each a
+/// description and a table of parameters. `--help` names the tools too, but in
+/// a sentence, and a test that parses prose fails when the prose is improved.
+fn api_reference() -> String {
+    let out = ast_editor("api_reference", &["skill", "api"]);
+    assert!(
+        out.status.success(),
+        "skill api failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).expect("skill api answers in UTF-8")
+}
+
+fn tool_names() -> Vec<String> {
+    let names: Vec<String> = api_reference()
+        .lines()
+        .filter_map(|line| Some(line.strip_prefix("## `")?.strip_suffix('`')?.to_string()))
+        .collect();
+    assert!(!names.is_empty(), "skill api named no tool");
+    names
+}
+
+/// One tool's parameters as `(name, description)`. A cell may carry an escaped
+/// pipe — the type column lists a template's values that way — so the escapes
+/// are put aside before the row is split on the column separator.
+fn tool_options(tool: &str) -> Vec<(String, String)> {
+    const ESCAPED: &str = "\u{0}";
+    let reference = api_reference();
+    let section = reference
+        .split_once(&format!("## `{tool}`"))
+        .unwrap_or_else(|| panic!("skill api prints no section for {tool}"))
+        .1
+        .split("\n## ")
+        .next()
+        .unwrap()
+        .to_string();
+    section
+        .lines()
+        .filter(|line| line.starts_with("| `"))
+        .filter_map(|line| {
+            let cells: Vec<String> = line
+                .replace("\\|", ESCAPED)
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().replace(ESCAPED, "|"))
+                .collect();
+            let [name, _type, _required, description] = cells.as_slice() else {
+                return None;
+            };
+            Some((
+                name.trim_matches('`').to_string(),
+                description.trim().to_string(),
+            ))
+        })
+        .collect()
+}
+
 fn scratch(name: &str, content: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("ast-editor-cli-files-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -157,10 +214,13 @@ fn test_version_reports_the_grammar_set_it_is_paired_with() {
         .and_then(|rest| rest.split_whitespace().next())
         .and_then(|n| n.parse().ok())
         .unwrap_or_else(|| panic!("--version does not count its grammars: {text}"));
-    let listed: Vec<(&str, &str)> = text
+    let listed: Vec<(&str, &str, Vec<&str>)> = text
         .lines()
         .skip(2)
-        .filter_map(|line| line.trim().split_once(' '))
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            Some((words.next()?, words.next()?, words.collect()))
+        })
         .collect();
     assert_eq!(
         listed.len(),
@@ -171,18 +231,30 @@ fn test_version_reports_the_grammar_set_it_is_paired_with() {
 
     // Each grammar carries the version Cargo.lock pinned for it, which is a
     // number rather than a word, and its own rather than its neighbour's.
-    for (name, version) in &listed {
+    for (name, version, extensions) in &listed {
         assert!(
             version.split('.').count() >= 2
                 && version.split('.').all(|part| part.parse::<u32>().is_ok()),
             "the grammar {name:?} reports {version:?} as a version: {text}"
+        );
+        // The extensions are what decides whether a file is parsed at all, so a
+        // grammar that names none is compiled in and unreachable.
+        assert!(
+            !extensions.is_empty(),
+            "the grammar {name:?} claims no extension: {text}"
+        );
+        assert!(
+            extensions.iter().all(|extension| extension.starts_with('.')
+                && extension.len() > 1
+                && !extension[1..].contains('.')),
+            "the grammar {name:?} reports {extensions:?} as extensions: {text}"
         );
     }
     // The grammars are pinned one crate at a time, so a version shared by most
     // of them is not eighteen coincidences: it is one lookup answering for
     // everyone. A few do share one, being built from a single crate.
     let mut seen: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-    for (_, version) in &listed {
+    for (_, version, _) in &listed {
         *seen.entry(version).or_default() += 1;
     }
     let (common, count) = seen
@@ -2762,8 +2834,7 @@ fn a_script_naming_replace_substring_is_sent_to_the_json_form() {
 fn a_tool_help_carries_each_option_description_whole() {
     let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
 
-    for tool in ast_editor::tools::ToolDispatcher::new().list_tools() {
-        let name = tool["name"].as_str().unwrap().to_string();
+    for name in tool_names() {
         let out = ast_editor(&format!("desc_{name}"), &[&name, "--help"]);
         assert!(
             out.status.success(),
@@ -2772,21 +2843,19 @@ fn a_tool_help_carries_each_option_description_whole() {
         );
         let help = flat(&String::from_utf8_lossy(&out.stdout));
 
-        let properties = tool["inputSchema"]["properties"].as_object().unwrap();
-        let mut checked = 0;
-        for (field, property) in properties {
-            let Some(description) = property["description"].as_str() else {
-                continue;
-            };
+        let options = tool_options(&name);
+        assert!(
+            !options.is_empty(),
+            "{name} has no described options to check"
+        );
+        for (field, description) in options {
             assert!(
-                help.contains(&flat(description)),
+                help.contains(&flat(&description)),
                 "{name} --help does not carry {field}'s description whole:\n  \
                  wanted {:?}\n  in {help:?}",
-                flat(description)
+                flat(&description)
             );
-            checked += 1;
         }
-        assert!(checked > 0, "{name} has no described options to check");
     }
 }
 
@@ -3373,8 +3442,7 @@ fn a_parse_error_carries_a_window_of_the_file_around_it() {
 /// a wrap that breaks earlier than it has to costs a reader rows for nothing.
 #[test]
 fn a_tool_help_lays_its_prose_in_one_column() {
-    for tool in ast_editor::tools::ToolDispatcher::new().list_tools() {
-        let name = tool["name"].as_str().unwrap().to_string();
+    for name in tool_names() {
         let out = ast_editor(&format!("col_{name}"), &[&name, "--help"]);
         assert!(
             out.status.success(),

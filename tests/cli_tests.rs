@@ -2086,3 +2086,50 @@ fn what_is_not_a_range_is_a_path() {
         );
     }
 }
+
+/// A fenced code block is closed by a fence of the same character, at least as
+/// long as the one that opened it, indented no more than three spaces past it,
+/// and with nothing but whitespace after it. Those are CommonMark's rules, and
+/// an edit to markdown warns when a block is left open — so each rule needs a
+/// pair that sits on either side of it.
+#[test]
+fn an_unclosed_code_fence_is_told_apart_from_a_closed_one() {
+    // (name, body, whether the block is closed)
+    let cases: &[(&str, &str, bool)] = &[
+        ("plain", "# T\n\n```\ncode\n```\n", true),
+        ("missing", "# T\n\n```\ncode\n", false),
+        ("indented_3", "# T\n\n```\ncode\n   ```\n", true),
+        ("indented_4", "# T\n\n```\ncode\n    ```\n", false),
+        ("other_char", "# T\n\n```\ncode\n~~~\n", false),
+        ("tilde_pair", "# T\n\n~~~\ncode\n~~~\n", true),
+        ("shorter", "# T\n\n````\ncode\n```\n", false),
+        ("longer", "# T\n\n```\ncode\n`````\n", true),
+        ("trailing_text", "# T\n\n```\ncode\n``` done\n", false),
+    ];
+
+    for (name, body, closed) in cases {
+        let file = scratch(&format!("fence_{name}.md"), body);
+        let out = run_script(&format!("fence_{name}"), &file, "append ```\ntext\n```\n");
+        assert!(
+            out.status.success(),
+            "{name} was refused: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let warnings = json_block(&out.stdout)["warnings"].clone();
+        let unclosed = warnings
+            .as_array()
+            .map(|all| {
+                all.iter()
+                    .filter_map(|w| w.as_str())
+                    .any(|w| w.contains("Unclosed fenced code block"))
+            })
+            .unwrap_or(false);
+        assert_eq!(
+            !unclosed,
+            *closed,
+            "{name}: the block is {}, and the answer {} it open",
+            if *closed { "closed" } else { "open" },
+            if unclosed { "calls" } else { "does not call" }
+        );
+    }
+}

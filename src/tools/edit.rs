@@ -26,8 +26,6 @@ fn validate_markdown(content: &str) -> Result<()> {
                 if start_idx < lines.len() && end_idx < lines.len() {
                     let start_line_str = lines[start_idx];
                     let trimmed = start_line_str.trim_start();
-                    let start_lead_spaces =
-                        start_line_str.len() - start_line_str.trim_start().len();
                     let fence_char = if trimmed.starts_with('`') {
                         Some('`')
                     } else if trimmed.starts_with('~') {
@@ -37,27 +35,23 @@ fn validate_markdown(content: &str) -> Result<()> {
                     };
 
                     if let Some(fc) = fence_char {
-                        let fence_len = trimmed.chars().take_while(|&c| c == fc).count();
-                        if fence_len >= 3 {
-                            let end_line_str = lines[end_idx];
-                            let end_trimmed = end_line_str.trim_end_matches('\r').trim_start();
-                            let end_lead_spaces =
-                                end_line_str.len() - end_line_str.trim_start().len();
+                        // comrak ends a fenced block either at a closing fence or
+                        // at the end of the input, and it is the one applying
+                        // CommonMark's rules — same character, at least as long as
+                        // the opening run, indented no further than three, nothing
+                        // after it — when it decides where the block ends. So the
+                        // only question left is which of the two it did, and the
+                        // line it ended on answers that. Re-deriving those rules
+                        // here could agree with comrak and nothing else.
+                        let end_trimmed = lines[end_idx].trim_end_matches('\r').trim_start();
+                        let is_valid_closing_fence = end_trimmed.starts_with(fc)
+                            && end_trimmed.trim_end().chars().all(|c| c == fc);
 
-                            let is_valid_closing_fence = if end_lead_spaces <= start_lead_spaces + 3
-                                && end_trimmed.starts_with(fc)
-                            {
-                                let end_fence_len =
-                                    end_trimmed.chars().take_while(|&c| c == fc).count();
-                                let remainder = &end_trimmed[end_fence_len..];
-                                end_fence_len >= fence_len && remainder.trim().is_empty()
-                            } else {
-                                false
-                            };
-
-                            if !is_valid_closing_fence {
-                                anyhow::bail!("Validation error: Unclosed fenced code block starting at line {}", start_line);
-                            }
+                        if !is_valid_closing_fence {
+                            anyhow::bail!(
+                                "Validation error: Unclosed fenced code block starting at line {}",
+                                start_line
+                            );
                         }
                     }
                 } else {

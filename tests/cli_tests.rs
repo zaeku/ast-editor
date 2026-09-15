@@ -1127,6 +1127,108 @@ fn line_ids(test: &str, file: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+/// Two previews stand at once. Taking one is not a reason to drop another: a
+/// caller may look at two batches before deciding which to commit, and each
+/// `preview_id` is answered as if it will keep.
+#[test]
+fn a_second_preview_does_not_spend_the_first() {
+    let file = scratch(
+        "two_previews.rs",
+        "fn a() {\n    let x = 1;\n    let y = 2;\n}\n",
+    );
+    let ids = line_ids("twoprev", &file);
+
+    let take = |test: &str, id: &str, text: &str| -> String {
+        let out = run_script_with(
+            test,
+            &file,
+            &format!("replace {id} ```\n    {text}\n```\n"),
+            &["--dry-run"],
+        );
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        json_block(&out.stdout)["preview_id"]
+            .as_str()
+            .expect("a dry run answers with a preview_id")
+            .to_string()
+    };
+
+    let first = take("twoprev", &ids[1], "let x = 9;");
+    let second = take("twoprev", &ids[2], "let y = 9;");
+    assert_ne!(first, second, "two previews share an id");
+
+    // The first is applied after the second was taken, which is the order that
+    // tells whether taking one swept the other.
+    let out = ast_editor(
+        "twoprev",
+        &["edit", file.to_str().unwrap(), "--apply", &first],
+    );
+    assert!(
+        out.status.success(),
+        "the first preview was gone once a second was taken: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn a() {\n    let x = 9;\n    let y = 2;\n}\n"
+    );
+}
+
+/// A file written with CRLF endings keeps them. An edit rewrites the whole
+/// file, so a tool that forgot which ending the file used would change every
+/// line of it while being asked to change one — a diff nobody asked for, in a
+/// file someone else's tools also read.
+#[test]
+fn a_file_written_with_crlf_is_written_back_with_crlf() {
+    let file = scratch("crlf.txt", "one\r\ntwo\r\nthree\r\n");
+    let ids = line_ids("crlf", &file);
+    let out = run_script(
+        "crlf",
+        &file,
+        &format!("replace {} ```\nTWO\n```\n", ids[1]),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "one\r\nTWO\r\nthree\r\n",
+        "an edit to a CRLF file did not keep its endings"
+    );
+
+    // An inserted line takes the file's ending too, not the one the script
+    // arrived with.
+    let ids = line_ids("crlf", &file);
+    let out = run_script(
+        "crlf",
+        &file,
+        &format!("insert_after {} ```\nMIDDLE\n```\n", ids[0]),
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "one\r\nMIDDLE\r\nTWO\r\nthree\r\n",
+        "a line inserted into a CRLF file did not take its endings"
+    );
+
+    // And a file with LF endings is not given CRLF for having been edited.
+    let plain = scratch("lf.txt", "one\ntwo\n");
+    let ids = line_ids("lf", &plain);
+    let out = run_script("lf", &plain, &format!("replace {} ```\nTWO\n```\n", ids[1]));
+    assert!(out.status.success());
+    assert_eq!(std::fs::read_to_string(&plain).unwrap(), "one\nTWO\n");
+}
+
 /// A preview is taken, looked at, and applied. The looking is a call of its
 /// own, so a read between the two must leave the preview standing — a preview
 /// that a plain read invalidates cannot be used the way it is offered.

@@ -1164,9 +1164,7 @@ mod tests {
         fs::write(&file_path, "line 1\nline 2\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        // Ensure no stale session exists in DB from previous test runs
         let repository = SqliteSessionRepository;
-        let _ = repository.delete_session(filepath_str);
 
         // Call edit_lines directly without calling init_edit_session.
         // We can append a line. Since it's append, start_id is ignored.

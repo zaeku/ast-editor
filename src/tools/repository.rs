@@ -31,7 +31,6 @@ pub trait SessionRepository: Send + Sync {
     /// Persist a planned buffer as the session's new index. Call only once the
     /// buffer's content has been accepted and written to disk.
     fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()>;
-    fn delete_session(&self, filepath: &str) -> Result<()>;
     fn get_session_crlf(&self, session_id: &str) -> Result<bool>;
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>>;
     fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>>;
@@ -210,16 +209,6 @@ impl SessionRepository for SqliteSessionRepository {
 
         conn.execute("DELETE FROM previews WHERE id = ?1", [rowid])?;
         Ok(serde_json::from_str(&edits_json)?)
-    }
-
-    fn delete_session(&self, filepath: &str) -> Result<()> {
-        let conn = get_db_connection()?;
-        conn.execute(
-            "DELETE FROM lines WHERE session_id IN (SELECT session_id FROM sessions WHERE filepath = ?1);",
-            [filepath]
-        )?;
-        conn.execute("DELETE FROM sessions WHERE filepath = ?1;", [filepath])?;
-        Ok(())
     }
 
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>> {

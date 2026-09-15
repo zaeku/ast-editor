@@ -27,6 +27,11 @@ in the commit that changed it, and what the project holds true is in
   schema as pretty-printed JSON, 421 lines where `ast-editor skill api` says
   the same thing in 75, and the install ships neither. It carries what the
   command prints now.
+- **The crate builds a binary and no library.** `ast-editor` was never
+  published as one — the command and the documents are what this project
+  promises, and `src/` is an internal — but the target existed, so `use
+  ast_editor::…` compiled. **It no longer does.** Nothing the command offers
+  has changed.
 
 ### Fixed
 

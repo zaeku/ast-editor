@@ -2205,3 +2205,109 @@ fn a_markdown_template_finds_its_kind_and_says_which_are_structures() {
         );
     }
 }
+
+/// A hash on its own addresses a line by its content. The ids allow it because
+/// the hash is of the content, and it is refused in the two cases where content
+/// does not pick out a line: when nothing has it, and when more than one thing
+/// does. Identical lines are different lines, so a content address cannot
+/// choose between them and does not guess.
+#[test]
+fn a_hash_on_its_own_addresses_a_line_by_content() {
+    let hash_of =
+        |ids: &[String], row: usize| -> String { ids[row].split_once('#').unwrap().1.to_string() };
+
+    // One line has it: the line goes.
+    let file = scratch("byhash.txt", "one\ntwo\nthree\n");
+    let ids = line_ids("byhash", &file);
+    let out = run_script("byhash", &file, &format!("delete {}\n", hash_of(&ids, 0)));
+    assert!(
+        out.status.success(),
+        "a hash on its own was refused: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "two\nthree\n");
+
+    // Nothing has it.
+    let file = scratch("byhash_none.txt", "one\ntwo\n");
+    let out = run_script("byhash_none", &file, "delete deadbeef\n");
+    assert!(!out.status.success(), "a hash naming no line was accepted");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("deadbeef"),
+        "the refusal did not name the hash: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\ntwo\n");
+
+    // Two lines have it, and they are different lines.
+    let file = scratch("byhash_two.txt", "same\nsame\nother\n");
+    let ids = line_ids("byhash_two", &file);
+    assert_eq!(
+        hash_of(&ids, 0),
+        hash_of(&ids, 1),
+        "identical lines hashed differently"
+    );
+    assert_ne!(ids[0], ids[1], "identical lines were given one id");
+    let out = run_script(
+        "byhash_two",
+        &file,
+        &format!("delete {}\n", hash_of(&ids, 0)),
+    );
+    assert!(
+        !out.status.success(),
+        "a hash matching two lines chose one of them: {}",
+        std::fs::read_to_string(&file).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "same\nsame\nother\n"
+    );
+}
+
+/// The two refusals a content address can get say different things, because
+/// the remedies differ: nothing has that content, or several things do and the
+/// caller has to say which. A caller told the wrong one looks in the wrong
+/// place.
+#[test]
+fn a_content_address_says_which_of_the_two_went_wrong() {
+    let file = scratch("two_refusals.txt", "same\nsame\nother\n");
+    let ids = line_ids("tworef", &file);
+    let hash = ids[0].split_once('#').unwrap().1.to_string();
+
+    let ambiguous = run_script("tworef_a", &file, &format!("delete {hash}\n"));
+    let missing = run_script("tworef_m", &file, "delete deadbeef\n");
+    assert!(!ambiguous.status.success() && !missing.status.success());
+
+    let said_ambiguous = String::from_utf8_lossy(&ambiguous.stderr).to_string();
+    let said_missing = String::from_utf8_lossy(&missing.stderr).to_string();
+    assert_ne!(
+        said_ambiguous.replace(&hash, "H").replace("deadbeef", "H"),
+        said_missing.replace(&hash, "H").replace("deadbeef", "H"),
+        "a hash matching nothing and a hash matching two lines were refused alike"
+    );
+}
+
+/// A file changed on disk under a session is reconciled before an edit lands,
+/// and a content address is resolved against what the file holds now. It is
+/// still refused when the content picks out more than one line: reconciling
+/// does not make an ambiguous address answerable.
+#[test]
+fn a_content_address_stays_ambiguous_across_a_reconcile() {
+    let file = scratch("reconciled.txt", "same\nsame\nother\n");
+    let ids = line_ids("reconcile", &file);
+    let hash = ids[0].split_once('#').unwrap().1.to_string();
+
+    // Changed on disk after the read, so the session is behind the file.
+    std::fs::write(&file, "same\nsame\nother\nadded\n").unwrap();
+
+    let out = run_script("reconcile", &file, &format!("delete {hash}\n"));
+    assert!(
+        !out.status.success(),
+        "an ambiguous address was answered after a reconcile: {}",
+        std::fs::read_to_string(&file).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "same\nsame\nother\nadded\n",
+        "a refused edit wrote to the file"
+    );
+}

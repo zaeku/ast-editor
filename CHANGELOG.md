@@ -4,6 +4,37 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.9 — 2026-09-16
+
+### Changed
+
+- **The last three machine-readable prefixes are gone**, which the 0.2.0 notes
+  said already. `CHECKSUM_ERROR:` and `CONCURRENCY_ERROR:` survived that sweep
+  by being written at the `bail!` that printed them rather than stored with
+  every other message, and `PREVIEW_STALE:` survived it by being stored with
+  the prefix already on it. All three now say what happened and what to do
+  next. **A caller matching on any of those three strings will stop
+  matching.**
+- **`--version` reports the extensions beside each grammar.** It said how many
+  grammars were compiled in and never which files they claim, so a reader
+  asking whether `.mjs` is handled had nowhere to look. A line is now the
+  name, the version pinned for it, and the extensions.
+- **A capped read says how a long line is counted.** `Output truncated to 800
+  lines max.` now adds that a line counts as one per 2048 characters. A caller
+  whose read was cut short could not tell why the count did not match, and the
+  rule was in no string the binary printed.
+- **The API reference is the table the binary prints.** It rendered every
+  schema as pretty-printed JSON, 421 lines where `ast-editor skill api` says
+  the same thing in 75, and the install ships neither. It carries what the
+  command prints now.
+
+### Fixed
+
+- A file reformatted under the store kept its line ids, which is what the
+  store is for, but nothing checked that they followed the content rather than
+  the position. They do; the test that covers it could not previously tell the
+  two apart.
+
 ## 0.3.8 — 2026-09-15
 
 ### Changed

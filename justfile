@@ -73,11 +73,12 @@ release LEVEL='patch' EXECUTE='':
     set -euo pipefail
     if [ -z '{{EXECUTE}}' ]; then
         echo 'A release, in order:'
-        echo '  1. cargo release {{LEVEL}}     the version, the changelog heading and the tag'
-        echo '  2. jj sign && jj git push      master requires a signature'
-        echo '  3. just install                so the fences ask this build'
-        echo '  4. cargo run --bin check       in decisions/, which refuses a stale binary'
-        echo '  5. cargo publish'
+        echo '  1. write the CHANGELOG section for the version being cut'
+        echo '  2. cargo release {{LEVEL}}     the version in Cargo.toml, and nothing else'
+        echo '  3. jj sign && jj git push      master requires a signature'
+        echo '  4. just install                so the fences ask this build'
+        echo '  5. cargo run --bin check       in decisions/, which refuses a stale binary'
+        echo '  6. cargo publish'
         echo
         echo 'Rehearsing step 1 without writing anything:'
         # A dirty tree is what cargo-release objects to, and seeing the order is

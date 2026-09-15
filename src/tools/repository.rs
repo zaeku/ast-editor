@@ -128,7 +128,7 @@ impl SessionRepository for SqliteSessionRepository {
                     line.seq,
                     compute_stored_hash(&line.content),
                     compute_normalized_hash(&line.content),
-                    ((idx + 1) as f64) * 1000.0,
+                    (idx + 1) as f64,
                     line.parent_context,
                 ])?;
             }

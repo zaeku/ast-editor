@@ -91,6 +91,9 @@ fn create_tables(conn: &Connection) -> Result<()> {
             sequence_id INTEGER NOT NULL,
             line_hash TEXT,
             norm_hash TEXT,
+            -- The line's position. Every write replaces a session's rows, so
+            -- this is recomputed from the position rather than kept between
+            -- them, and nothing reads it but ORDER BY.
             sort_order REAL NOT NULL,
             parent_context TEXT,
             FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
@@ -404,7 +407,7 @@ pub(crate) fn reconcile_index(
                 seq,
                 disk_hashes[idx],
                 disk_norms[idx],
-                ((idx + 1) as f64) * 1000.0,
+                (idx + 1) as f64,
                 parent_contexts.get(idx).cloned().flatten(),
             ])?;
         }
@@ -613,7 +616,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 
         for (idx, line_content) in parts.iter().enumerate() {
             let seq = idx + 1;
-            let sort_order = (seq as f64) * 1000.0;
+            let sort_order = seq as f64;
             let trimmed_line = line_content.strip_suffix('\r').unwrap_or(line_content);
             let p_ctx = parent_contexts.get(idx).cloned().flatten();
             stmt.execute(rusqlite::params![
@@ -757,6 +760,15 @@ mod tests {
             conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='lines';")?;
         let mut rows = stmt.query([])?;
         assert!(rows.next()?.is_some(), "lines table should exist");
+
+        // The store hands pages back rather than keeping them on a free list,
+        // which is the setting it has to be switched into: a store that only
+        // ever grows is the cost of keeping ids, paid forever.
+        let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |row| row.get(0))?;
+        assert_eq!(
+            auto_vacuum, 2,
+            "the store was left on auto_vacuum {auto_vacuum} rather than incremental"
+        );
 
         Ok(())
     }

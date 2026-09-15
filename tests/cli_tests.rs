@@ -1886,6 +1886,171 @@ fn a_read_names_what_encloses_the_lines_it_printed() {
     );
 }
 
+/// The file on disk is the truth and the store is brought back to it. A line
+/// that survived an outside change keeps the number it had, and lines that are
+/// new get numbers of their own — one each, past everything the file has used,
+/// because a caller holding an id from before the change must still be pointing
+/// at the line it read.
+#[test]
+fn a_file_changed_outside_keeps_the_ids_of_what_survived() {
+    let seq = |id: &str| -> i64 {
+        let (number, _) = id.split_once('#').expect("an id is a number and a hash");
+        i64::from_str_radix(number, 16).expect("the number is hex")
+    };
+
+    let file = scratch("outside.txt", "alpha\nbeta\n");
+    let before = line_ids("outside", &file);
+    assert_eq!(before.len(), 2);
+
+    // Two lines appended and one inserted, by something that is not this tool.
+    std::fs::write(&file, "alpha\nmiddle\nbeta\ngamma\n").unwrap();
+    let after = line_ids("outside", &file);
+    assert_eq!(
+        after.len(),
+        4,
+        "the read did not follow the file: {after:?}"
+    );
+
+    // What survived kept its id, in the places the new file puts it.
+    assert_eq!(after[0], before[0], "the first line was renumbered");
+    assert_eq!(
+        after[2], before[1],
+        "the line that moved down was renumbered"
+    );
+
+    // The new lines took numbers of their own, past what the file had used.
+    let minted = [seq(&after[1]), seq(&after[3])];
+    assert_ne!(
+        minted[0], minted[1],
+        "two new lines share a number: {after:?}"
+    );
+    for number in minted {
+        assert!(
+            number > seq(&before[1]),
+            "a new line took {number}, which the file had already used: {after:?}"
+        );
+    }
+
+    // And an id taken before the change still edits the line it named.
+    let out = run_script(
+        "outside",
+        &file,
+        &format!("replace {} ```\nBETA\n```\n", before[1]),
+    );
+    assert!(
+        out.status.success(),
+        "an id from before the change was refused: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "alpha\nmiddle\nBETA\ngamma\n"
+    );
+}
+
+/// Respacing a line does not make it a different line. The store keeps a second
+/// hash that ignores whitespace, so a file reformatted under the store is
+/// recognised line by line rather than read as every line having been replaced
+/// — which would renumber all of them and void every id a caller holds.
+#[test]
+fn a_line_that_was_only_reindented_is_the_same_line() {
+    let file = scratch(
+        "respaced.rs",
+        "fn f() {\n    let a = 1;\n    let b = 2;\n}\n",
+    );
+    let before = line_ids("respaced", &file);
+
+    // The same four lines, every one of them indented differently by something
+    // else. Leaving a line alone would anchor the alignment on its exact hash,
+    // and the hash that ignores whitespace would not have to work for it.
+    std::fs::write(
+        &file,
+        "  fn f() {\n      let a = 1;\n      let b = 2;\n  }\n",
+    )
+    .unwrap();
+    let after = line_ids("respaced", &file);
+
+    let numbers = |ids: &[String]| -> Vec<String> {
+        ids.iter()
+            .map(|id| id.split_once('#').unwrap().0.to_string())
+            .collect()
+    };
+    assert_eq!(
+        numbers(&after),
+        numbers(&before),
+        "a reindented file was read as four new lines: {after:?}"
+    );
+
+    // The hash moved with the content, so the old id is refused and the new one
+    // is not: the line is the same line, and the caller's view of it is stale.
+    let out = run_script(
+        "respaced",
+        &file,
+        &format!("replace {} ```\n    let a = 9;\n```\n", before[1]),
+    );
+    assert!(
+        !out.status.success(),
+        "an id whose line was respaced was accepted as unchanged"
+    );
+    let out = run_script(
+        "respaced",
+        &file,
+        &format!("replace {} ```\n      let a = 9;\n```\n", after[1]),
+    );
+    assert!(
+        out.status.success(),
+        "the id just read was refused: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// An op that needs a field it was not given says which field it needs and
+/// which ones the edit did carry. The second half is what makes the message
+/// actionable: a caller building edits from a template learns whether the field
+/// is missing or spelled wrong, without reading the reference again.
+#[test]
+fn an_op_missing_a_field_names_what_it_was_given() {
+    let file = scratch("missing.txt", "one\ntwo\n");
+    let ids = line_ids("missing", &file);
+    let edits = serde_json::json!({
+        "filepath": file.to_str().unwrap(),
+        "edits": [{ "op": "replace_substring", "start_id": ids[0], "replacement": "X" }],
+    });
+    let out = ast_editor(
+        "missing",
+        &["edit", "--json", &serde_json::to_string(&edits).unwrap()],
+    );
+    assert!(
+        !out.status.success(),
+        "an edit missing a field was accepted"
+    );
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("needs pattern"),
+        "the refusal does not name the field it needs: {said}"
+    );
+    assert!(
+        said.contains("carries start_id, replacement"),
+        "the refusal does not name the fields it was given: {said}"
+    );
+
+    // An edit carrying nothing else says so, rather than listing the fields it
+    // does not have.
+    let edits = serde_json::json!({
+        "filepath": file.to_str().unwrap(),
+        "edits": [{ "op": "replace_substring" }],
+    });
+    let out = ast_editor(
+        "missing2",
+        &["edit", "--json", &serde_json::to_string(&edits).unwrap()],
+    );
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("carries no other field"),
+        "an edit with nothing else did not say so: {said}"
+    );
+}
+
 /// Markdown has no grammar behind it, so what encloses a line is worked out
 /// from its headings. A `#` only opens a heading when a space follows it, so
 /// `#notaheading` is a word a paragraph begins with; treating it as a heading

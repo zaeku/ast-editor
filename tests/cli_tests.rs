@@ -3462,3 +3462,77 @@ fn a_tool_help_lays_its_prose_in_one_column() {
         }
     }
 }
+
+/// A dry run whose result parses with complaints answers `syntax_valid: true`
+/// and carries the complaints beside a `preview_id`. The warnings are advice,
+/// so the batch behind the id is committable: a caller who reads them and
+/// decides they do not matter applies what it already validated rather than
+/// resending it.
+#[test]
+fn a_dry_run_that_warns_still_hands_back_its_batch() {
+    // A heading two levels below the one above it, which is what the markdown
+    // grammar complains about without calling the file broken.
+    let file = scratch("dry_warn.md", "# Title\n\nbody\n");
+    let ids = line_ids("dry_warn", &file);
+    let out = run_script_with(
+        "dry_warn",
+        &file,
+        &format!("replace {} ```\n### Skipped\n```\n", ids[2]),
+        &["--dry-run"],
+    );
+    assert!(
+        out.status.success(),
+        "a dry run that only warns exited non-zero: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let answer = json_block(&out.stdout);
+    assert_eq!(
+        answer["syntax_valid"], true,
+        "a warning was reported as a broken parse: {answer}"
+    );
+    assert!(
+        !answer["warnings"].as_array().expect("warnings").is_empty(),
+        "the skipped heading level was not reported: {answer}"
+    );
+    assert!(
+        answer["preview_id"].is_string(),
+        "a warned batch was not named, so it cannot be applied: {answer}"
+    );
+}
+
+/// A dry run whose result does not parse answers `syntax_valid: false` with the
+/// diagnostics — and a `preview_id` all the same. The parser reports rather
+/// than vetoes, so a caller who judges it wrong applies the batch instead of
+/// retyping it.
+#[test]
+fn a_dry_run_that_does_not_parse_still_names_its_batch() {
+    let file = scratch("dry_broken.rs", "fn main() {\n    let x = 1;\n}\n");
+    let ids = line_ids("dry_broken", &file);
+    let out = run_script_with(
+        "dry_broken",
+        &file,
+        &format!("replace {} ```\n    let x = (1;\n```\n", ids[1]),
+        &["--dry-run"],
+    );
+    let answer = json_block(&out.stdout);
+    assert_eq!(
+        answer["syntax_valid"], false,
+        "a broken payload was reported as parsing: {answer}"
+    );
+    assert!(
+        !answer["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .is_empty(),
+        "nothing said what was wrong: {answer}"
+    );
+    assert!(
+        answer["preview_id"].is_string(),
+        "a refused batch was not named, so it cannot be applied: {answer}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn main() {\n    let x = 1;\n}\n",
+        "a dry run wrote to the file"
+    );
+}

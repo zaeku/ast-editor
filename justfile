@@ -46,6 +46,15 @@ lint:
 doc:
     cargo test --test readme_generator
 
+# Line coverage says which code a suite reaches, not which defects it would
+# catch — `just mutants` answers that. This is for asking what one test file
+# reaches that the others do not: run it, drop a --test, and read the
+# difference.
+
+# Report line coverage over the whole suite.
+cov:
+    cargo llvm-cov --all-targets --summary-only
+
 # The binary is no use to an agent that has not been told the command exists,
 # so this installs both halves.
 

@@ -80,8 +80,8 @@ uninstall:
 mutants:
     ./tools/mutation-run.sh
 
-# One job per machine is what makes the verdicts trustworthy; the machines buy
-# the time back. SHARDS, HARDWARE and JOBS override it.
+# Sharding buys wall clock; the total cost is the same either way. SHARDS,
+# HARDWARE and JOBS override it.
 
 # The same measurement, split across rented sessions.
 mutants-split:

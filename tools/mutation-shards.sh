@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# A full mutation run split across rented sessions, one job on each.
+# A full mutation run split across rented sessions.
 #
-# One job is what makes the verdicts trustworthy: a run whose jobs execute at
-# the same time reports mutants as killed that the suite does not kill, measured
-# at 44 and at 12 vCPU and absent at 2. One job at a time is right and slow, so
-# the machines are what buy the time back rather than the job count.
+# Sharding buys wall clock and not cost: three machines for fifty minutes is
+# the same rent as one for two and a half hours. Jobs inside a shard buy the
+# rest, and they are only safe because the suite keeps one process's fixtures
+# out of another's — a run whose jobs execute at the same time used to report
+# mutants as killed that the suite does not kill, and that was the fixtures.
 set -euo pipefail
 
 SHARDS=${SHARDS:-3}
 HARDWARE=${HARDWARE:-gpu A100}
-JOBS=${JOBS:-1}
+JOBS=${JOBS:-8}
 BUILD_JOBS=${BUILD_JOBS:-12}
 OUT=${OUT:-mutants.out}
 HERE=$(cd "$(dirname "$0")" && pwd)

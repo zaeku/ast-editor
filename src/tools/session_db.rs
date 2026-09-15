@@ -462,12 +462,13 @@ pub fn check_language_supported(path: &str) -> bool {
     crate::config::language_for_extension(&ext).is_some()
 }
 
-/// How long a file's entry outlives its last use. Evicting one costs nothing
-/// but the stability of that file's ids, so the window only has to outlast the
-/// task an agent is in the middle of.
 /// Previews older than this are pruned. A preview is only useful while the file
 /// it was computed against is unchanged, so this is a backstop, not a lifetime.
 pub(crate) const PREVIEW_TTL_SECONDS: i64 = 3600;
+
+/// How long a file's entry outlives its last use. Evicting one costs nothing
+/// but the stability of that file's ids, so the window only has to outlast the
+/// task an agent is in the middle of.
 const SESSION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
 
 fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
@@ -841,10 +842,15 @@ mod tests {
         create_tables(&conn)?;
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-        // Expressed against the window itself, so widening it does not quietly
-        // turn this into a test of nothing.
-        let stale_time = now - SESSION_TTL_SECONDS - 1;
-        let fresh_time = now - SESSION_TTL_SECONDS / 2;
+        // Expressed in seconds rather than against the window, because a time
+        // derived from the window is stale or fresh whatever the window is, and
+        // the test then holds for a window of two minutes or of none. What the
+        // window is for decides the two numbers: it has to outlast the task an
+        // agent is in the middle of, and a session nothing has touched for a
+        // month is not one of those.
+        let day = 24 * 60 * 60;
+        let stale_time = now - 31 * day;
+        let fresh_time = now - day;
 
         conn.execute(
             "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",

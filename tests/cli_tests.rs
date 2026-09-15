@@ -1127,6 +1127,51 @@ fn line_ids(test: &str, file: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+/// A preview is taken, looked at, and applied. The looking is a call of its
+/// own, so a read between the two must leave the preview standing — a preview
+/// that a plain read invalidates cannot be used the way it is offered.
+#[test]
+fn a_preview_survives_a_read_taken_before_it_is_applied() {
+    let file = scratch("previewed.rs", "fn a() {\n    let x = 1;\n}\n");
+    let ids = line_ids("previewed", &file);
+    let out = run_script_with(
+        "previewed",
+        &file,
+        &format!("replace {} ```\n    let x = 2;\n```\n", ids[1]),
+        &["--dry-run"],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let preview = json_block(&out.stdout)["preview_id"]
+        .as_str()
+        .expect("a dry run answers with a preview_id")
+        .to_string();
+
+    // The read in between is the point: it opens the store and sweeps what has
+    // expired, and this preview has not.
+    let between = ast_editor("previewed", &["view", file.to_str().unwrap()]);
+    assert!(between.status.success());
+
+    let out = ast_editor(
+        "previewed",
+        &["edit", file.to_str().unwrap(), "--apply", &preview],
+    );
+    assert!(
+        out.status.success(),
+        "a preview taken one read ago was refused: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "fn a() {\n    let x = 2;\n}\n",
+        "the applied preview did not write what it previewed"
+    );
+}
+
 /// The number in a line id names the line, and a number is never handed out
 /// twice for one file. It is a counter the file carries, not a position: it
 /// keeps counting across calls, and a number that belonged to a deleted line

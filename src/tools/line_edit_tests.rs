@@ -186,7 +186,7 @@ async fn test_edit_operations_and_ast_validation() {
     }];
     // 1. Permissive Mode test: should save with errors
     let edit_res_permissive =
-        edit::edit_lines(&repository, file.path_str(), invalid_edits.clone(), &pm)
+        edit::edit_lines_permissive(&repository, file.path_str(), invalid_edits.clone(), &pm)
             .await
             .unwrap();
     let res_permissive: serde_json::Value = serde_json::from_str(&edit_res_permissive).unwrap();
@@ -215,7 +215,7 @@ async fn test_edit_operations_and_ast_validation() {
     }];
 
     // 2. Strict Mode test: should roll back
-    let edit_res = edit::edit_lines_with_validation(
+    let edit_res = edit::edit_lines(
         &repository,
         file.path_str(),
         invalid_edits_strict,
@@ -254,7 +254,7 @@ async fn test_edit_operations_and_ast_validation() {
         content: Some("    let a = 2;".to_string()),
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(&repository, file.path_str(), valid_edits, &pm)
+    let edit_res = edit::edit_lines_permissive(&repository, file.path_str(), valid_edits, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&edit_res).unwrap();
@@ -312,7 +312,7 @@ async fn test_transactional_deletes_and_inserts() {
         },
     ];
 
-    let edit_preview = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+    let edit_preview = edit::edit_lines_permissive(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&edit_preview).unwrap();
@@ -362,7 +362,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
         ..Default::default()
     }];
 
-    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+    let edit_res = edit::edit_lines_permissive(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
     assert!(edit_res.contains("modified_lines"), "{}", edit_res);
@@ -389,7 +389,7 @@ async fn test_integration_append_operation() {
         ..Default::default()
     }];
 
-    let preview = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+    let preview = edit::edit_lines_permissive(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview).unwrap();
@@ -437,7 +437,7 @@ async fn test_integration_advanced_operations() {
         ..Default::default()
     }];
 
-    let preview = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+    let preview = edit::edit_lines_permissive(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview).unwrap();
@@ -469,7 +469,7 @@ async fn test_integration_advanced_operations() {
         ..Default::default()
     }];
 
-    let preview_move = edit::edit_lines(&repository, file.path_str(), edits_move, &pm)
+    let preview_move = edit::edit_lines_permissive(&repository, file.path_str(), edits_move, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview_move).unwrap();
@@ -499,7 +499,7 @@ async fn test_integration_insert_without_start_id() {
         ..Default::default()
     }];
 
-    let preview1 = edit::edit_lines(&repository, file.path_str(), edits_before, &pm)
+    let preview1 = edit::edit_lines_permissive(&repository, file.path_str(), edits_before, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview1).unwrap();
@@ -521,7 +521,7 @@ async fn test_integration_insert_without_start_id() {
         ..Default::default()
     }];
 
-    let preview2 = edit::edit_lines(&repository, file.path_str(), edits_after, &pm)
+    let preview2 = edit::edit_lines_permissive(&repository, file.path_str(), edits_after, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&preview2).unwrap();
@@ -587,7 +587,7 @@ async fn test_integration_create_lines_flow() {
         ..Default::default()
     }];
 
-    let edit_res = edit::edit_lines(&repository, &filepath_str, edits, &pm)
+    let edit_res = edit::edit_lines_permissive(&repository, &filepath_str, edits, &pm)
         .await
         .unwrap();
     let res: serde_json::Value = serde_json::from_str(&edit_res).unwrap();
@@ -640,7 +640,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
         occurrence: Some(1),
         ..Default::default()
     }];
-    let edit_res = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+    let edit_res = edit::edit_lines_permissive(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
     assert!(edit_res.contains("modified_lines"), "{}", edit_res);
@@ -795,7 +795,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     );
 
     // 4. Applying the previewed batch produces what the preview showed.
-    let res = edit::edit_lines(&repository, file.path_str(), valid_edits, &pm)
+    let res = edit::edit_lines_permissive(&repository, file.path_str(), valid_edits, &pm)
         .await
         .unwrap();
     let applied: serde_json::Value = serde_json::from_str(&res).unwrap();
@@ -1071,7 +1071,7 @@ async fn test_a_multi_line_replace_names_every_line_it_wrote() {
         ..Default::default()
     }];
 
-    let res = edit::edit_lines(&repository, file.path_str(), edits, &pm)
+    let res = edit::edit_lines_permissive(&repository, file.path_str(), edits, &pm)
         .await
         .unwrap();
     let answer: serde_json::Value = serde_json::from_str(&res).unwrap();
@@ -1112,7 +1112,7 @@ async fn test_store_holds_no_file_text() {
         .as_str()
         .unwrap()
         .to_string();
-    edit::edit_lines(
+    edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
@@ -1239,7 +1239,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
         "fn main() {\n    let a = 1;\n    let b = 99;\n}\n",
     )
     .unwrap();
-    let res = edit::edit_lines(
+    let res = edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
@@ -1266,7 +1266,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
         "fn main() {\n    let a = 123;\n    let b = 99;\n}\n",
     )
     .unwrap();
-    let err = edit::edit_lines(
+    let err = edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
@@ -1329,7 +1329,7 @@ async fn test_a_deleted_id_is_never_reissued() {
 
     // Delete the last line of the file, retiring the highest id in use.
     let doomed = live_id(&repository, file.path_str(), 3);
-    edit::edit_lines(
+    edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
@@ -1344,7 +1344,7 @@ async fn test_a_deleted_id_is_never_reissued() {
     let retired: i64 = i64::from_str_radix(doomed.split('#').next().unwrap(), 16).unwrap();
 
     // Invariant 2: a retired id is never reassigned to a different line.
-    let res = edit::edit_lines(
+    let res = edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
@@ -1374,7 +1374,7 @@ async fn test_repeated_insertion_between_the_same_pair() {
     let mut seen = std::collections::HashSet::new();
     for n in 0..200 {
         let anchor = live_id(&repository, file.path_str(), 1);
-        let res = edit::edit_lines(
+        let res = edit::edit_lines_permissive(
             &repository,
             file.path_str(),
             vec![edit::LineEdit {
@@ -1420,7 +1420,7 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
     // Push the ids out of step with the positions, so that renumbering the
     // file 1..N would give a visibly different answer from reconciling it.
     let anchor = live_id(&repository, file.path_str(), 1);
-    edit::edit_lines(
+    edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {
@@ -1584,9 +1584,9 @@ async fn test_a_structural_match_carries_the_ids_that_edit_it() {
         .find(|m| m["text"].as_str().unwrap().contains("doomed"))
         .expect("the function was not matched");
 
-    // The ids the query returned go straight to edit_lines, with no call in
+    // The ids the query returned go straight to edit_lines_permissive, with no call in
     // between to turn line numbers into ids.
-    let out = edit::edit_lines(
+    let out = edit::edit_lines_permissive(
         &repository,
         file.path_str(),
         vec![edit::LineEdit {

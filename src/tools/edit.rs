@@ -373,7 +373,7 @@ pub(crate) async fn apply_preview(
     parser_manager: &crate::parser::ParserManager,
 ) -> Result<String> {
     let edits = repository.take_preview(filepath, preview_id)?;
-    edit_lines_with_validation(
+    edit_lines(
         repository,
         filepath,
         edits,
@@ -383,7 +383,10 @@ pub(crate) async fn apply_preview(
     .await
 }
 
-pub(crate) async fn edit_lines_with_validation(
+/// Apply a batch and answer with the lines it changed. `strict_validation`
+/// decides what happens when the result does not parse: rolled back and
+/// refused, or written with the verdict beside it. Both check.
+pub(crate) async fn edit_lines(
     repository: &impl SessionRepository,
     filepath: &str,
     edits: Vec<LineEdit>,
@@ -557,17 +560,16 @@ pub(crate) async fn edit_lines_with_validation(
     Ok(format!("{{\n  {}\n}}", fields.join(",\n  ")))
 }
 
-/// The permissive default, which no caller takes: an edit arrives through the
-/// dispatcher carrying the flag either way. It stands for the tests that would
-/// otherwise repeat `false` at every call.
+/// `edit_lines` at the setting the dispatcher passes for an edit that did not
+/// ask for strictness. It spares every test below a bare `false`.
 #[cfg(test)]
-pub(crate) async fn edit_lines(
+pub(crate) async fn edit_lines_permissive(
     repository: &impl SessionRepository,
     filepath: &str,
     edits: Vec<LineEdit>,
     parser_manager: &crate::parser::ParserManager,
 ) -> Result<String> {
-    edit_lines_with_validation(repository, filepath, edits, false, parser_manager).await
+    edit_lines(repository, filepath, edits, false, parser_manager).await
 }
 
 #[cfg(test)]
@@ -665,7 +667,7 @@ mod tests {
             content: Some("    let a = 42;".to_string()),
             ..Default::default()
         }];
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -693,7 +695,7 @@ mod tests {
             content: Some("    let b = 2;".to_string()),
             ..Default::default()
         }];
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -718,7 +720,7 @@ mod tests {
             content: None,
             ..Default::default()
         }];
-        let _preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let _preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "fn main() {\n    let a = 42;\n}\n"
@@ -750,7 +752,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let res = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let res = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         assert!(res.contains("modified_lines"), "{}", res);
 
         // Verify disk content includes both the external change and our new edit!
@@ -780,7 +782,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let res = edit_lines(&repository, filepath_str, edits, &env.pm).await;
+        let res = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await;
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(
@@ -818,8 +820,8 @@ mod tests {
             ..Default::default()
         }];
 
-        // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines)
-        let res = edit_lines(&repository, filepath_str, edits.clone(), &env.pm).await?;
+        // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines_permissive)
+        let res = edit_lines_permissive(&repository, filepath_str, edits.clone(), &env.pm).await?;
         let val: serde_json::Value = serde_json::from_str(&res)?;
         assert_eq!(val["status"], "saved_with_errors");
         assert_eq!(val["syntax_valid"], false);
@@ -844,9 +846,7 @@ mod tests {
         }];
 
         // 2. Test Strict Mode (strict_validation: true)
-        let res_strict =
-            edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &env.pm)
-                .await;
+        let res_strict = edit_lines(&repository, filepath_str, edits_strict, true, &env.pm).await;
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
         assert!(
@@ -892,7 +892,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -932,7 +932,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -966,7 +966,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -996,7 +996,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1030,7 +1030,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
         // The op and the field are named as a caller spells them, and so is
@@ -1060,7 +1060,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1101,7 +1101,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1146,7 +1146,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1170,7 +1170,7 @@ mod tests {
 
         let repository = SqliteSessionRepository;
 
-        // Call edit_lines directly without calling init_edit_session.
+        // Call edit_lines_permissive directly without calling init_edit_session.
         // We can append a line. Since it's append, start_id is ignored.
         let edits = vec![LineEdit {
             op: EditOp::Append,
@@ -1178,7 +1178,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1229,7 +1229,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         assert!(result.contains("modified_lines"), "{}", result);
 
         // Verify that the file content was updated on disk
@@ -1267,7 +1267,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
 
         // The edit should succeed (status success) but return warnings!
         assert!(
@@ -1316,7 +1316,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
 
         // The edit should succeed (status success) but return HTML warnings!
         assert!(
@@ -1410,7 +1410,7 @@ fn main() {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_ok());
 
         let disk_content = fs::read_to_string(&file_path)?;
@@ -1445,7 +1445,7 @@ fn main() {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
         assert!(
             !result.contains("\"status\""),
             "success is the exit code: {}",
@@ -1485,7 +1485,7 @@ fn main() {
             ..Default::default()
         }];
 
-        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
 
         let val: serde_json::Value = serde_json::from_str(&result)?;
         assert!(val["status"].is_null(), "success is the exit code: {}", val);
@@ -1538,8 +1538,8 @@ fn main() {
             ..Default::default()
         }];
 
-        // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines)
-        let res = edit_lines(&repository, filepath_str, edits.clone(), &env.pm).await?;
+        // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines_permissive)
+        let res = edit_lines_permissive(&repository, filepath_str, edits.clone(), &env.pm).await?;
         let val: serde_json::Value = serde_json::from_str(&res)?;
         assert_eq!(val["status"], "saved_with_errors");
         assert_eq!(val["syntax_valid"], false);
@@ -1564,9 +1564,7 @@ fn main() {
         }];
 
         // 2. Test Strict Mode (strict_validation: true)
-        let res_strict =
-            edit_lines_with_validation(&repository, filepath_str, edits_strict, true, &env.pm)
-                .await;
+        let res_strict = edit_lines(&repository, filepath_str, edits_strict, true, &env.pm).await;
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
         assert!(

@@ -419,7 +419,7 @@ impl ToolDispatcher {
                             fenced("json", &preview.report)
                         ));
                     }
-                    edit::edit_lines_with_validation(
+                    edit::edit_lines(
                         &repository,
                         filepath,
                         edits,

@@ -14,7 +14,7 @@
 use crate::tools::ToolDispatcher;
 
 /// The hub document, printed by `ast-editor skill` with no topic.
-pub const SKILL: &str = include_str!("../agent_skill/SKILL.md");
+pub(crate) const SKILL: &str = include_str!("../agent_skill/SKILL.md");
 
 /// Topics that are authored documents, embedded verbatim.
 const REFERENCES: &[(&str, &str)] = &[
@@ -85,7 +85,7 @@ pub fn document(topic: Option<&str>) -> anyhow::Result<String> {
 
 /// The tool schemas, rendered from the ones this binary serves. Dry on purpose:
 /// it is exhaustive and cannot drift, and worked examples live in `usage`.
-pub fn render_api() -> String {
+pub(crate) fn render_api() -> String {
     let mut out = String::from(
         "# API Reference\n\n\
          Every tool, every parameter, rendered from the schemas this binary serves.\n\

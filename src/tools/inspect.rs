@@ -11,7 +11,7 @@ use crate::parser::ParserManager;
 use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
 
 #[derive(Debug, Deserialize)]
-pub struct InspectArgs {
+pub(crate) struct InspectArgs {
     pub filepath: String,
     pub query: Option<String>,
     pub template: Option<String>,
@@ -23,13 +23,13 @@ pub struct InspectArgs {
 /// is kept out of the report because code inside a JSON string is code
 /// nobody can read and nothing can copy.
 #[derive(Debug)]
-pub struct Inspected {
+pub(crate) struct Inspected {
     pub blocks: Vec<String>,
     pub report: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct InspectResult {
+pub(crate) struct InspectResult {
     /// Absent when the search ran and answered. A name here means something
     /// else happened: a template the language does not have, or a query the
     /// grammar refused.
@@ -48,7 +48,7 @@ pub struct InspectResult {
 }
 
 #[derive(Debug, Serialize)]
-pub struct InspectMatch {
+pub(crate) struct InspectMatch {
     pub capture_name: String,
     pub start_line: usize,
     pub end_line: usize,
@@ -64,7 +64,7 @@ pub struct InspectMatch {
 
 /// One definition a file declares, as `outline` lists it.
 #[derive(Debug, Serialize)]
-pub struct OutlineEntry {
+pub(crate) struct OutlineEntry {
     pub kind: String,
     pub signature: String,
     pub start_line: usize,
@@ -92,7 +92,7 @@ fn line_id_at(
 }
 
 #[derive(Debug, Serialize)]
-pub struct InspectDefinition {
+pub(crate) struct InspectDefinition {
     pub r#type: String,
     pub start_line: usize,
     pub end_line: usize,
@@ -315,7 +315,7 @@ pub(crate) async fn outline_report(
     Ok(serde_json::to_string_pretty(&report)?)
 }
 
-pub async fn run_inspect(
+pub(crate) async fn run_inspect(
     args: InspectArgs,
     parser_manager: &Arc<ParserManager>,
 ) -> Result<Inspected> {
@@ -520,7 +520,7 @@ fn definition_lines(
     Ok(formatted.lines_text.unwrap_or_default())
 }
 
-pub fn run_markdown_inspect(
+pub(crate) fn run_markdown_inspect(
     code: &str,
     args: &InspectArgs,
     repository: &impl SessionRepository,

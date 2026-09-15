@@ -151,7 +151,7 @@ pub static GRAMMARS: &[Grammar] = &[
 ];
 
 /// The language an extension is read as, with or without a leading dot.
-pub fn grammar_for_extension(ext: &str) -> Option<&'static Grammar> {
+pub(crate) fn grammar_for_extension(ext: &str) -> Option<&'static Grammar> {
     let wanted = ext.trim_start_matches('.').to_ascii_lowercase();
     GRAMMARS
         .iter()
@@ -159,7 +159,7 @@ pub fn grammar_for_extension(ext: &str) -> Option<&'static Grammar> {
 }
 
 /// The name of the language an extension is read as.
-pub fn language_for_extension(ext: &str) -> Option<&'static str> {
+pub(crate) fn language_for_extension(ext: &str) -> Option<&'static str> {
     grammar_for_extension(ext).map(|grammar| grammar.name)
 }
 

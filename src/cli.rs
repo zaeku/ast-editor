@@ -56,7 +56,7 @@ fn schema_of(tool: &str) -> Result<Value> {
 
 /// An absolute path, so that a session is keyed the same however the caller
 /// spelled it. The file need not exist yet: `create` makes one.
-pub fn absolute(path: &str) -> Result<String> {
+pub(crate) fn absolute(path: &str) -> Result<String> {
     let path = std::path::Path::new(path);
     if path.is_absolute() {
         return Ok(path.to_string_lossy().into_owned());

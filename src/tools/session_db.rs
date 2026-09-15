@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn get_db_path() -> Result<PathBuf> {
+pub(crate) fn get_db_path() -> Result<PathBuf> {
     let mut path = if let Some(dir) = env::var_os("AST_EDITOR_CACHE_DIR") {
         PathBuf::from(dir)
     } else if cfg!(test) {
@@ -220,7 +220,7 @@ pub(crate) fn missing_field(edit: &LineEdit, needs: &str) -> anyhow::Error {
     )
 }
 
-pub fn parse_line_id(id_str: &str) -> Result<(i64, String)> {
+pub(crate) fn parse_line_id(id_str: &str) -> Result<(i64, String)> {
     let parts: Vec<&str> = id_str.split('#').collect();
     if parts.len() == 1 {
         anyhow::bail!(crate::tools::metadata::get_config()
@@ -455,7 +455,7 @@ pub(crate) fn compute_sha256(path: &str) -> Result<String> {
 /// its extension, or it is markdown, which comrak parses without one. Derived
 /// rather than listed, so that dropping a grammar in reaches the check too
 /// (D-01M27WE1VYAKPP).
-pub fn check_language_supported(path: &str) -> bool {
+pub(crate) fn check_language_supported(path: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -493,7 +493,10 @@ fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<SessionMetadata> {
+pub(crate) fn init_edit_session(
+    filepath: &str,
+    create_if_not_exists: bool,
+) -> Result<SessionMetadata> {
     let mut conn = get_db_connection()?;
     create_tables(&conn)?;
     cleanup_stale_sessions(&conn)?;
@@ -653,7 +656,7 @@ pub fn init_edit_session(filepath: &str, create_if_not_exists: bool) -> Result<S
 /// The hash kept in the index. Reconciliation aligns disk lines against stored
 /// rows before any sequence number is known, so this is the only key available
 /// there and needs enough width that a file's lines do not collide.
-pub fn compute_stored_hash(content: &str) -> String {
+pub(crate) fn compute_stored_hash(content: &str) -> String {
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
     hasher.update(content.as_bytes());
@@ -677,7 +680,7 @@ pub(crate) fn compute_normalized_hash(content: &str) -> String {
 /// of the stored hash, so the short form can be checked against a stored row
 /// without keeping a second column. The sequence number does the identifying
 /// here, which is why four characters are enough.
-pub fn compute_line_hash(content: &str) -> String {
+pub(crate) fn compute_line_hash(content: &str) -> String {
     compute_stored_hash(content)[..4].to_string()
 }
 

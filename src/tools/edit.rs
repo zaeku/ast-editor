@@ -365,7 +365,7 @@ pub async fn edit_lines_dry_run(
 
 /// Apply the edit batch a previous dry run validated, addressed by its preview
 /// id instead of resent in full.
-pub async fn apply_preview(
+pub(crate) async fn apply_preview(
     repository: &impl SessionRepository,
     filepath: &str,
     preview_id: &str,
@@ -383,7 +383,7 @@ pub async fn apply_preview(
     .await
 }
 
-pub async fn edit_lines_with_validation(
+pub(crate) async fn edit_lines_with_validation(
     repository: &impl SessionRepository,
     filepath: &str,
     edits: Vec<LineEdit>,

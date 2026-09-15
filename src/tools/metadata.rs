@@ -13,7 +13,7 @@ static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
 });
 
 #[derive(Deserialize)]
-pub struct ToolConfig {
+pub(crate) struct ToolConfig {
     pub only_ids_wrap_trigger_length: usize,
     pub warning_cumulative_limit: String,
     pub warning_line_cap: String,
@@ -45,7 +45,7 @@ static CONFIG: Lazy<ToolConfig> = Lazy::new(|| {
     serde_json::from_str(json_str).expect("Failed to parse tool_config.json")
 });
 
-pub fn get_config() -> &'static ToolConfig {
+pub(crate) fn get_config() -> &'static ToolConfig {
     &CONFIG
 }
 

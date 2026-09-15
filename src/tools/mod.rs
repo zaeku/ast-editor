@@ -1,13 +1,20 @@
 pub mod buffer;
 pub mod edit;
 pub mod formatter;
-pub mod inspect;
+pub(crate) mod inspect;
 pub mod metadata;
-pub mod outline;
+pub(crate) mod outline;
 pub mod repository;
 pub mod script;
 pub mod session_db;
 pub mod view;
+
+// Drives the tools through the crate rather than through the command, which is
+// what lets a caller reach a path no CLI invocation reaches deterministically —
+// the index falling out of step with a file being written under it. Inside the
+// crate rather than under tests/ so that nothing has to be `pub` to be tested.
+#[cfg(test)]
+mod line_edit_tests;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;

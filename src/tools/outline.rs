@@ -8,7 +8,7 @@ use tree_sitter::Node;
 use crate::parser::ParserManager;
 
 #[derive(Debug, Deserialize)]
-pub struct OutlineArgs {
+pub(crate) struct OutlineArgs {
     pub filepath: String,
     pub sexp: Option<bool>,
 }
@@ -65,7 +65,10 @@ fn format_node(
     }
 }
 
-pub async fn run_outline(args: OutlineArgs, parser_manager: &Arc<ParserManager>) -> Result<String> {
+pub(crate) async fn run_outline(
+    args: OutlineArgs,
+    parser_manager: &Arc<ParserManager>,
+) -> Result<String> {
     if !args.sexp.unwrap_or(false) {
         return crate::tools::inspect::outline_report(&args.filepath, parser_manager).await;
     }

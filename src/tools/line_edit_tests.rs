@@ -1,11 +1,11 @@
 #![allow(clippy::await_holding_lock)]
-use ast_editor::parser::ParserManager;
-use ast_editor::tools::edit;
-use ast_editor::tools::repository;
-use ast_editor::tools::repository::{SessionRepository, SqliteSessionRepository};
-use ast_editor::tools::session_db;
-use ast_editor::tools::session_db::{EditOp, MovePosition};
-use ast_editor::tools::view;
+use crate::parser::ParserManager;
+use crate::tools::edit;
+use crate::tools::repository;
+use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
+use crate::tools::session_db;
+use crate::tools::session_db::{EditOp, MovePosition};
+use crate::tools::view;
 use std::fs;
 use std::path::PathBuf;
 
@@ -111,20 +111,13 @@ fn create_test_parser_manager() -> ParserManager {
     ParserManager::new().unwrap()
 }
 
-/// Point this test binary's store at a directory of its own. Integration
-/// tests link the library built without cfg(test), and the two test binaries
-/// run as separate processes that no in-process lock can serialise.
-fn isolate_store() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("ast-editor-test-{}", std::process::id()));
-        std::env::set_var("AST_EDITOR_CACHE_DIR", dir);
-    });
-}
-
+/// The store these tests reach is the one `get_db_path` picks under
+/// `cfg!(test)`, which is a directory of this build's own. Pointing an
+/// environment variable at another one is what an integration test has to do,
+/// and doing it here would take the store out from under the unit tests that
+/// share this binary.
 fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
-    isolate_store();
-    match ast_editor::tools::TEST_DB_LOCK.lock() {
+    match crate::tools::TEST_DB_LOCK.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
@@ -1002,7 +995,7 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
         .unwrap_err();
     // Compared against what the message is stored as, so editing that copy
     // stays a change to resources/ rather than a change to this file too.
-    let stored = &ast_editor::tools::metadata::get_config().error_preview_stale;
+    let stored = &crate::tools::metadata::get_config().error_preview_stale;
     for segment in stored.split("{}").filter(|part| !part.trim().is_empty()) {
         assert!(format!("{}", err).contains(segment), "{}", err);
     }
@@ -1496,8 +1489,8 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
 
 /// run_inspect prints a JSON report; this is it, parsed.
 async fn inspect_report(path: &str, template: Option<&str>) -> serde_json::Value {
-    let res = ast_editor::tools::inspect::run_inspect(
-        ast_editor::tools::inspect::InspectArgs {
+    let res = crate::tools::inspect::run_inspect(
+        crate::tools::inspect::InspectArgs {
             filepath: path.to_string(),
             query: None,
             template: template.map(str::to_string),
@@ -1519,7 +1512,7 @@ async fn test_the_outline_lists_the_definitions_with_ids_to_act_on() {
     );
     let pm = std::sync::Arc::new(create_test_parser_manager());
 
-    let text = ast_editor::tools::outline::run_outline(
+    let text = crate::tools::outline::run_outline(
         serde_json::from_value(serde_json::json!({ "filepath": file.path_str() })).unwrap(),
         &pm,
     )
@@ -1543,7 +1536,7 @@ async fn test_the_outline_lists_the_definitions_with_ids_to_act_on() {
     }
 
     // The same file, dumped: one form is the survey, the other the grammar.
-    let sexp = ast_editor::tools::outline::run_outline(
+    let sexp = crate::tools::outline::run_outline(
         serde_json::from_value(serde_json::json!({ "filepath": file.path_str(), "sexp": true }))
             .unwrap(),
         &pm,
@@ -1557,8 +1550,8 @@ async fn test_the_outline_lists_the_definitions_with_ids_to_act_on() {
 async fn test_inspect_refuses_to_search_for_nothing_and_names_the_outline() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("nothing.rs", "fn alpha() {\n}\n");
-    let err = ast_editor::tools::inspect::run_inspect(
-        ast_editor::tools::inspect::InspectArgs {
+    let err = crate::tools::inspect::run_inspect(
+        crate::tools::inspect::InspectArgs {
             filepath: file.path_str().to_string(),
             query: None,
             template: None,

@@ -53,7 +53,7 @@ impl LineBuffer {
     /// `next_seq` is the file's monotonic counter. Deriving it from the lines
     /// that happen to survive would hand a deleted line's number to the next
     /// one inserted.
-    pub fn new(lines: Vec<BufLine>, next_seq: i64) -> Self {
+    pub(crate) fn new(lines: Vec<BufLine>, next_seq: i64) -> Self {
         Self { lines, next_seq }
     }
 
@@ -63,7 +63,7 @@ impl LineBuffer {
         seq
     }
 
-    pub fn join(&self, line_ending: &str) -> String {
+    pub(crate) fn join(&self, line_ending: &str) -> String {
         self.lines
             .iter()
             .map(|l| l.content.as_str())
@@ -104,7 +104,7 @@ impl LineBuffer {
     /// Each of `ids` with the 1-indexed line it now sits on, in file order.
     /// An id the buffer no longer holds is dropped: a delete mints nothing and
     /// leaves nothing to point at.
-    pub fn locate(&self, ids: &[String]) -> Vec<(String, usize)> {
+    pub(crate) fn locate(&self, ids: &[String]) -> Vec<(String, usize)> {
         let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
         self.lines
             .iter()
@@ -140,7 +140,7 @@ impl LineBuffer {
     }
 
     /// Apply one batch of edits in order, returning the ids the batch touched.
-    pub fn apply(&mut self, edits: &[LineEdit]) -> Result<Vec<String>> {
+    pub(crate) fn apply(&mut self, edits: &[LineEdit]) -> Result<Vec<String>> {
         let mut modified = Vec::new();
 
         for edit in edits {

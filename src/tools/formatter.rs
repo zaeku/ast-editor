@@ -20,16 +20,16 @@ pub const RESPONSE_BYTE_CAP: usize = 45_000;
 /// For a caller that stated how much it wanted. The cap is for a read given no
 /// bounds; a call answering for lines it just wrote has nothing to guard
 /// against (`D-01M2ATRFAMMMXD`).
-pub const NO_LINE_CAP: usize = usize::MAX;
+pub(crate) const NO_LINE_CAP: usize = usize::MAX;
 
-pub struct FormattedLinesResult {
+pub(crate) struct FormattedLinesResult {
     pub lines_text: Option<String>,
     pub ids_json: String,
     pub actual_end_line: usize,
     pub warning_msg: Option<String>,
 }
 
-pub fn retrieve_and_format_lines(
+pub(crate) fn retrieve_and_format_lines(
     repository: &impl SessionRepository,
     session_id: &str,
     start_line: usize,
@@ -195,7 +195,7 @@ fn wrap_items(items: &[String], wrap_trigger_length: usize) -> Vec<String> {
 /// shape `view --only-ids` already answers with. An id alone does not say
 /// where its line went, so a caller wanting the line beside it had to read the
 /// file again (card #5).
-pub fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) -> String {
+pub(crate) fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) -> String {
     if ids.is_empty() {
         return "[]".to_string();
     }

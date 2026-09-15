@@ -18,6 +18,7 @@
             pkgs.rustfmt
             pkgs.rust-analyzer
             pkgs.just
+            pkgs.cargo-release
           ];
         };
       });

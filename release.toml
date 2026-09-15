@@ -1,0 +1,8 @@
+# jj colocated leaves git HEAD detached, so cargo-release sees the branch as
+# `HEAD` and refuses by default. Only the version bump and the changelog
+# heading are wanted from it: master requires a signature, which `jj sign`
+# supplies, and `jj git push` is what moves the bookmark.
+allow-branch = ["HEAD"]
+push = false
+tag = false
+publish = false

@@ -47,6 +47,35 @@ doc:
 # Install the binary and the skill.
 install: install-bin install-skill
 
+# `cargo release` bumps the version, writes the tag and publishes. Between the
+# bump and the publish the installed binary is the tree's again: the fences ask
+# the command on PATH, and the decision layer refuses to run them when the
+# version it answers is not the version the manifest names. That refusal is why
+# the install belongs in the middle rather than at the end.
+
+# Cut a release: LEVEL is patch, minor, major or a version; EXECUTE=1 to carry it out.
+release LEVEL='patch' EXECUTE='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z '{{EXECUTE}}' ]; then
+        echo 'A release, in order:'
+        echo '  1. cargo release {{LEVEL}}     the version, the changelog heading and the tag'
+        echo '  2. jj sign && jj git push      master requires a signature'
+        echo '  3. just install                so the fences ask this build'
+        echo '  4. cargo run --bin check       in decisions/, which refuses a stale binary'
+        echo '  5. cargo publish'
+        echo
+        echo 'Rehearsing step 1 without writing anything:'
+        # A dirty tree is what cargo-release objects to, and seeing the order is
+        # most wanted while the tree is dirty, so its refusal is printed rather
+        # than made this recipe's.
+        cargo release {{LEVEL}} --no-confirm || true
+        exit 0
+    fi
+    cargo release {{LEVEL}} --no-confirm --execute --no-push --no-publish --no-tag
+    just install
+    echo 'Now: sign and push, run the decision layer'"'"'s check, then `cargo publish`.'
+
 # The grammars are compiled into the binary (D-01M28RAGW19ZZC), so the install
 # is one file and there is nothing beside it to find.
 

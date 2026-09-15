@@ -33,6 +33,10 @@ them, `repository.rs` owns the trait every tool reaches the store through,
 `formatter.rs` owns what output looks like, and `metadata.rs` owns every string
 the binary prints.
 
+CodeGraph's `no covering tests found` is wrong here whenever the cover is in
+`cli_tests.rs`: that suite drives the binary as a subprocess, which leaves no
+call path for the index to follow.
+
 Those first three depend in one direction — `repository.rs` on `buffer.rs` on
 `session_db.rs` — and a use that points back is a sign the new work belongs in
 the file it wanted to reach up to.

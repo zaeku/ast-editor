@@ -4,6 +4,19 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.6 — 2026-09-15
+
+### Changed
+
+- **`view <path> 40` answers with line 40, where it answered with 40 to the end
+  of the file.** It said what `40,` says, so the four spellings had three
+  meanings. The address is the one `sed -n` takes — which is why it is spelled
+  this way at all, since a caller reaching for part of a file writes a sed
+  address without being told to — and `sed -n '40p'` is one line. **A call
+  passing a bare number gets one line now rather than the rest of the file.**
+- The `--help` line for a range says the four forms are read as sed reads them,
+  where it showed `40,80` alone.
+
 ## 0.3.5 — 2026-09-14
 
 ### Fixed

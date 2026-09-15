@@ -680,7 +680,9 @@ fn a_range_can_follow_the_path() {
     let file = scratch("ranged.txt", &body);
     let path = file.to_str().unwrap();
 
-    for (range, start, end) in [("5,8", 5, 8), ("18", 18, 20), ("18,", 18, 20), (",3", 1, 3)] {
+    // One address is one line and a trailing comma is what runs to the end,
+    // which is how `sed -n` reads the same four addresses.
+    for (range, start, end) in [("5,8", 5, 8), ("18", 18, 18), ("18,", 18, 20), (",3", 1, 3)] {
         let out = ast_editor("ranged", &["view", path, range]);
         assert!(
             out.status.success(),
@@ -2040,8 +2042,8 @@ fn a_boolean_option_is_written_four_ways() {
 }
 
 /// A range after the path is read the way `sed -n '40,80p'` reads one, and what
-/// is not a range is a path. A number on its own is a start rather than a
-/// single line. Line numbers begin at one, so `0,2` is not a range at all, and
+/// is not a range is a path. Line numbers begin at one, so `0,2` is not a
+/// range at all, and
 /// the tool looks for a file by that name rather than reading from a line that
 /// cannot exist.
 #[test]
@@ -2065,8 +2067,8 @@ fn what_is_not_a_range_is_a_path() {
     assert_eq!(rows("range_both", "2,4"), vec![2, 3, 4]);
     assert_eq!(rows("range_from", "3,"), vec![3, 4, 5]);
     assert_eq!(rows("range_to", ",2"), vec![1, 2]);
-    // A number on its own is a start, so it says the same as `4,`.
-    assert_eq!(rows("range_one", "4"), vec![4, 5]);
+    // One address is one line, which is what `sed -n '4p'` reads.
+    assert_eq!(rows("range_one", "4"), vec![4]);
 
     for not_a_range in ["0,2", "2,0", "x,2"] {
         let out = ast_editor(

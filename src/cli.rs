@@ -202,8 +202,9 @@ pub fn arguments(tool: &str, args: &[String]) -> Result<Value> {
 }
 
 /// A line range written the way `sed -n '10,40p'` writes one: `10,40`, `10`,
-/// `10,` to the end, `,40` from the start. `None` where the argument is not
-/// one, so a path that happens to follow another path still reads as a path.
+/// `10,` to the end, `,40` from the start, `40` line 40 alone. `None` where the
+/// argument is not one, so a path that happens to follow another path still
+/// reads as a path.
 fn line_range(arg: &str) -> Option<(Option<u64>, Option<u64>)> {
     let number = |text: &str| -> Option<Option<u64>> {
         if text.is_empty() {
@@ -218,7 +219,9 @@ fn line_range(arg: &str) -> Option<(Option<u64>, Option<u64>)> {
             let (start, end) = (number(start)?, number(end)?);
             (start.is_some() || end.is_some()).then_some((start, end))
         }
-        None => number(arg)?.map(|start| (Some(start), None)),
+        // One address is one line, the way `sed -n '40p'` reads it. Running to
+        // the end is what the trailing comma says.
+        None => number(arg)?.map(|start| (Some(start), Some(start))),
     }
 }
 

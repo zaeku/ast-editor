@@ -1961,11 +1961,13 @@ fn a_line_that_was_only_reindented_is_the_same_line() {
     let before = line_ids("respaced", &file);
 
     // The same four lines, every one of them indented differently by something
-    // else. Leaving a line alone would anchor the alignment on its exact hash,
-    // and the hash that ignores whitespace would not have to work for it.
+    // else, and the two middle lines swapped. Respacing alone would not
+    // discriminate: a store handing the leftover ids out in order answers the
+    // same numbers whether or not it looks at the content. Swapping makes the
+    // content-matched answer the only one that keeps each id on its own line.
     std::fs::write(
         &file,
-        "  fn f() {\n      let a = 1;\n      let b = 2;\n  }\n",
+        "  fn f() {\n      let b = 2;\n      let a = 1;\n  }\n",
     )
     .unwrap();
     let after = line_ids("respaced", &file);
@@ -1975,10 +1977,11 @@ fn a_line_that_was_only_reindented_is_the_same_line() {
             .map(|id| id.split_once('#').unwrap().0.to_string())
             .collect()
     };
+    let n = numbers(&before);
     assert_eq!(
         numbers(&after),
-        numbers(&before),
-        "a reindented file was read as four new lines: {after:?}"
+        vec![n[0].clone(), n[2].clone(), n[1].clone(), n[3].clone()],
+        "a reindented file did not carry its ids to where the lines went: {after:?}"
     );
 
     // The hash moved with the content, so the old id is refused and the new one
@@ -1995,7 +1998,7 @@ fn a_line_that_was_only_reindented_is_the_same_line() {
     let out = run_script(
         "respaced",
         &file,
-        &format!("replace {} ```\n      let a = 9;\n```\n", after[1]),
+        &format!("replace {} ```\n      let a = 9;\n```\n", after[2]),
     );
     assert!(
         out.status.success(),

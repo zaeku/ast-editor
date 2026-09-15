@@ -145,35 +145,14 @@ pub fn retrieve_and_format_lines(
         None
     };
 
-    // Format ids_json in a nice wrapped array
-    let mut ids_json = String::new();
-    ids_json.push('[');
-    if !id_items.is_empty() {
-        ids_json.push('\n');
-        let mut current_line = "  ".to_string();
-        for (i, item) in id_items.iter().enumerate() {
-            if i > 0 {
-                let next_len = current_line.len() + 2 + item.len();
-                if next_len > wrap_trigger_length {
-                    ids_json.push_str(&current_line);
-                    ids_json.push_str(",\n");
-                    current_line = format!("  {}", item);
-                } else {
-                    current_line.push_str(", ");
-                    current_line.push_str(item);
-                }
-            } else {
-                current_line.push_str(item);
-            }
-        }
-        ids_json.push_str(&current_line);
-        ids_json.push('\n');
-    }
-    if id_items.is_empty() {
-        ids_json.push(']');
+    let ids_json = if id_items.is_empty() {
+        "[]".to_string()
     } else {
-        ids_json.push_str("  ]");
-    }
+        format!(
+            "[\n{}\n  ]",
+            wrap_items(&id_items, wrap_trigger_length).join(",\n")
+        )
+    };
 
     let lines_text = if only_ids {
         None
@@ -189,6 +168,28 @@ pub fn retrieve_and_format_lines(
     })
 }
 
+/// The rows of a json array, wrapped so that a row stops before it would run
+/// past `wrap_trigger_length` — unless one item alone does, which is a row of
+/// its own either way. Each row carries its own two-space indent and no comma:
+/// the caller joins them, because what closes the array differs with where the
+/// array is going.
+fn wrap_items(items: &[String], wrap_trigger_length: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    let mut current = "  ".to_string();
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            if current.len() + 2 + item.len() > wrap_trigger_length {
+                rows.push(std::mem::replace(&mut current, format!("  {item}")));
+                continue;
+            }
+            current.push_str(", ");
+        }
+        current.push_str(item);
+    }
+    rows.push(current);
+    rows
+}
+
 /// The ids an edit minted or touched, each with the line it is now, in the
 /// shape `view --only-ids` already answers with. An id alone does not say
 /// where its line went, so a caller wanting the line beside it had to read the
@@ -198,35 +199,20 @@ pub fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) -> Stri
         return "[]".to_string();
     }
 
-    let mut result = String::new();
-    result.push('[');
-    result.push('\n');
-
-    let mut current_line = "  ".to_string();
-    for (i, (id, line)) in ids.iter().enumerate() {
-        let item = format!(
-            "[{},{}]",
-            serde_json::to_string(id).unwrap_or_else(|_| format!("\"{}\"", id)),
-            line
-        );
-        if i > 0 {
-            let next_len = current_line.len() + 2 + item.len();
-            if next_len > wrap_trigger_length {
-                result.push_str(&current_line);
-                result.push_str(",\n");
-                current_line = format!("  {}", item);
-            } else {
-                current_line.push_str(", ");
-                current_line.push_str(&item);
-            }
-        } else {
-            current_line.push_str(&item);
-        }
-    }
-    result.push_str(&current_line);
-    result.push('\n');
-    result.push(']');
-    result
+    let items: Vec<String> = ids
+        .iter()
+        .map(|(id, line)| {
+            format!(
+                "[{},{}]",
+                serde_json::to_string(id).unwrap_or_else(|_| format!("\"{}\"", id)),
+                line
+            )
+        })
+        .collect();
+    format!(
+        "[\n{}\n]",
+        wrap_items(&items, wrap_trigger_length).join(",\n")
+    )
 }
 
 #[cfg(test)]
@@ -235,6 +221,56 @@ mod tests {
     use crate::tools::session_db::SqliteSessionRepository;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
+
+    /// A row is the two-space indent, the items on it, and the `", "` between
+    /// each pair, and it breaks when the next item would take it past the
+    /// trigger. The trigger is the width a row may reach, so a row that lands
+    /// exactly on it has not gone past it.
+    #[test]
+    fn a_row_of_ids_breaks_only_when_the_next_one_would_not_fit() {
+        let items: Vec<String> = ["aaaa", "bbbb", "cccc"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        // "  aaaa, bbbb" is twelve characters, so twelve is wide enough for it
+        // and eleven is not.
+        assert_eq!(
+            wrap_items(&items, 12),
+            vec!["  aaaa, bbbb".to_string(), "  cccc".to_string()]
+        );
+        assert_eq!(
+            wrap_items(&items, 11),
+            vec![
+                "  aaaa".to_string(),
+                "  bbbb".to_string(),
+                "  cccc".to_string()
+            ]
+        );
+
+        // Ten is narrower than two items and wider than one, which is what
+        // separates counting the separator from counting it the other way.
+        assert_eq!(
+            wrap_items(&items, 10),
+            vec![
+                "  aaaa".to_string(),
+                "  bbbb".to_string(),
+                "  cccc".to_string()
+            ]
+        );
+
+        // An item wider than the trigger is a row by itself rather than an
+        // empty row followed by it.
+        assert_eq!(
+            wrap_items(&items, 1),
+            vec![
+                "  aaaa".to_string(),
+                "  bbbb".to_string(),
+                "  cccc".to_string()
+            ]
+        );
+        assert_eq!(wrap_items(&[], 12), vec!["  ".to_string()]);
+    }
 
     #[test]
     fn test_retrieve_and_format_lines_only_ids() -> Result<()> {

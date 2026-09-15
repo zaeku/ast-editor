@@ -114,11 +114,15 @@ pub fn view_lines(
         if start == 0 {
             anyhow::bail!("Invalid bounds: start_line must be greater than 0");
         }
+        // One line past what may be printed, so the read that applies the cap
+        // is the one that sees it reached and says so. Stopping at the cap here
+        // would leave that read unable to fail, and bounding the fetch is the
+        // only thing this number is for.
         let end = end_line.unwrap_or_else(|| {
             if total_lines == 0 {
                 start
             } else {
-                std::cmp::min(total_lines, start.saturating_add(799))
+                std::cmp::min(total_lines, start.saturating_add(formatter::LINE_CAP))
             }
         });
         if start > end {
@@ -175,16 +179,7 @@ pub fn view_lines(
         }
     }
 
-    let config = crate::tools::metadata::get_config();
-    let requested_start = start_line.unwrap_or(1);
-    let requested_end = end_line.unwrap_or(total_lines);
-    let line_count_capped = query.is_none()
-        && requested_end.saturating_sub(requested_start) + 1 > formatter::LINE_CAP
-        && total_lines > formatter::LINE_CAP;
     let mut message = None;
-    if line_count_capped {
-        message = Some(config.warning_line_limit_exceeded.clone());
-    }
     for cap_msg in warning_messages {
         if let Some(existing_msg) = message {
             message = Some(format!("{}; {}", existing_msg, cap_msg));
@@ -273,26 +268,22 @@ pub fn create_lines(
         let meta = repository.init_session(filepath, false)?;
         let total_bytes = std::path::Path::new(filepath).metadata()?.len();
         if return_ids_bool {
-            if meta.total_lines > 0 {
-                let config = crate::tools::metadata::get_config();
-                let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
-                    repository,
-                    &meta.session_id,
-                    1,
-                    meta.total_lines,
-                    true,
-                    config.only_ids_wrap_trigger_length,
-                    formatter::NO_LINE_CAP,
-                )?;
-                Ok((
-                    Some(formatted_res.ids_json),
-                    formatted_res.warning_msg,
-                    meta.total_lines,
-                    total_bytes,
-                ))
-            } else {
-                Ok((Some("[]".to_string()), None, 0, total_bytes))
-            }
+            let config = crate::tools::metadata::get_config();
+            let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
+                repository,
+                &meta.session_id,
+                1,
+                meta.total_lines,
+                true,
+                config.only_ids_wrap_trigger_length,
+                formatter::NO_LINE_CAP,
+            )?;
+            Ok((
+                Some(formatted_res.ids_json),
+                formatted_res.warning_msg,
+                meta.total_lines,
+                total_bytes,
+            ))
         } else {
             Ok((None, None, meta.total_lines, total_bytes))
         }
@@ -301,19 +292,10 @@ pub fn create_lines(
     match setup_db_and_fetch() {
         Ok((items_opt, capacity_warning, total_lines, total_bytes)) => {
             let config = crate::tools::metadata::get_config();
-            // A create answers for every line it wrote (`D-01M2ATRFAMMMXD`), so
-            // there is no line count to report as capped. What is left is the
-            // byte cap, which arrives as capacity_warning below.
-            let line_count_capped = false;
-            let mut warning_parts = Vec::new();
-            if line_count_capped {
-                warning_parts.push(config.warning_line_limit_exceeded.as_str());
-            }
-            if let Some(ref cap_msg) = capacity_warning {
-                warning_parts.push(cap_msg.as_str());
-            }
-
-            let message = warning_parts.join("; ");
+            // A create answers for every line it wrote, so it has no line count
+            // to report as capped. The byte cap is what is left, and it arrives
+            // as capacity_warning.
+            let message = capacity_warning.unwrap_or_default();
 
             let output = if return_ids_bool {
                 let ids: Vec<(String, usize)> = items_opt

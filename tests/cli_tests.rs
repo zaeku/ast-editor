@@ -148,6 +148,118 @@ fn test_version_reports_the_grammar_set_it_is_paired_with() {
         "the grammar list is missing: {}",
         text
     );
+
+    // The header counts the grammars and the lines under it name them, so the
+    // two have to agree or one of them is describing a different binary.
+    let counted: usize = text
+        .lines()
+        .find_map(|line| line.strip_prefix("grammars "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("--version does not count its grammars: {text}"));
+    let listed: Vec<(&str, &str)> = text
+        .lines()
+        .skip(2)
+        .filter_map(|line| line.trim().split_once(' '))
+        .collect();
+    assert_eq!(
+        listed.len(),
+        counted,
+        "--version counted {counted} grammars and listed {}: {text}",
+        listed.len()
+    );
+
+    // Each grammar carries the version Cargo.lock pinned for it, which is a
+    // number rather than a word, and its own rather than its neighbour's.
+    for (name, version) in &listed {
+        assert!(
+            version.split('.').count() >= 2
+                && version.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "the grammar {name:?} reports {version:?} as a version: {text}"
+        );
+    }
+    // The grammars are pinned one crate at a time, so a version shared by most
+    // of them is not eighteen coincidences: it is one lookup answering for
+    // everyone. A few do share one, being built from a single crate.
+    let mut seen: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (_, version) in &listed {
+        *seen.entry(version).or_default() += 1;
+    }
+    let (common, count) = seen
+        .iter()
+        .max_by_key(|(_, count)| **count)
+        .map(|(version, count)| (*version, *count))
+        .unwrap();
+    assert!(
+        count * 2 < listed.len(),
+        "{count} of {} grammars report {common:?}, so they are not reporting their own: {text}",
+        listed.len()
+    );
+}
+
+/// A store that cannot be opened is not a failed read. The line ids go missing
+/// and the answer still carries the code, and the reason lands on stderr where
+/// a caller reading the answer on stdout will not confuse it for output — which
+/// only happens if something is listening for it.
+#[test]
+fn a_store_that_will_not_open_leaves_the_read_standing_and_says_why() {
+    let file = scratch("nostore.rs", "struct Point {\n    x: u8,\n}\n");
+    // A plain file where the cache directory should be: creating it fails, and
+    // it fails for a reason the binary did not choose.
+    let blocked = scratch("blocked-store", "not a directory\n");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(["inspect", file.to_str().unwrap(), "--template", "classes"])
+        .env("AST_EDITOR_CACHE_DIR", &blocked)
+        .output()
+        .expect("failed to run ast-editor");
+
+    assert!(
+        out.status.success(),
+        "a read failed because the store did not open: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let block = json_block(&out.stdout);
+    assert_eq!(block["match_count"], 1, "{block}");
+    assert!(
+        block["matches"][0]["start_id"].is_null(),
+        "a read with no store answered with a line id: {block}"
+    );
+
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("WARN") && said.contains("cache directory"),
+        "nothing on stderr said the store could not be opened: {said}"
+    );
+}
+
+/// `skill <topic>` refuses a topic it does not have by listing the ones it
+/// does, because a reader who guessed wrong has no other way to find them and
+/// the documents are compiled into the binary.
+#[test]
+fn a_skill_topic_it_does_not_have_is_refused_with_the_ones_it_does() {
+    let out = ast_editor("skilltopic", &["skill", "nosuchtopic"]);
+    assert!(!out.status.success(), "an unknown topic was served");
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("nosuchtopic"),
+        "the refusal does not name what was asked for: {text}"
+    );
+    for topic in ["api", "rust", "python", "usage"] {
+        assert!(
+            text.contains(topic),
+            "the refusal does not offer {topic:?}: {text}"
+        );
+    }
+
+    // Each offered topic answers, so the list is the list rather than a label.
+    for topic in ["api", "rust"] {
+        let out = ast_editor(&format!("skill_{topic}"), &["skill", topic]);
+        assert!(
+            out.status.success() && !out.stdout.is_empty(),
+            "the offered topic {topic:?} does not answer: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 }
 
 #[test]
@@ -734,8 +846,17 @@ fn several_files_in_one_call() {
     assert!(files[0]["filepath"].as_str().unwrap().ends_with("one.rs"));
     assert!(files[1]["filepath"].as_str().unwrap().ends_with("two.py"));
 
-    // One file answers as it always has.
+    // One file answers as it always has: its own data block and nothing that
+    // says which file it was, because there is only one. Counting the blocks is
+    // the assertion — reading the first one would not see a summary appended
+    // after it.
     let alone = ast_editor("severalone", &["view", first.to_str().unwrap()]);
+    let text = String::from_utf8_lossy(&alone.stdout);
+    assert_eq!(
+        text.lines().filter(|line| *line == "```json").count(),
+        1,
+        "one file answered with more than one data block: {text}"
+    );
     let data = json_block(&alone.stdout);
     assert!(
         data["files"].is_null(),
@@ -1232,6 +1353,75 @@ fn a_read_past_the_cap_stops_at_it_and_says_so() {
     assert_eq!(rows.len(), 101);
     assert_eq!((rows[0], rows[100]), (400, 500));
     assert!(said.is_empty(), "an uncapped read warned: {said:?}");
+}
+
+/// `create --return-ids` answers for every line it wrote, however many there
+/// are: a caller that cannot see the ids of what it just wrote has to read the
+/// file again to edit it. The response still has a size, so what bounds the
+/// answer is bytes rather than lines, and reaching that bound is said out loud
+/// — an answer that stops early without saying so reads as a file that ended.
+#[test]
+fn a_create_answers_for_every_line_until_the_response_is_full() {
+    let dir = std::env::temp_dir().join(format!("ast-editor-cli-files-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Past the line cap and inside the byte cap: every line comes back.
+    let path = dir.join("created_long.txt");
+    let _ = std::fs::remove_file(&path);
+    let content: String = (1..=900).map(|n| format!("line {n}\n")).collect();
+    let out = ast_editor(
+        "createlong",
+        &[
+            "create",
+            path.to_str().unwrap(),
+            "--content",
+            &content,
+            "--return-ids",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let block = json_block(&out.stdout);
+    assert_eq!(block["total_lines"], 900, "{block}");
+    assert_eq!(
+        block["lines"].as_array().unwrap().len(),
+        900,
+        "a create withheld ids for lines it wrote: {block}"
+    );
+    assert!(
+        block["message"].is_null(),
+        "a create inside the byte cap warned: {block}"
+    );
+
+    // Past the byte cap: the answer stops and says that it did.
+    let path = dir.join("created_huge.txt");
+    let _ = std::fs::remove_file(&path);
+    let content: String = (1..=4000).map(|n| format!("line {n}\n")).collect();
+    let out = ast_editor(
+        "createhuge",
+        &[
+            "create",
+            path.to_str().unwrap(),
+            "--content",
+            &content,
+            "--return-ids",
+        ],
+    );
+    let block = json_block(&out.stdout);
+    assert_eq!(block["total_lines"], 4000, "{block}");
+    let answered = block["lines"].as_array().unwrap().len();
+    assert!(
+        answered > 0 && answered < 4000,
+        "the byte cap withheld {answered} of 4000 lines: {block}"
+    );
+    let said = block["message"].as_str().unwrap_or("");
+    assert!(
+        said.contains("45,000"),
+        "the answer stopped without saying why: {block}"
+    );
 }
 
 /// The warning is about lines withheld, not about the size of the request. A

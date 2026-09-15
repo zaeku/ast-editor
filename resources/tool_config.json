@@ -3,7 +3,6 @@
   "warning_cumulative_limit": "Response truncated: cumulative response size limit (45,000 bytes) was reached.",
   "warning_line_cap": "Output truncated to 800 lines max.",
   "error_no_query_match": "No lines matched query: '{}'",
-  "warning_line_limit_exceeded": "Line count limit (800 lines max) exceeded. Output capped at 800 lines.",
   "warning_header_hierarchy": "Header hierarchy mismatch at line {}: found H{} after H{} without H{}",
   "warning_malformed_link": "Possible malformed link syntax at line {}: unclosed parenthesis or bracket in link",
   "warning_html_syntax": "HTML syntax warning: AST contains error or missing nodes.\n{}",

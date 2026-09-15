@@ -19,7 +19,6 @@ pub struct ToolConfig {
     pub warning_line_cap: String,
     pub error_no_query_match: String,
     pub error_query_does_not_compile: String,
-    pub warning_line_limit_exceeded: String,
     pub warning_header_hierarchy: String,
     pub warning_malformed_link: String,
     pub warning_html_syntax: String,

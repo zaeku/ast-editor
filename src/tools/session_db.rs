@@ -130,7 +130,7 @@ fn create_tables(conn: &Connection) -> Result<()> {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct SessionMetadata {
+pub(crate) struct SessionMetadata {
     pub session_id: String,
     pub total_lines: usize,
     pub file_hash: String,

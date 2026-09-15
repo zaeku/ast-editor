@@ -17,7 +17,7 @@ use super::session_db::{
 /// One line of a file being edited, paired with the sequence number that
 /// identifies it. Position in `LineBuffer::lines` is the line's order.
 #[derive(Clone)]
-pub struct BufLine {
+pub(crate) struct BufLine {
     pub seq: i64,
     pub content: String,
     pub parent_context: Option<String>,
@@ -26,7 +26,7 @@ pub struct BufLine {
 /// A file's lines held in memory for the duration of one edit batch. Edits
 /// mutate the buffer; nothing reaches the database or the disk until the
 /// caller decides the result is good.
-pub struct LineBuffer {
+pub(crate) struct LineBuffer {
     pub lines: Vec<BufLine>,
     next_seq: i64,
 }

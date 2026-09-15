@@ -2,13 +2,13 @@ use crate::tools::formatter;
 use crate::tools::repository::SessionRepository;
 use anyhow::Result;
 
-pub struct ViewLinesOutput {
+pub(crate) struct ViewLinesOutput {
     pub lines_text: Option<String>,
     pub metadata_json: String,
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn view_lines(
+pub(crate) fn view_lines(
     repository: &impl SessionRepository,
     filepath: &str,
     start_line: Option<usize>,
@@ -245,7 +245,7 @@ pub fn view_lines(
     })
 }
 
-pub fn create_lines(
+pub(crate) fn create_lines(
     repository: &impl SessionRepository,
     filepath: &str,
     content: &str,

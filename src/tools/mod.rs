@@ -1,13 +1,13 @@
-pub mod buffer;
-pub mod edit;
+pub(crate) mod buffer;
+pub(crate) mod edit;
 pub mod formatter;
 pub(crate) mod inspect;
 pub mod metadata;
 pub(crate) mod outline;
-pub mod repository;
+pub(crate) mod repository;
 pub mod script;
-pub mod session_db;
-pub mod view;
+pub(crate) mod session_db;
+pub(crate) mod view;
 
 // Drives the tools through the crate rather than through the command, which is
 // what lets a caller reach a path no CLI invocation reaches deterministically —

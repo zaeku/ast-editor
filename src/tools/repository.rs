@@ -12,7 +12,7 @@ use super::session_db::{
     PREVIEW_TTL_SECONDS,
 };
 
-pub trait SessionRepository: Send + Sync {
+pub(crate) trait SessionRepository: Send + Sync {
     fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata>;
     fn get_total_lines(&self, session_id: &str) -> Result<usize>;
     fn fetch_lines_range(
@@ -39,7 +39,7 @@ pub trait SessionRepository: Send + Sync {
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
 }
 
-pub struct SqliteSessionRepository;
+pub(crate) struct SqliteSessionRepository;
 
 impl SessionRepository for SqliteSessionRepository {
     fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata> {

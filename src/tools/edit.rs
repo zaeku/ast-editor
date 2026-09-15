@@ -1,6 +1,6 @@
 use crate::tools::repository::SessionRepository;
 use crate::tools::session_db::check_language_supported;
-pub use crate::tools::session_db::LineEdit;
+pub(crate) use crate::tools::session_db::LineEdit;
 use anyhow::Result;
 use std::fs;
 
@@ -285,12 +285,12 @@ fn resync_if_stale(
 /// What a dry run has to say: the diff to read, and the report to act on.
 /// They are separate because a diff inside a JSON string is a diff nobody can
 /// read.
-pub struct DryRun {
+pub(crate) struct DryRun {
     pub diff: String,
     pub report: String,
 }
 
-pub async fn edit_lines_dry_run(
+pub(crate) async fn edit_lines_dry_run(
     repository: &impl SessionRepository,
     filepath: &str,
     edits: Vec<LineEdit>,
@@ -557,7 +557,11 @@ pub(crate) async fn edit_lines_with_validation(
     Ok(format!("{{\n  {}\n}}", fields.join(",\n  ")))
 }
 
-pub async fn edit_lines(
+/// The permissive default, which no caller takes: an edit arrives through the
+/// dispatcher carrying the flag either way. It stands for the tests that would
+/// otherwise repeat `false` at every call.
+#[cfg(test)]
+pub(crate) async fn edit_lines(
     repository: &impl SessionRepository,
     filepath: &str,
     edits: Vec<LineEdit>,

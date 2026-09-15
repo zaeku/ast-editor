@@ -1,8 +1,3 @@
-use ast_editor::parser::ParserManager;
-use ast_editor::tools::edit;
-use ast_editor::tools::repository::SqliteSessionRepository;
-use ast_editor::tools::session_db::EditOp;
-use ast_editor::tools::view;
 use ast_editor::tools::ToolDispatcher;
 use std::fs;
 use std::path::PathBuf;
@@ -27,36 +22,33 @@ impl Drop for CleanupGuard {
     }
 }
 
-/// Point this test binary's store at a directory of its own. Integration
-/// tests link the library built without cfg(test), and the two test binaries
-/// run as separate processes that no in-process lock can serialise.
-fn isolate_store() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let dir = std::env::temp_dir().join(format!("ast-editor-test-{}", std::process::id()));
-        std::env::set_var("AST_EDITOR_CACHE_DIR", dir);
-    });
+/// Run the command the way a reader would, against a store of its own.
+fn ast_editor(cache: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ast-editor"))
+        .args(args)
+        .env("AST_EDITOR_CACHE_DIR", cache)
+        .output()
+        .expect("failed to run ast-editor");
+    assert!(
+        out.status.success(),
+        "ast-editor {args:?} exited non-zero: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).expect("ast-editor answers in UTF-8")
 }
 
-fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
-    isolate_store();
-    match ast_editor::tools::TEST_DB_LOCK.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+/// The JSON an answer carries, taken back out of the block it was printed in.
+fn json_of(answer: &str) -> serde_json::Value {
+    let body = answer
+        .split("```json")
+        .nth(1)
+        .and_then(|rest| rest.split("```").next())
+        .expect("an answer carries a json block");
+    serde_json::from_str(body).expect("the json block parses")
 }
 
-fn create_test_parser_manager() -> ParserManager {
-    // Every grammar is compiled in (D-01M28RAGW19ZZC), so there is no
-    // directory to arrange.
-    ParserManager::new().unwrap()
-}
-
-#[tokio::test]
-#[allow(clippy::await_holding_lock)]
-async fn generate_readme() {
-    let _lock = acquire_db_lock();
-
+#[test]
+fn generate_readme() {
     // 1. Arrange: setup workspace folder
     let pid = std::process::id();
     let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -68,99 +60,84 @@ async fn generate_readme() {
     let _guard = CleanupGuard {
         dir: temp_dir.clone(),
     };
+    // A store of its own, so no lock is needed against the other suites: each
+    // call is a process that shares nothing with them.
+    let cache = temp_dir.join("cache");
 
-    let repo = SqliteSessionRepository;
-    let pm = create_test_parser_manager();
-
-    // 2. Act:
-    // Run create return_ids=false
-    let file_default = temp_dir.join("create_default.rs");
+    // 2. Act: every answer below is the command's own stdout, fences and all,
+    // so the document shows what a reader gets rather than a rebuilt copy of
+    // it.
     let content = "fn main() {\n    let x = 42;\n    let scratch = 0;\n}\n";
-    let out_create_default =
-        view::create_lines(&repo, file_default.to_str().unwrap(), content, Some(false)).unwrap();
+    let file_default = temp_dir.join("create_default.rs");
+    let out_create_default = ast_editor(
+        &cache,
+        &[
+            "create",
+            file_default.to_str().unwrap(),
+            "--content",
+            content,
+            "--return-ids",
+            "false",
+        ],
+    );
 
-    // Run create return_ids=true
     let file_ids = temp_dir.join("create_ids.rs");
-    let out_create_ids =
-        view::create_lines(&repo, file_ids.to_str().unwrap(), content, Some(true)).unwrap();
+    let path_ids = file_ids.to_str().unwrap().to_string();
+    let out_create_ids = ast_editor(
+        &cache,
+        &[
+            "create",
+            &path_ids,
+            "--content",
+            content,
+            "--return-ids",
+            "true",
+        ],
+    );
 
-    // Run view only_ids=None
-    let out_view_default = view::view_lines(
-        &repo,
-        file_ids.to_str().unwrap(),
-        Some(1),
-        Some(3),
-        None,
-        None,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Run view only_ids=true
-    let out_view_only_ids = view::view_lines(
-        &repo,
-        file_ids.to_str().unwrap(),
-        Some(1),
-        Some(3),
-        Some(true),
-        None,
-        None,
-        None,
-    )
-    .unwrap();
+    let out_view_default = ast_editor(&cache, &["view", &path_ids, "1,3"]);
+    let out_view_only_ids = ast_editor(&cache, &["view", &path_ids, "1,3", "--only-ids"]);
 
     // Lines 2 and 3 go out together and one line comes back in their place, so
     // the example addresses a span and the file it leaves still parses.
-    let val_create_ids: serde_json::Value = serde_json::from_str(&out_create_ids).unwrap();
-    let ids = val_create_ids["lines"].as_array().unwrap();
+    let ids = json_of(&out_create_ids);
+    let ids = ids["lines"].as_array().unwrap();
     // Each entry is [id, line] (card #5).
-    let span_start = ids[1][0].as_str().unwrap().to_string();
-    let span_end = ids[2][0].as_str().unwrap().to_string();
-    let id_to_insert_after = ids[0][0].as_str().unwrap().to_string();
+    let id_at = |n: usize| ids[n][0].as_str().unwrap().to_string();
+    let id_to_insert_after = id_at(0);
+    let span_start = id_at(1);
+    let span_end = id_at(2);
 
-    // Run edit multi-operation batch (a span replaced, a line inserted)
-    let edits = vec![
-        edit::LineEdit {
-            op: EditOp::InsertAfter,
-            start_id: Some(id_to_insert_after.clone()),
-            content: Some("    let y = 200;".to_string()),
-            ..Default::default()
-        },
-        edit::LineEdit {
-            op: EditOp::Replace,
-            start_id: Some(span_start.clone()),
-            end_id: Some(span_end.clone()),
-            content: Some("    let x = 100;".to_string()),
-            ..Default::default()
-        },
-    ];
+    let batch = serde_json::json!({
+        "filepath": path_ids,
+        "edits": [
+            {
+                "op": "insert_after",
+                "start_id": id_to_insert_after,
+                "content": "    let y = 200;"
+            },
+            {
+                "op": "replace",
+                "start_id": span_start,
+                "end_id": span_end,
+                "content": "    let x = 100;"
+            }
+        ]
+    });
+    let batch = serde_json::to_string(&batch).unwrap();
+
     // Preview the batch first, then apply it. The preview leaves the session
     // untouched, so the same IDs are still valid for the real call below.
-    let out_edit_dry_run =
-        edit::edit_lines_dry_run(&repo, file_ids.to_str().unwrap(), edits.clone(), &pm)
-            .await
-            .unwrap();
-    let out_edit_dry_run_report = out_edit_dry_run.report.clone();
-    let out_edit_dry_run = format!(
-        "{}\n{}",
-        ast_editor::tools::fenced("diff", out_edit_dry_run.diff.trim_end()),
-        ast_editor::tools::fenced("json", &out_edit_dry_run.report)
-    )
-    .replace(file_ids.to_str().unwrap(), DOC_FILEPATH);
+    let out_edit_dry_run = ast_editor(&cache, &["edit", &path_ids, "--json", &batch, "--dry-run"]);
     // The preview id counts up with every run, so pin it or the generated
     // documentation differs on each invocation.
-    let out_edit_dry_run = {
-        let parsed: serde_json::Value = serde_json::from_str(&out_edit_dry_run_report).unwrap();
-        let minted = parsed["preview_id"]
-            .as_str()
-            .expect("a valid preview mints an id");
-        out_edit_dry_run.replace(minted, DOC_PREVIEW_ID)
-    };
+    let minted = json_of(&out_edit_dry_run)["preview_id"]
+        .as_str()
+        .expect("a valid preview mints an id")
+        .to_string();
+    let out_edit_dry_run = out_edit_dry_run.replace(&minted, DOC_PREVIEW_ID);
 
-    let out_edit_compact = edit::edit_lines(&repo, file_ids.to_str().unwrap(), edits, &pm)
-        .await
-        .unwrap();
+    let out_edit_compact = ast_editor(&cache, &["edit", &path_ids, "--json", &batch]);
 
     // Construct pretty-printed JSON inputs
     let create_input_default_val = serde_json::json!({
@@ -283,17 +260,18 @@ async fn generate_readme() {
         serde_json::to_string_pretty(edit_schema).unwrap()
     );
 
-    // Format tool outputs to ensure they look perfect
-    let fmt_create_default = format!("```json\n{}\n```", out_create_default);
-    let fmt_create_ids = format!("```json\n{}\n```", out_create_ids);
-    let fmt_view_default = format!(
-        "```rust\n{}\n```\n\n```json\n{}\n```",
-        out_view_default.lines_text.as_ref().unwrap(),
-        out_view_default.metadata_json
+    // Each answer already carries the fences the command printed it in, and
+    // the path it echoes is this machine's. Only the path is rewritten.
+    let doc = |answer: &str| answer.trim_end().replace(&path_ids, DOC_FILEPATH);
+    let fmt_create_default = doc(&out_create_default).replace(
+        file_default.to_str().unwrap(),
+        "/path/to/project/create_default.rs",
     );
-    let fmt_view_only_ids = format!("```json\n{}\n```", out_view_only_ids.metadata_json);
-    let fmt_edit_compact = format!("```json\n{}\n```", out_edit_compact);
-    let fmt_edit_dry_run = out_edit_dry_run.clone();
+    let fmt_create_ids = doc(&out_create_ids);
+    let fmt_view_default = doc(&out_view_default);
+    let fmt_view_only_ids = doc(&out_view_only_ids);
+    let fmt_edit_compact = doc(&out_edit_compact);
+    let fmt_edit_dry_run = doc(&out_edit_dry_run);
 
     // Each tool's one-line description is the one the binary prints, so the
     // document repeats what the tool says about itself rather than a second

@@ -153,7 +153,6 @@ Output:
 2#bcb4|2:     let x = 42;
 3#8d90|3:     let scratch = 0;
 ```
-
 ```json
 {
   "enclosing_contexts": [{"end":4,"name":"fn:main","start":1}],

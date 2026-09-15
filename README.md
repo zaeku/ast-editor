@@ -198,25 +198,25 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 
-The batch below replaces one line, adds another after it, and removes the line
-the `view` above numbered 3:
+The batch below replaces the two lines the `view` above numbered 2 and 3 with
+one line, and adds another after line 1. A span is addressed by its first and
+last id, and what goes in its place is not tied to its length:
 
 ```bash
 ast-editor edit src/main.rs <<'EOF'
-replace 2#bcb4 ```
+replace 2#bcb4,3#8d90 ```
     let x = 100;
 ```
-insert_after 2#bcb4 ```
+insert_after 1#77cf ```
     let y = 200;
 ```
-delete 3#8d90
 EOF
 ```
 
 ```json
 {
   "modified_lines": [
-    ["2#9639",2], ["5#b7a3",3], ["4#c2b7",4]
+    ["5#b7a3",2], ["2#9639",3]
   ]
 }
 ```
@@ -231,8 +231,8 @@ EOF
  fn main() {
 -    let x = 42;
 -    let scratch = 0;
-+    let x = 100;
 +    let y = 200;
++    let x = 100;
  }
 ```
 ```json

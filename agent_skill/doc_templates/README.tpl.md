@@ -175,18 +175,18 @@ is an error rather than zero matches.
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 
-The batch below replaces one line, adds another after it, and removes the line
-the `view` above numbered 3:
+The batch below replaces the two lines the `view` above numbered 2 and 3 with
+one line, and adds another after line 1. A span is addressed by its first and
+last id, and what goes in its place is not tied to its length:
 
 ```bash
 ast-editor edit src/main.rs <<'EOF'
-replace 2#bcb4 ```
+replace 2#bcb4,3#8d90 ```
     let x = 100;
 ```
-insert_after 2#bcb4 ```
+insert_after 1#77cf ```
     let y = 200;
 ```
-delete 3#8d90
 EOF
 ```
 

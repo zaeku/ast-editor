@@ -282,7 +282,7 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
 
 ### An example
 
-A batch that replaces a line, inserts after it, and deletes another:
+A batch that replaces a span of two lines with one, and inserts after another:
 
 ```json
 {
@@ -290,16 +290,13 @@ A batch that replaces a line, inserts after it, and deletes another:
     {
       "content": "    let y = 200;",
       "op": "insert_after",
-      "start_id": "2#bcb4"
+      "start_id": "1#77cf"
     },
     {
       "content": "    let x = 100;",
+      "end_id": "3#8d90",
       "op": "replace",
       "start_id": "2#bcb4"
-    },
-    {
-      "op": "delete",
-      "start_id": "3#8d90"
     }
   ],
   "filepath": "/path/to/project/create_ids.rs"
@@ -309,7 +306,7 @@ A batch that replaces a line, inserts after it, and deletes another:
 ```json
 {
   "modified_lines": [
-    ["2#9639",2], ["5#b7a3",3], ["4#c2b7",4]
+    ["5#b7a3",2], ["2#9639",3]
   ]
 }
 ```
@@ -330,16 +327,13 @@ diff and the syntax result; the file and the line ids are untouched, and no
     {
       "content": "    let y = 200;",
       "op": "insert_after",
-      "start_id": "2#bcb4"
+      "start_id": "1#77cf"
     },
     {
       "content": "    let x = 100;",
+      "end_id": "3#8d90",
       "op": "replace",
       "start_id": "2#bcb4"
-    },
-    {
-      "op": "delete",
-      "start_id": "3#8d90"
     }
   ],
   "filepath": "/path/to/project/create_ids.rs"
@@ -353,8 +347,8 @@ diff and the syntax result; the file and the line ids are untouched, and no
  fn main() {
 -    let x = 42;
 -    let scratch = 0;
-+    let x = 100;
 +    let y = 200;
++    let x = 100;
  }
 ```
 ```json

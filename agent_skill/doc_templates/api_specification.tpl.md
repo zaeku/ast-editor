@@ -58,7 +58,7 @@ With `only_ids`:
 
 ### An example
 
-A batch that replaces a line, inserts after it, and deletes another:
+A batch that replaces a span of two lines with one, and inserts after another:
 
 {{edit_input_compact}}
 

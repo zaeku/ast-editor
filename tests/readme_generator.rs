@@ -110,16 +110,16 @@ async fn generate_readme() {
     )
     .unwrap();
 
-    // Parse the returned line IDs: line 2 is edited, line 3 is the one the
-    // batch removes, so the example leaves a file that still parses.
+    // Lines 2 and 3 go out together and one line comes back in their place, so
+    // the example addresses a span and the file it leaves still parses.
     let val_create_ids: serde_json::Value = serde_json::from_str(&out_create_ids).unwrap();
     let ids = val_create_ids["lines"].as_array().unwrap();
     // Each entry is [id, line] (card #5).
-    let id_to_update = ids[1][0].as_str().unwrap().to_string();
-    let id_to_insert_after = ids[1][0].as_str().unwrap().to_string();
-    let id_to_delete = ids[2][0].as_str().unwrap().to_string();
+    let span_start = ids[1][0].as_str().unwrap().to_string();
+    let span_end = ids[2][0].as_str().unwrap().to_string();
+    let id_to_insert_after = ids[0][0].as_str().unwrap().to_string();
 
-    // Run edit multi-operation batch (update, insert_after, delete)
+    // Run edit multi-operation batch (a span replaced, a line inserted)
     let edits = vec![
         edit::LineEdit {
             op: EditOp::InsertAfter,
@@ -129,13 +129,9 @@ async fn generate_readme() {
         },
         edit::LineEdit {
             op: EditOp::Replace,
-            start_id: Some(id_to_update.clone()),
+            start_id: Some(span_start.clone()),
+            end_id: Some(span_end.clone()),
             content: Some("    let x = 100;".to_string()),
-            ..Default::default()
-        },
-        edit::LineEdit {
-            op: EditOp::Delete,
-            start_id: Some(id_to_delete.clone()),
             ..Default::default()
         },
     ];
@@ -219,12 +215,9 @@ async fn generate_readme() {
             },
             {
                 "op": "replace",
-                "start_id": id_to_update,
+                "start_id": span_start,
+                "end_id": span_end,
                 "content": "    let x = 100;"
-            },
-            {
-                "op": "delete",
-                "start_id": id_to_delete
             }
         ]
     });

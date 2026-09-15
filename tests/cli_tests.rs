@@ -916,8 +916,20 @@ fn replace_substring_takes_the_occurrence_it_was_given() {
 
 /// An edit script through stdin, which is how `edit` is driven from a shell.
 fn run_script(test: &str, file: &std::path::Path, script: &str) -> std::process::Output {
+    run_script_with(test, file, script, &[])
+}
+
+/// The same, with options after the path.
+fn run_script_with(
+    test: &str,
+    file: &std::path::Path,
+    script: &str,
+    options: &[&str],
+) -> std::process::Output {
+    let mut args = vec!["edit", file.to_str().unwrap()];
+    args.extend_from_slice(options);
     let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
-        .args(["edit", file.to_str().unwrap()])
+        .args(args)
         .env("AST_EDITOR_CACHE_DIR", store_for(test))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -2393,6 +2405,87 @@ fn an_enclosing_context_names_the_kind_it_is() {
         assert!(
             names.contains(wanted),
             "{name} line {range} is inside {wanted:?} and the answer said {names:?}"
+        );
+    }
+}
+
+/// A refusal carries the lines around the one the parser objected to, so a
+/// caller can see the error without reading the file. Which line a grammar
+/// blames is the grammar's business; what the context owes is that it is a
+/// window of the file — consecutive lines, each numbered as the file numbers
+/// it, at most two on either side, and exactly one of them marked.
+#[test]
+fn a_parse_error_carries_a_window_of_the_file_around_it() {
+    let body = "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\nfn e() {}\nfn f() {}\n";
+    let file = scratch("windowed.rs", body);
+    let ids = line_ids("window", &file);
+    let out = run_script_with(
+        "window",
+        &file,
+        &format!("replace {} ```\nfn d( {{\n```\n", ids[3]),
+        &["--strict"],
+    );
+    assert!(!out.status.success(), "a broken edit was accepted");
+
+    // A strict refusal answers in the shape of a dry run, on stderr.
+    let diagnostics = json_block(&out.stderr)["diagnostics"].clone();
+    let context: Vec<String> = diagnostics[0]["context"]
+        .as_array()
+        .expect("no context in the diagnostic")
+        .iter()
+        .map(|line| line.as_str().unwrap().to_string())
+        .collect();
+
+    assert!(
+        (1..=5).contains(&context.len()),
+        "a window of two either side is at most five lines, and this is {}: {context:?}",
+        context.len()
+    );
+    assert_eq!(
+        context.iter().filter(|line| line.contains("-->")).count(),
+        1,
+        "exactly one line is the one objected to: {context:?}"
+    );
+
+    // Each line says which line of the file it is, and it is that line.
+    let written: Vec<&str> = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .leak()
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    let mut numbers = Vec::new();
+    for line in &context {
+        let (head, text) = line.split_once(": ").expect("no line number");
+        let number: usize = head.trim().parse().expect("line number is not a number");
+        numbers.push(number);
+        let text = text.trim_start_matches("--> ").trim_start();
+        assert_eq!(
+            text,
+            written[number - 1].trim_start(),
+            "the context says line {number} is {text:?} and the file says {:?}",
+            written[number - 1]
+        );
+    }
+    for pair in numbers.windows(2) {
+        assert_eq!(pair[1], pair[0] + 1, "the window skips a line: {numbers:?}");
+    }
+
+    // A window is around the line, so when the file continues past it, some of
+    // what follows is in there. Otherwise the context is only what came before.
+    let marked = context
+        .iter()
+        .position(|line| line.contains("-->"))
+        .expect("checked above");
+    let at = numbers[marked];
+    if at < written.len() {
+        assert!(
+            marked + 1 < context.len(),
+            "line {at} of {} was blamed and the context stopped there: {context:?}",
+            written.len()
         );
     }
 }

@@ -704,7 +704,6 @@ pub trait SessionRepository: Send + Sync {
         start_line: usize,
         end_line: usize,
     ) -> Result<Vec<(i64, Option<String>, String)>>;
-    fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>>;
     /// Work out what a batch would produce, touching nothing. Returns the
     /// resulting buffer and the ids the batch would report.
     fn plan_line_edits(
@@ -715,9 +714,7 @@ pub trait SessionRepository: Send + Sync {
     /// Persist a planned buffer as the session's new index. Call only once the
     /// buffer's content has been accepted and written to disk.
     fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()>;
-    fn update_session_metadata(&self, session_id: &str, file_hash: &str, mtime: i64) -> Result<()>;
     fn delete_session(&self, filepath: &str) -> Result<()>;
-    fn get_session_mtime(&self, filepath: &str) -> Result<Option<i64>>;
     fn get_session_crlf(&self, session_id: &str) -> Result<bool>;
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>>;
     fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>>;
@@ -792,16 +789,6 @@ impl SessionRepository for SqliteSessionRepository {
                 )
             })
             .collect())
-    }
-
-    fn get_line_content(&self, session_id: &str, sequence_id: i64) -> Result<Option<String>> {
-        let mut conn = get_db_connection()?;
-        let buffer = load_buffer(&mut conn, session_id)?;
-        Ok(buffer
-            .lines
-            .iter()
-            .find(|line| line.seq == sequence_id)
-            .map(|line| line.content.clone()))
     }
 
     fn plan_line_edits(
@@ -912,16 +899,6 @@ impl SessionRepository for SqliteSessionRepository {
         Ok(serde_json::from_str(&edits_json)?)
     }
 
-    fn update_session_metadata(&self, session_id: &str, file_hash: &str, mtime: i64) -> Result<()> {
-        let conn = get_db_connection()?;
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-        conn.execute(
-            "UPDATE sessions SET file_hash = ?1, mtime = ?2, last_accessed_at = ?3 WHERE session_id = ?4;",
-            rusqlite::params![file_hash, mtime, now, session_id]
-        )?;
-        Ok(())
-    }
-
     fn delete_session(&self, filepath: &str) -> Result<()> {
         let conn = get_db_connection()?;
         conn.execute(
@@ -930,20 +907,6 @@ impl SessionRepository for SqliteSessionRepository {
         )?;
         conn.execute("DELETE FROM sessions WHERE filepath = ?1;", [filepath])?;
         Ok(())
-    }
-
-    fn get_session_mtime(&self, filepath: &str) -> Result<Option<i64>> {
-        let conn = get_db_connection()?;
-        let res = conn.query_row(
-            "SELECT mtime FROM sessions WHERE filepath = ?1",
-            [filepath],
-            |row| row.get(0),
-        );
-        match res {
-            Ok(mtime) => Ok(Some(mtime)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(err) => Err(anyhow::Error::from(err)),
-        }
     }
 
     fn get_session_id(&self, filepath: &str) -> Result<Option<String>> {

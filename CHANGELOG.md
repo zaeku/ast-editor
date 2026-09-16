@@ -4,6 +4,25 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.10 — 2026-09-16
+
+### Fixed
+
+- **`outline` names every kind of definition a file declares.** It listed
+  functions and what it called classes, which for Rust meant `struct` alone:
+  an `enum`, a `trait`, a `type` and a `const` were each absent from a listing
+  whose job is to be complete, and a TypeScript file declaring an interface, a
+  type, an enum, a class and a function was answered with two of the five. Java
+  `record`s, C `typedef`s and C++ `namespace`s were missing the same way. **An
+  entry's `kind` is now the kind** — `enum`, `interface`, `trait`, `record` —
+  where anything that was not a function used to come back as `class`.
+- **An insert given a span is refused.** `insert_after` and `insert_before`
+  act at one line. The script form said so; the JSON form took an `end_id`,
+  dropped it without a word and inserted at `start_id`, so the same batch did
+  different things depending on which form it arrived in. **A batch that
+  carried a pointless `end_id` on an insert and appeared to work now fails**,
+  which is what it was doing all along.
+
 ## 0.3.9 — 2026-09-16
 
 ### Changed

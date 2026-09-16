@@ -76,26 +76,22 @@ pub(crate) fn get_db_connection() -> Result<Connection> {
 /// opened and closed; nothing here is. The rows are the same rows, so they are
 /// renamed rather than rebuilt — the line ids a caller is holding are in them.
 ///
-/// Runs on every open and does nothing once there is no `files` table,
-/// which is the state a store reaches on its first open after this and stays
-/// in. It is safe to delete once no store predates it.
+/// Looks before it locks. Every call opens the store, and taking the write lock
+/// each time would serialise calls that have nothing to write against each
+/// other; the read says no on every open after the first. It is safe to delete
+/// once no store predates it.
 fn migrate_sessions_to_files(conn: &Connection) -> Result<()> {
-    // Two calls can find the old shape at the same moment, so the rename takes
-    // the write lock before it looks rather than after: whichever arrives
-    // second finds the work already done and the table gone.
+    if !has_old_table(conn)? {
+        return Ok(());
+    }
+
+    // Two calls can find the old shape at the same moment, so the rename looks
+    // again under the write lock: whichever arrives second finds the work done
+    // and the table gone.
     conn.execute_batch("BEGIN IMMEDIATE;")
         .context("Failed to take the store's write lock")?;
     let renamed = (|| -> Result<()> {
-        let old = conn
-            .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
-                [],
-                |_| Ok(()),
-            )
-            .optional()
-            .context("Failed to look for the store's previous schema")?
-            .is_some();
-        if !old {
+        if !has_old_table(conn)? {
             return Ok(());
         }
         // `lines` keeps its name; only the key it joins on moves.
@@ -115,6 +111,19 @@ fn migrate_sessions_to_files(conn: &Connection) -> Result<()> {
             Err(err)
         }
     }
+}
+
+/// Whether the store still carries the table the entries used to live in.
+fn has_old_table(conn: &Connection) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .context("Failed to look for the store's previous schema")?
+        .is_some())
 }
 
 pub(crate) fn create_tables(conn: &Connection) -> Result<()> {

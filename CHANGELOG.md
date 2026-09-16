@@ -4,6 +4,21 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.3.11 — 2026-09-16
+
+Nothing the command answers has changed. The one thing worth knowing is where
+the store went.
+
+### Changed
+
+- **The store's entries table is `files` and its key `file_key`**, where they
+  were `sessions` and `session_id` — names for something opened and closed,
+  which a file's entry is not: it outlives the call that made it by seven
+  days. A store written by an earlier version is carried over on first open
+  rather than rebuilt, so the line ids it holds survive the upgrade. The file
+  is still `sessions.db`, because renaming it would abandon the store instead
+  of carrying it.
+
 ## 0.3.10 — 2026-09-16
 
 ### Fixed

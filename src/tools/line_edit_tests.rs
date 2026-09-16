@@ -1,10 +1,10 @@
 #![allow(clippy::await_holding_lock)]
 use crate::parser::ParserManager;
 use crate::tools::edit;
+use crate::tools::file_entry;
 use crate::tools::line_id::{EditOp, MovePosition};
 use crate::tools::repository;
-use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
-use crate::tools::session_db;
+use crate::tools::repository::{FileStore, SqliteFileStore};
 use crate::tools::view;
 use std::fs;
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ impl Drop for TestFile {
 }
 
 fn view_range(
-    repository: &impl repository::SessionRepository,
+    repository: &impl repository::FileStore,
     filepath: &str,
     start_line: usize,
     end_line: usize,
@@ -124,24 +124,24 @@ fn acquire_db_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[tokio::test]
-async fn test_sqlite_session_lifecycle() {
+async fn test_sqlite_file_entry_lifecycle() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("lifecycle.py", "def foo():\n    print('bar')\n");
 
-    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    let meta = file_entry::init_file_entry(file.path_str(), false).unwrap();
     assert_eq!(meta.total_lines, 2);
     assert!(meta.is_supported);
 
-    // Test session reuse
-    let meta_reused = session_db::init_edit_session(file.path_str(), false).unwrap();
-    assert_eq!(meta.session_id, meta_reused.session_id);
+    // Test entry reuse
+    let meta_reused = file_entry::init_file_entry(file.path_str(), false).unwrap();
+    assert_eq!(meta.file_key, meta_reused.file_key);
 }
 
 #[tokio::test]
 async fn test_view_lines_lazy_hashing() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("lazy.rs", "fn main() {\n    println!(\"hello\");\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     // Retrieve lines (this triggers lazy hashing for range)
     let view_res = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
@@ -165,7 +165,7 @@ async fn test_view_lines_lazy_hashing() {
 async fn test_edit_operations_and_ast_validation() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("edit.rs", "fn main() {\n    let a = 1;\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pm = create_test_parser_manager();
 
@@ -198,8 +198,8 @@ async fn test_edit_operations_and_ast_validation() {
 
     // Reset file for strict test
     fs::write(file.path_str(), "fn main() {\n    let a = 1;\n}\n").unwrap();
-    // Re-initialize session to clear the dirty session
-    let _init = session_db::init_edit_session(file.path_str(), false).unwrap();
+    // Re-read the entry to clear the dirty one
+    let _init = file_entry::init_file_entry(file.path_str(), false).unwrap();
     let view_res_strict = view_range(&repository, file.path_str(), 2, 2, None).unwrap();
     let val_strict: serde_json::Value = serde_json::from_str(&view_res_strict).unwrap();
     let start_id_strict = val_strict["lines"][0].as_array().unwrap()[0]
@@ -272,7 +272,7 @@ async fn test_transactional_deletes_and_inserts() {
         "trans_ops.rs",
         "fn main() {\n    let a = 1;\n    let b = 2;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pm = create_test_parser_manager();
 
@@ -334,7 +334,7 @@ async fn test_transactional_deletes_and_inserts() {
 async fn test_concurrency_error_out_of_sync_mtime() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("concurrency.rs", "fn main() {\n    let a = 1;\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pm = create_test_parser_manager();
 
@@ -377,7 +377,7 @@ async fn test_concurrency_error_out_of_sync_mtime() {
 async fn test_integration_append_operation() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("append_integration.rs", "fn main() {\n    let a = 1;\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pm = create_test_parser_manager();
 
@@ -407,7 +407,7 @@ async fn test_integration_advanced_operations() {
         "advanced_int.rs",
         "fn main() {\n    let a = 1;\n    let b = 2;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pm = create_test_parser_manager();
 
@@ -487,7 +487,7 @@ async fn test_integration_insert_without_start_id() {
         "insert_jit_no_target.rs",
         "fn main() {\n    let a = 1;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pm = create_test_parser_manager();
 
@@ -540,7 +540,7 @@ async fn test_integration_insert_without_start_id() {
 async fn test_integration_create_lines_flow() {
     let _lock = acquire_db_lock();
     let pm = create_test_parser_manager();
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pid = std::process::id();
     let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -608,7 +608,7 @@ async fn test_integration_create_lines_flow() {
 async fn test_integration_view_lines_truncation_and_protection() {
     let _lock = acquire_db_lock();
     let pm = create_test_parser_manager();
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let long_line = "a".repeat(2500);
     let content = format!("fn first() {{\n{}\n}}\n", long_line);
@@ -652,7 +652,7 @@ async fn test_integration_view_lines_truncation_and_protection() {
 #[tokio::test]
 async fn test_integration_view_lines_capacity_cap() {
     let _lock = acquire_db_lock();
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let line_content = "x".repeat(1000);
     let mut lines = Vec::new();
@@ -678,7 +678,7 @@ async fn test_integration_view_lines_capacity_cap() {
 #[tokio::test]
 async fn test_integration_create_lines_return_ids_false() {
     let _lock = acquire_db_lock();
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let pid = std::process::id();
     let counter = TEST_FILE_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -707,7 +707,7 @@ async fn test_integration_create_lines_return_ids_false() {
 #[tokio::test]
 async fn test_integration_view_lines_only_ids() {
     let _lock = acquire_db_lock();
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let file = TestFile::new("only_ids.rs", "fn main() {\n    let a = 1;\n}\n");
 
     let view_res = view_range(&repository, file.path_str(), 1, 3, Some(true)).unwrap();
@@ -727,7 +727,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
     let _lock = acquire_db_lock();
     let original = "fn main() {\n    let a = 1;\n}\n";
     let file = TestFile::new("dry_run.rs", original);
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let before_view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
@@ -764,7 +764,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
         diff
     );
 
-    // 3. Nothing on disk or in the session changed.
+    // 3. Nothing on disk or in the entry changed.
     assert_eq!(fs::read_to_string(file.path_str()).unwrap(), original);
     assert_eq!(
         fs::metadata(file.path_str()).unwrap().modified().unwrap(),
@@ -814,7 +814,7 @@ async fn test_dry_run_preview_leaves_everything_untouched() {
 async fn test_dry_run_preview_reports_markdown_warnings_as_valid() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("dry_run.md", "# Title\n\nbody\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let view = view_range(&repository, file.path_str(), 3, 3, None).unwrap();
@@ -853,7 +853,7 @@ async fn test_view_lines_without_a_range_does_not_overflow() {
         + "\n";
     let small = TestFile::new("norange_small.rs", "fn main() {}\n");
     let large = TestFile::new("norange_large.txt", &big);
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let res = view::view_lines(
         &repository,
@@ -899,7 +899,7 @@ async fn test_preview_id_applies_the_validated_batch() {
     let _lock = acquire_db_lock();
     let original = "fn main() {\n    let a = 1;\n}\n";
     let file = TestFile::new("preview_apply.rs", original);
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
@@ -959,7 +959,7 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("preview_stale.rs", "fn main() {\n    let a = 1;\n}\n");
     let other = TestFile::new("preview_other.rs", "fn other() {}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
@@ -1012,7 +1012,7 @@ async fn test_preview_id_is_refused_when_stale_or_misaddressed() {
 async fn test_a_failed_dry_run_still_names_its_batch() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("preview_invalid.rs", "fn main() {\n    let a = 1;\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
@@ -1054,7 +1054,7 @@ async fn test_a_failed_dry_run_still_names_its_batch() {
 async fn test_a_multi_line_replace_names_every_line_it_wrote() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("multi_replace.txt", "one\ntwo\nthree\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let view = view_range(&repository, file.path_str(), 1, 3, None).unwrap();
@@ -1102,7 +1102,7 @@ async fn test_store_holds_no_file_text() {
     let _lock = acquire_db_lock();
     let secret = "let api_key = \"correct-horse-battery-staple\";";
     let file = TestFile::new("no_text.rs", &format!("fn main() {{\n    {}\n}}\n", secret));
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     // Touch every path that populates the index.
@@ -1143,10 +1143,10 @@ async fn test_store_holds_no_file_text() {
 }
 
 /// Read the (sequence id, content) pairs the index currently holds.
-fn index_pairs(repository: &SqliteSessionRepository, path: &str) -> Vec<(i64, String)> {
-    let meta = session_db::init_edit_session(path, false).unwrap();
+fn index_pairs(repository: &SqliteFileStore, path: &str) -> Vec<(i64, String)> {
+    let meta = file_entry::init_file_entry(path, false).unwrap();
     repository
-        .fetch_lines_range(&meta.session_id, 1, meta.total_lines)
+        .fetch_lines_range(&meta.file_key, 1, meta.total_lines)
         .unwrap()
         .into_iter()
         .map(|(seq, _, content)| (seq, content))
@@ -1160,7 +1160,7 @@ async fn test_external_insert_preserves_surrounding_ids() {
         "reconcile_insert.rs",
         "fn main() {\n    let a = 1;\n    let b = 2;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let before = index_pairs(&repository, file.path_str());
     assert_eq!(before.len(), 4);
@@ -1194,7 +1194,7 @@ async fn test_duplicate_lines_reconcile_without_misalignment() {
     // Blank lines and bare braces are what a naive diff mis-pairs.
     let original = "fn a() {\n}\n\nfn b() {\n}\n";
     let file = TestFile::new("reconcile_dupes.rs", original);
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let before = index_pairs(&repository, file.path_str());
     assert_eq!(before.len(), 5);
@@ -1213,7 +1213,7 @@ async fn test_duplicate_lines_reconcile_without_misalignment() {
 }
 
 /// The id an agent would hold for a given line, straight from view.
-fn live_id(repository: &SqliteSessionRepository, path: &str, line: usize) -> String {
+fn live_id(repository: &SqliteFileStore, path: &str, line: usize) -> String {
     let view = view_range(repository, path, line, line, None).unwrap();
     let val: serde_json::Value = serde_json::from_str(&view).unwrap();
     val["lines"][0].as_array().unwrap()[0]
@@ -1229,7 +1229,7 @@ async fn test_edit_conflicts_only_when_the_target_itself_changed() {
         "reconcile_conflict.rs",
         "fn main() {\n    let a = 1;\n    let b = 2;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     // An untargeted line changes underneath. The edit should still land.
@@ -1298,7 +1298,7 @@ async fn test_reformatting_preserves_every_id() {
         "reconcile_format.rs",
         "fn main() {\n    let a = 1;\n    let b = a + 2;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
     let before = index_pairs(&repository, file.path_str());
     assert_eq!(before.len(), 4);
@@ -1324,7 +1324,7 @@ async fn test_reformatting_preserves_every_id() {
 async fn test_a_deleted_id_is_never_reissued() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("no_reuse.rs", "fn main() {\n    let a = 1;\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     // Delete the last line of the file, retiring the highest id in use.
@@ -1366,7 +1366,7 @@ async fn test_a_deleted_id_is_never_reissued() {
 async fn test_repeated_insertion_between_the_same_pair() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("endurance.rs", "fn main() {\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     // Invariant 7: ordering does not degrade under repeated insertion at one
@@ -1414,7 +1414,7 @@ async fn test_repeated_insertion_between_the_same_pair() {
 async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
     let _lock = acquire_db_lock();
     let file = TestFile::new("desync.rs", "fn main() {\n    let a = 1;\n}\n");
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     // Push the ids out of step with the positions, so that renumbering the
@@ -1446,19 +1446,19 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
     // Stand in for the narrow window where the file changes between the
     // reconcile at the gate and the buffer load: drop the last index row so the
     // index is shorter than the file, without touching the file itself.
-    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    let meta = file_entry::init_file_entry(file.path_str(), false).unwrap();
     let db = rusqlite::Connection::open(crate::tools::store::get_db_path().unwrap()).unwrap();
     db.execute(
-        "DELETE FROM lines WHERE session_id = ?1 AND sequence_id = (SELECT MAX(sequence_id) FROM lines WHERE session_id = ?1)",
-        [&meta.session_id],
+        "DELETE FROM lines WHERE file_key = ?1 AND sequence_id = (SELECT MAX(sequence_id) FROM lines WHERE file_key = ?1)",
+        [&meta.file_key],
     ).unwrap();
     drop(db);
 
-    // Read a fixed range rather than the session's line count: the point is
+    // Read a fixed range rather than the entry's line count: the point is
     // what the buffer recovers, not what the stale count claims.
-    let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
+    let meta = file_entry::init_file_entry(file.path_str(), false).unwrap();
     let after: Vec<(i64, String)> = repository
-        .fetch_lines_range(&meta.session_id, 1, 4)
+        .fetch_lines_range(&meta.file_key, 1, 4)
         .unwrap()
         .into_iter()
         .map(|(seq, _, content)| (seq, content))
@@ -1572,7 +1572,7 @@ async fn test_a_structural_match_carries_the_ids_that_edit_it() {
         "bridge.rs",
         "fn keep() {\n}\n\nfn doomed() {\n    let x = 1;\n}\n",
     );
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let pm = create_test_parser_manager();
 
     let res = inspect_report(file.path_str(), Some("functions")).await;

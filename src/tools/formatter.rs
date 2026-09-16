@@ -1,5 +1,5 @@
 use crate::tools::line_id::compute_line_hash;
-use crate::tools::repository::SessionRepository;
+use crate::tools::repository::FileStore;
 use anyhow::Result;
 
 /// Where a line is broken for display. The break is at a fixed count of
@@ -30,15 +30,15 @@ pub(crate) struct FormattedLinesResult {
 }
 
 pub(crate) fn retrieve_and_format_lines(
-    repository: &impl SessionRepository,
-    session_id: &str,
+    repository: &impl FileStore,
+    file_key: &str,
     start_line: usize,
     end_line: usize,
     only_ids: bool,
     wrap_trigger_length: usize,
     line_cap: usize,
 ) -> Result<FormattedLinesResult> {
-    let lines = repository.fetch_lines_range(session_id, start_line, end_line)?;
+    let lines = repository.fetch_lines_range(file_key, start_line, end_line)?;
     let mut id_items = Vec::new();
     let mut pending: Vec<(String, usize, Vec<String>)> = Vec::new();
 
@@ -219,7 +219,7 @@ pub(crate) fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::repository::SqliteSessionRepository;
+    use crate::tools::repository::SqliteFileStore;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
 
@@ -287,12 +287,12 @@ mod tests {
         let content = "line 1\nline 2\nline 3\nline 4";
         fs::write(filepath_str, content)?;
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let meta = repository.init_session(filepath_str, false)?;
-        let session_id = &meta.session_id;
+        let file_key = &meta.file_key;
 
         // Test with a small wrap_trigger_length to force wrapping
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 4, true, 30, LINE_CAP)?;
+        let res = retrieve_and_format_lines(&repository, file_key, 1, 4, true, 30, LINE_CAP)?;
         assert_eq!(res.actual_end_line, 4);
         assert!(res.warning_msg.is_none());
         assert!(res.lines_text.is_none());
@@ -315,7 +315,7 @@ mod tests {
 
         // Test with large wrap_trigger_length so everything is on one line
         let res_no_wrap =
-            retrieve_and_format_lines(&repository, session_id, 1, 4, true, 1000, LINE_CAP)?;
+            retrieve_and_format_lines(&repository, file_key, 1, 4, true, 1000, LINE_CAP)?;
         let lines_no_wrap: Vec<&str> = res_no_wrap.ids_json.lines().collect();
         assert_eq!(lines_no_wrap.len(), 3);
         assert_eq!(lines_no_wrap[0], "[");
@@ -339,11 +339,11 @@ mod tests {
         let content = "line 1\nline 2";
         fs::write(filepath_str, content)?;
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let meta = repository.init_session(filepath_str, false)?;
-        let session_id = &meta.session_id;
+        let file_key = &meta.file_key;
 
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 2, false, 1000, LINE_CAP)?;
+        let res = retrieve_and_format_lines(&repository, file_key, 1, 2, false, 1000, LINE_CAP)?;
         assert_eq!(res.actual_end_line, 2);
         assert!(res.warning_msg.is_none());
 
@@ -375,11 +375,11 @@ mod tests {
         let long_line = "A".repeat(2500);
         fs::write(filepath_str, &long_line)?;
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let meta = repository.init_session(filepath_str, false)?;
-        let session_id = &meta.session_id;
+        let file_key = &meta.file_key;
 
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 1, false, 1000, LINE_CAP)?;
+        let res = retrieve_and_format_lines(&repository, file_key, 1, 1, false, 1000, LINE_CAP)?;
         let text = res.lines_text.as_ref().unwrap();
         assert!(text.contains("|1: "));
         assert!(text.contains("│: "));
@@ -421,13 +421,13 @@ mod tests {
         }
         fs::write(filepath_str, lines.join("\n"))?;
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let meta = repository.init_session(filepath_str, false)?;
-        let session_id = &meta.session_id;
+        let file_key = &meta.file_key;
 
         // 44, not 45: the id each line carries is part of the response, so it
         // is counted against the 45,000 bytes.
-        let res = retrieve_and_format_lines(&repository, session_id, 1, 50, false, 1000, LINE_CAP)?;
+        let res = retrieve_and_format_lines(&repository, file_key, 1, 50, false, 1000, LINE_CAP)?;
         assert_eq!(res.actual_end_line, 44);
         assert_eq!(
             res.warning_msg.as_deref(),

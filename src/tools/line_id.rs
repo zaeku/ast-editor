@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub(crate) struct SessionMetadata {
-    pub session_id: String,
+pub(crate) struct FileEntry {
+    pub file_key: String,
     pub total_lines: usize,
     pub file_hash: String,
     pub mtime: i64,

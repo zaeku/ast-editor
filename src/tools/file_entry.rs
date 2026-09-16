@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 
 use crate::tools::line_id::{
-    compute_normalized_hash, compute_stored_hash, parse_line_id, SessionMetadata,
+    compute_normalized_hash, compute_stored_hash, parse_line_id, FileEntry,
 };
 use crate::tools::store::{cleanup_stale_sessions, create_tables, get_db_connection};
 use rusqlite::{Connection, OptionalExtension};
@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Reconcile a session's index with the file on disk.
+/// Reconcile a file's index with the file on disk.
 ///
 /// Lines that survived keep their sequence number; only genuinely new lines
 /// get a fresh one. Alignment comes from a patience diff over the stored
@@ -22,13 +22,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// guessing which line was meant.
 pub(crate) fn reconcile_index(
     conn: &mut Connection,
-    session_id: &str,
+    file_key: &str,
     filepath: &str,
     start_ids: &[String],
 ) -> Result<usize> {
     let current: Option<(String, i64, usize)> = conn.query_row(
-        "SELECT file_hash, mtime, (SELECT COUNT(*) FROM lines WHERE session_id = ?1) FROM sessions WHERE session_id = ?1",
-        [session_id],
+        "SELECT file_hash, mtime, (SELECT COUNT(*) FROM lines WHERE file_key = ?1) FROM files WHERE file_key = ?1",
+        [file_key],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).optional()?;
     let disk_mtime = std::path::Path::new(filepath)
@@ -71,9 +71,9 @@ pub(crate) fn reconcile_index(
 
     let index: Vec<(i64, String, String)> = {
         let mut stmt = conn.prepare(
-            "SELECT sequence_id, COALESCE(line_hash, ''), COALESCE(norm_hash, '') FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+            "SELECT sequence_id, COALESCE(line_hash, ''), COALESCE(norm_hash, '') FROM lines WHERE file_key = ?1 ORDER BY sort_order"
         )?;
-        let rows = stmt.query_map([session_id], |row| {
+        let rows = stmt.query_map([file_key], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()?
@@ -137,8 +137,8 @@ pub(crate) fn reconcile_index(
 
     let stored_next: i64 = conn
         .query_row(
-            "SELECT next_line_id FROM sessions WHERE session_id = ?1",
-            [session_id],
+            "SELECT next_line_id FROM files WHERE file_key = ?1",
+            [file_key],
             |row| row.get(0),
         )
         .unwrap_or(1);
@@ -171,14 +171,14 @@ pub(crate) fn reconcile_index(
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
+    tx.execute("DELETE FROM lines WHERE file_key = ?1", [file_key])?;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+            "INSERT INTO lines (file_key, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
         )?;
         for (idx, seq) in seqs.iter().enumerate() {
             stmt.execute(rusqlite::params![
-                session_id,
+                file_key,
                 seq,
                 disk_hashes[idx],
                 disk_norms[idx],
@@ -188,8 +188,8 @@ pub(crate) fn reconcile_index(
         }
     }
     tx.execute(
-        "UPDATE sessions SET file_hash = ?1, mtime = ?2, line_ending_crlf = ?3, last_accessed_at = ?4, next_line_id = ?5 WHERE session_id = ?6",
-        rusqlite::params![disk_file_hash, disk_mtime, crlf_val, now, next_seq, session_id],
+        "UPDATE files SET file_hash = ?1, mtime = ?2, line_ending_crlf = ?3, last_accessed_at = ?4, next_line_id = ?5 WHERE file_key = ?6",
+        rusqlite::params![disk_file_hash, disk_mtime, crlf_val, now, next_seq, file_key],
     )?;
     tx.commit()?;
 
@@ -240,10 +240,7 @@ pub(crate) fn check_language_supported(path: &str) -> bool {
     crate::config::language_for_extension(&ext).is_some()
 }
 
-pub(crate) fn init_edit_session(
-    filepath: &str,
-    create_if_not_exists: bool,
-) -> Result<SessionMetadata> {
+pub(crate) fn init_file_entry(filepath: &str, create_if_not_exists: bool) -> Result<FileEntry> {
     let mut conn = get_db_connection()?;
     create_tables(&conn)?;
     cleanup_stale_sessions(&conn)?;
@@ -272,16 +269,16 @@ pub(crate) fn init_edit_session(
         .as_secs() as i64;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
-    // A session for this path, and whether the file still looks the way the
-    // session last saw it.
+    // The entry for this path, and whether the file still looks the way the
+    // entry last saw it.
     let existing: Option<(String, bool)> = conn
         .query_row(
-            "SELECT session_id, file_hash = ?2 AND mtime = ?3 FROM sessions WHERE filepath = ?1",
+            "SELECT file_key, file_hash = ?2 AND mtime = ?3 FROM files WHERE filepath = ?1",
             rusqlite::params![filepath, file_hash, mtime],
             |row| Ok((row.get(0)?, row.get::<_, i64>(1)? != 0)),
         )
         .optional()
-        .context("Failed to query existing session")?;
+        .context("Failed to query the existing entry")?;
 
     let is_supported = check_language_supported(filepath);
     let warning_message = if !is_supported {
@@ -294,26 +291,26 @@ pub(crate) fn init_edit_session(
         None
     };
 
-    if let Some((session_id, unchanged)) = existing {
+    if let Some((file_key, unchanged)) = existing {
         // The one gate every entry point passes through: a file that moved
         // under us is reconciled here, not rebuilt, so the ids an agent is
         // holding survive whatever happened outside the tool.
         let total_lines = if unchanged {
             conn.execute(
-                "UPDATE sessions SET last_accessed_at = ?1 WHERE session_id = ?2;",
-                rusqlite::params![now, session_id],
+                "UPDATE files SET last_accessed_at = ?1 WHERE file_key = ?2;",
+                rusqlite::params![now, file_key],
             )
-            .context("Failed to update last_accessed_at for reused session")?;
+            .context("Failed to update last_accessed_at for a reused entry")?;
             conn.query_row(
-                "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
-                rusqlite::params![session_id],
+                "SELECT COUNT(*) FROM lines WHERE file_key = ?1",
+                rusqlite::params![file_key],
                 |row| row.get(0),
             )?
         } else {
-            reconcile_index(&mut conn, &session_id, filepath, &[])?
+            reconcile_index(&mut conn, &file_key, filepath, &[])?
         };
-        return Ok(SessionMetadata {
-            session_id,
+        return Ok(FileEntry {
+            file_key,
             total_lines,
             file_hash,
             mtime,
@@ -322,9 +319,9 @@ pub(crate) fn init_edit_session(
         });
     }
 
-    // Create a new session
+    // Create a new entry
     use sha1::{Digest, Sha1};
-    let session_id = format!(
+    let file_key = format!(
         "{:x}",
         Sha1::digest(format!("{}-{}-{}", filepath, file_hash, now).as_bytes())
     );
@@ -339,23 +336,23 @@ pub(crate) fn init_edit_session(
         .transaction()
         .context("Failed to begin SQLite transaction")?;
 
-    // Clear any stale session for this filepath
+    // Clear any stale entry for this filepath
     tx.execute(
-        "DELETE FROM sessions WHERE filepath = ?1;",
+        "DELETE FROM files WHERE filepath = ?1;",
         rusqlite::params![filepath],
     )
-    .context("Failed to delete existing session for path")?;
+    .context("Failed to delete the existing entry for path")?;
 
     tx.execute(
-        "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at, line_ending_crlf) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
-        rusqlite::params![filepath, session_id, file_hash, mtime, now, crlf_val],
-    ).context("Failed to insert new session")?;
+        "INSERT INTO files (filepath, file_key, file_hash, mtime, last_accessed_at, line_ending_crlf) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+        rusqlite::params![filepath, file_key, file_hash, mtime, now, crlf_val],
+    ).context("Failed to insert the new entry")?;
 
     let parent_contexts = crate::parser::compute_parent_contexts(filepath, &content);
     let mut lines_count = 0;
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO lines (session_id, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
+            "INSERT INTO lines (file_key, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
         )?;
 
         // Split by lines, preserving empty final lines
@@ -370,7 +367,7 @@ pub(crate) fn init_edit_session(
             let trimmed_line = line_content.strip_suffix('\r').unwrap_or(line_content);
             let p_ctx = parent_contexts.get(idx).cloned().flatten();
             stmt.execute(rusqlite::params![
-                session_id,
+                file_key,
                 seq,
                 compute_stored_hash(trimmed_line),
                 compute_normalized_hash(trimmed_line),
@@ -383,15 +380,15 @@ pub(crate) fn init_edit_session(
     }
 
     tx.execute(
-        "UPDATE sessions SET next_line_id = ?1 WHERE session_id = ?2",
-        rusqlite::params![lines_count as i64 + 1, session_id],
+        "UPDATE files SET next_line_id = ?1 WHERE file_key = ?2",
+        rusqlite::params![lines_count as i64 + 1, file_key],
     )
     .context("Failed to seed the line id counter")?;
 
     tx.commit().context("Failed to commit SQLite transaction")?;
 
-    Ok(SessionMetadata {
-        session_id,
+    Ok(FileEntry {
+        file_key,
         total_lines: lines_count,
         file_hash,
         mtime,

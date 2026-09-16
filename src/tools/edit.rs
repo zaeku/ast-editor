@@ -1,6 +1,6 @@
+use crate::tools::file_entry::check_language_supported;
 pub(crate) use crate::tools::line_id::LineEdit;
-use crate::tools::repository::SessionRepository;
-use crate::tools::session_db::check_language_supported;
+use crate::tools::repository::FileStore;
 use anyhow::Result;
 use std::fs;
 
@@ -250,16 +250,12 @@ async fn validate_syntax(
     SyntaxValidationResult::Success
 }
 
-/// Reconcile the session with disk when the file changed under us, so that an
+/// Reconcile the entry with disk when the file changed under us, so that an
 /// edit or a preview operates on the current state.
-fn resync_if_stale(
-    repository: &impl SessionRepository,
-    filepath: &str,
-    edits: &[LineEdit],
-) -> Result<()> {
+fn resync_if_stale(repository: &impl FileStore, filepath: &str, edits: &[LineEdit]) -> Result<()> {
     // Reconcile before the read path can, so the lines this batch targets are
     // checked for having survived rather than silently re-identified.
-    let Some(session_id) = repository.get_session_id(filepath)? else {
+    let Some(file_key) = repository.get_file_key(filepath)? else {
         return Ok(());
     };
 
@@ -273,13 +269,13 @@ fn resync_if_stale(
         }
     }
 
-    repository.smart_resync(filepath, &session_id, &start_ids)
+    repository.smart_resync(filepath, &file_key, &start_ids)
 }
 
-/// Preview an edit batch without touching disk or the session store.
+/// Preview an edit batch without touching disk or the store.
 ///
-/// The batch is applied to the session, the resulting content is validated the
-/// same way a real commit is, and the session is then restored to its previous
+/// The batch is applied to the entry, the resulting content is validated the
+/// same way a real commit is, and the entry is then restored to its previous
 /// state. No line IDs are minted: the caller obtains those from a real
 /// `edit` call.
 /// What a dry run has to say: the diff to read, and the report to act on.
@@ -291,7 +287,7 @@ pub(crate) struct DryRun {
 }
 
 pub(crate) async fn edit_lines_dry_run(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     edits: Vec<LineEdit>,
     parser_manager: &crate::parser::ParserManager,
@@ -299,9 +295,9 @@ pub(crate) async fn edit_lines_dry_run(
     resync_if_stale(repository, filepath, &edits)?;
 
     let meta = repository.init_session(filepath, false)?;
-    let session_id = meta.session_id;
+    let file_key = meta.file_key;
 
-    let line_ending = if repository.get_session_crlf(&session_id)? {
+    let line_ending = if repository.get_file_crlf(&file_key)? {
         "\r\n"
     } else {
         "\n"
@@ -309,7 +305,7 @@ pub(crate) async fn edit_lines_dry_run(
     let original_content = fs::read_to_string(filepath)?;
 
     // A preview is a plan that is never committed, so there is nothing to undo.
-    let (buffer, _) = repository.plan_line_edits(&session_id, &edits)?;
+    let (buffer, _) = repository.plan_line_edits(&file_key, &edits)?;
     let preview_content = buffer.join(line_ending);
 
     let diff = similar::TextDiff::from_lines(&original_content, &preview_content)
@@ -366,7 +362,7 @@ pub(crate) async fn edit_lines_dry_run(
 /// Apply the edit batch a previous dry run validated, addressed by its preview
 /// id instead of resent in full.
 pub(crate) async fn apply_preview(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     preview_id: &str,
     strict_validation: bool,
@@ -387,7 +383,7 @@ pub(crate) async fn apply_preview(
 /// decides what happens when the result does not parse: rolled back and
 /// refused, or written with the verdict beside it. Both check.
 pub(crate) async fn edit_lines(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     edits: Vec<LineEdit>,
     strict_validation: bool,
@@ -396,9 +392,9 @@ pub(crate) async fn edit_lines(
     resync_if_stale(repository, filepath, &edits)?;
 
     let meta = repository.init_session(filepath, false)?;
-    let session_id = meta.session_id;
+    let file_key = meta.file_key;
 
-    let line_ending = if repository.get_session_crlf(&session_id)? {
+    let line_ending = if repository.get_file_crlf(&file_key)? {
         "\r\n"
     } else {
         "\n"
@@ -406,7 +402,7 @@ pub(crate) async fn edit_lines(
 
     // Plan the batch without persisting it. Nothing is committed until the
     // content it produces has been accepted, so a rejected edit needs no undo.
-    let (buffer, newly_modified_lines) = repository.plan_line_edits(&session_id, &edits)?;
+    let (buffer, newly_modified_lines) = repository.plan_line_edits(&file_key, &edits)?;
     // Each id with the line it is now, walked off the planned buffer: an id
     // alone does not say where its line went (card #5).
     let newly_modified_lines = buffer.locate(&newly_modified_lines);
@@ -455,8 +451,8 @@ pub(crate) async fn edit_lines(
             } else {
                 // Permissive Mode: Write to disk and save, but return status "saved_with_errors" with details
                 fs::write(filepath, &final_content)?;
-                repository.commit_buffer(&session_id, &buffer)?;
-                repository.smart_resync(filepath, &session_id, &[])?;
+                repository.commit_buffer(&file_key, &buffer)?;
+                repository.smart_resync(filepath, &file_key, &[])?;
 
                 let config = crate::tools::metadata::get_config();
                 let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
@@ -499,8 +495,8 @@ pub(crate) async fn edit_lines(
             } else {
                 // Permissive Mode: Write to disk, but return "saved" with error reason message
                 fs::write(filepath, &final_content)?;
-                repository.commit_buffer(&session_id, &buffer)?;
-                repository.smart_resync(filepath, &session_id, &[])?;
+                repository.commit_buffer(&file_key, &buffer)?;
+                repository.smart_resync(filepath, &file_key, &[])?;
 
                 let config = crate::tools::metadata::get_config();
                 let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
@@ -525,10 +521,10 @@ pub(crate) async fn edit_lines(
 
     // Save to disk
     fs::write(filepath, &final_content)?;
-    repository.commit_buffer(&session_id, &buffer)?;
+    repository.commit_buffer(&file_key, &buffer)?;
 
-    // Resync database session to update parent contexts, line hashes, and mtime/file_hash metadata
-    repository.smart_resync(filepath, &session_id, &[])?;
+    // Resync the entry to update parent contexts, line hashes, and mtime/file_hash metadata
+    repository.smart_resync(filepath, &file_key, &[])?;
 
     let config = crate::tools::metadata::get_config();
     let only_ids_wrap_trigger_length = config.only_ids_wrap_trigger_length;
@@ -564,7 +560,7 @@ pub(crate) async fn edit_lines(
 /// ask for strictness. It spares every test below a bare `false`.
 #[cfg(test)]
 pub(crate) async fn edit_lines_permissive(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     edits: Vec<LineEdit>,
     parser_manager: &crate::parser::ParserManager,
@@ -577,9 +573,9 @@ pub(crate) async fn edit_lines_permissive(
 mod tests {
     use super::*;
     use crate::parser::ParserManager;
+    use crate::tools::file_entry::init_file_entry;
     use crate::tools::line_id::{parse_line_id, EditOp, MovePosition};
-    use crate::tools::repository::SqliteSessionRepository;
-    use crate::tools::session_db::init_edit_session;
+    use crate::tools::repository::SqliteFileStore;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
 
     /// A temporary directory to put fixtures in. The grammars are compiled in
@@ -625,7 +621,7 @@ mod tests {
     }
 
     fn test_view_lines(
-        repository: &impl crate::tools::repository::SessionRepository,
+        repository: &impl crate::tools::repository::FileStore,
         filepath: &str,
         start_line: usize,
         end_line: usize,
@@ -647,13 +643,13 @@ mod tests {
     async fn test_apply_line_edits_insert_update_delete() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("basic_ops");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "fn main() {\n    let a = 1;\n}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 3);
 
         // Get the line IDs by viewing
@@ -683,8 +679,8 @@ mod tests {
             "fn main() {\n    let a = 42;\n}\n"
         );
 
-        // Refresh metadata/session
-        let _metadata = init_edit_session(filepath_str, false)?;
+        // Refresh the entry
+        let _metadata = init_file_entry(filepath_str, false)?;
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let new_start_id = find_line_id(&lines_view, "let a = 42;");
         assert!(!new_start_id.is_empty());
@@ -705,8 +701,8 @@ mod tests {
             "fn main() {\n    let a = 42;\n    let b = 2;\n}\n"
         );
 
-        // Refresh session to get latest target IDs
-        let _ = init_edit_session(filepath_str, false)?;
+        // Refresh the entry to get the latest ids
+        let _ = init_file_entry(filepath_str, false)?;
         let lines_view = test_view_lines(&repository, filepath_str, 1, 4, None)?;
         let b_id = find_line_id(&lines_view, "let b = 2;");
         assert!(!b_id.is_empty());
@@ -734,13 +730,13 @@ mod tests {
     async fn test_concurrency_smart_resync() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("concurrency");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "fn main() {}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         // Modify file externally on disk, changing its mtime
         tokio::time::sleep(tokio::time::Duration::from_millis(1100)).await;
@@ -768,13 +764,13 @@ mod tests {
     async fn test_checksum_error() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("checksum");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "fn main() {}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         let edits = vec![LineEdit {
             op: EditOp::Replace,
@@ -799,14 +795,14 @@ mod tests {
     async fn test_syntax_validation_error_rolls_back() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("syntax_error");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         let initial_content = "fn main() {\n    let a = 1;\n}\n";
         fs::write(&file_path, initial_content)?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         // Find the line 2 ID
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
@@ -836,7 +832,7 @@ mod tests {
 
         // Restore initial content for strict validation test
         fs::write(&file_path, initial_content)?;
-        let _metadata_strict = init_edit_session(filepath_str, false)?;
+        let _metadata_strict = init_file_entry(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let start_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
         let edits_strict = vec![LineEdit {
@@ -865,7 +861,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
 
         // Verify DB content was rolled back (re-query content of line 2)
-        let lines_strict = repository.fetch_lines_range(&_metadata_strict.session_id, 2, 2)?;
+        let lines_strict = repository.fetch_lines_range(&_metadata_strict.file_key, 2, 2)?;
         assert_eq!(lines_strict.len(), 1);
         assert_eq!(lines_strict[0].2.trim(), "let a = 1;");
 
@@ -877,13 +873,13 @@ mod tests {
     async fn test_insert_into_empty_file() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("empty_file");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 0);
 
         let edits = vec![LineEdit {
@@ -907,7 +903,7 @@ mod tests {
     async fn test_case_insensitive_validation_and_deletion_preview() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("case_insensitive_and_delete");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         // Use uppercase extension: .RS
         let file_path = env.dir.join("code.RS");
@@ -917,7 +913,7 @@ mod tests {
         )?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 5);
 
         // Get the line IDs by viewing
@@ -951,13 +947,13 @@ mod tests {
     async fn test_append_operation_empty_file() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let env = TestEnvironment::new("append_empty");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 0);
 
         let edits = vec![LineEdit {
@@ -981,13 +977,13 @@ mod tests {
     async fn test_append_operation_with_content() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("append_content");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "pub fn foo() {}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 1);
 
         let edits = vec![LineEdit {
@@ -1014,13 +1010,13 @@ mod tests {
     async fn test_strict_start_id_validation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("strict_validation");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "pub fn foo() {}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 1);
 
         // Call update with start_id = None
@@ -1046,13 +1042,13 @@ mod tests {
     async fn test_prepend_operation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("prepend");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(&file_path, "pub fn hello() {}\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         let edits = vec![LineEdit {
             op: EditOp::Prepend,
@@ -1078,7 +1074,7 @@ mod tests {
     async fn test_replace_range_operation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("replace_range");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(
@@ -1087,7 +1083,7 @@ mod tests {
         )?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         // Find IDs for lines 2 and 3
         let lines_view = test_view_lines(&repository, filepath_str, 2, 3, None)?;
@@ -1119,7 +1115,7 @@ mod tests {
     async fn test_move_operation() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("move_ops");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         fs::write(
@@ -1128,7 +1124,7 @@ mod tests {
         )?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         // Get target ID for lines 4 (pub fn foo() {})
         let lines_view = test_view_lines(&repository, filepath_str, 4, 4, None)?;
@@ -1169,9 +1165,9 @@ mod tests {
         fs::write(&file_path, "line 1\nline 2\n")?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
-        // Call edit_lines_permissive directly without calling init_edit_session.
+        // Call edit_lines_permissive directly without calling init_file_entry.
         // We can append a line. Since it's append, start_id is ignored.
         let edits = vec![LineEdit {
             op: EditOp::Append,
@@ -1196,7 +1192,7 @@ mod tests {
     async fn test_long_line_replace_substring() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("long_line_substring_test");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("code.rs");
         let long_line = "a".repeat(2050);
@@ -1204,7 +1200,7 @@ mod tests {
         fs::write(&file_path, &file_content)?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 3);
 
         // Get the lines view
@@ -1245,14 +1241,14 @@ mod tests {
     async fn test_hybrid_policy_markdown_warning() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("hybrid_md_warning");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("doc.md");
         let md_content = "# Title\nSome content\n";
         fs::write(&file_path, md_content)?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 2);
 
         // Get the lines view
@@ -1294,14 +1290,14 @@ mod tests {
     async fn test_hybrid_policy_html_warning() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("hybrid_html_warning");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("index.html");
         let html_content = "<div>\n  <p>Hello</p>\n</div>\n";
         fs::write(&file_path, html_content)?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let metadata = init_edit_session(filepath_str, false)?;
+        let metadata = init_file_entry(filepath_str, false)?;
         assert_eq!(metadata.total_lines, 3);
 
         // Get the lines view
@@ -1377,7 +1373,7 @@ fn main() {
     ```json
     {
       "status": "success",
-      "session_id": "8f3a8b23",
+      "file_key": "8f3a8b23",
       "total_lines": 420,
       "file_hash": "a1b2c3d4",
       "mtime": "2026-07-08T22:07:07Z",
@@ -1392,14 +1388,14 @@ fn main() {
     async fn test_edit_lines_markdown_success() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("markdown_success");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("test.md");
         let file_content = "# Title\n\n```rust\nfn main() {}\n```\n";
         fs::write(&file_path, file_content)?;
 
         let filepath_str = file_path.to_str().unwrap();
-        let _init_res = init_edit_session(filepath_str, false)?;
+        let _init_res = init_file_entry(filepath_str, false)?;
 
         let lines_view = test_view_lines(&repository, filepath_str, 1, 100, None)?;
         let start_line_id = find_line_id(&lines_view, "fn main()");
@@ -1428,14 +1424,14 @@ fn main() {
     async fn test_edit_lines_markdown_soft_warning() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("markdown_failure");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("test.md");
         let file_content = "# Title\n\n```rust\nfn main() {}\n````\n";
         fs::write(&file_path, file_content)?;
 
         let filepath_str = file_path.to_str().unwrap();
-        let _init_res = init_edit_session(filepath_str, false)?;
+        let _init_res = init_file_entry(filepath_str, false)?;
 
         let lines_view = test_view_lines(&repository, filepath_str, 1, 100, None)?;
         let target_line_id = find_line_id(&lines_view, "````");
@@ -1465,7 +1461,7 @@ fn main() {
     async fn test_edit_lines_success_response_formatting() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("response_formatting");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         // A file a grammar covers: an edit that parses says nothing but its
         // ids, which is what this checks. The other case is its own test.
@@ -1474,7 +1470,7 @@ fn main() {
         fs::write(&file_path, file_content)?;
 
         let filepath_str = file_path.to_str().unwrap();
-        let _init_res = init_edit_session(filepath_str, false)?;
+        let _init_res = init_file_entry(filepath_str, false)?;
 
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let line_1_id = find_line_id(&lines_view, "fn a() {}");
@@ -1517,14 +1513,14 @@ fn main() {
     async fn test_bash_syntax_validation_error_rolls_back() -> Result<()> {
         let _lock = DB_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let env = TestEnvironment::new("bash_syntax_error");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let file_path = env.dir.join("script.sh");
         let initial_content = "if [ \"$x\" = \"1\" ]; then\n    echo \"one\"\nfi\n";
         fs::write(&file_path, initial_content)?;
         let filepath_str = file_path.to_str().unwrap();
 
-        let _metadata = init_edit_session(filepath_str, false)?;
+        let _metadata = init_file_entry(filepath_str, false)?;
 
         // Find the line 3 ID (which is "fi")
         let lines_view = test_view_lines(&repository, filepath_str, 1, 3, None)?;
@@ -1554,7 +1550,7 @@ fn main() {
 
         // Restore initial content for strict validation test
         fs::write(&file_path, initial_content)?;
-        let _metadata_strict = init_edit_session(filepath_str, false)?;
+        let _metadata_strict = init_file_entry(filepath_str, false)?;
         let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
         let start_id_strict = find_line_id(&lines_view_strict, "fi");
         let edits_strict = vec![LineEdit {
@@ -1583,7 +1579,7 @@ fn main() {
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
 
         // Verify DB content was rolled back (re-query content of line 3)
-        let lines_strict = repository.fetch_lines_range(&_metadata_strict.session_id, 3, 3)?;
+        let lines_strict = repository.fetch_lines_range(&_metadata_strict.file_key, 3, 3)?;
         assert_eq!(lines_strict.len(), 1);
         assert_eq!(lines_strict[0].2.trim(), "fi");
 

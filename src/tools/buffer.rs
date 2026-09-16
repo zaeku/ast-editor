@@ -9,10 +9,10 @@ use std::fs;
 
 use rusqlite::Connection;
 
+use super::file_entry::reconcile_index;
 use super::line_id::{
     compute_line_hash, missing_field, parse_line_id, EditOp, LineEdit, MovePosition,
 };
-use super::session_db::reconcile_index;
 
 /// One line of a file being edited, paired with the sequence number that
 /// identifies it. Position in `LineBuffer::lines` is the line's order.
@@ -362,23 +362,23 @@ impl LineBuffer {
     }
 }
 
-/// The path a session tracks. Content lives on disk, so most operations need
-/// to get back to it from a session id alone.
-fn session_filepath(conn: &Connection, session_id: &str) -> Result<String> {
+/// The path an entry tracks. Content lives on disk, so most operations need
+/// to get back to it from a file key alone.
+fn entry_filepath(conn: &Connection, file_key: &str) -> Result<String> {
     conn.query_row(
-        "SELECT filepath FROM sessions WHERE session_id = ?1",
-        [session_id],
+        "SELECT filepath FROM files WHERE file_key = ?1",
+        [file_key],
         |row| row.get(0),
     )
-    .with_context(|| format!("No session found for session_id={}", session_id))
+    .with_context(|| format!("No entry found for file_key={}", file_key))
 }
 
-/// Read a session's file and pair each line with the identity the index holds
+/// Read a file and pair each line with the identity the index holds
 /// for it. The index stores order and identity; the text comes from disk.
-pub(crate) fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<LineBuffer> {
-    let filepath = session_filepath(conn, session_id)?;
+pub(crate) fn load_buffer(conn: &mut Connection, file_key: &str) -> Result<LineBuffer> {
+    let filepath = entry_filepath(conn, file_key)?;
 
-    // Callers reach here through init_edit_session, which reconciles, so the
+    // Callers reach here through init_file_entry, which reconciles, so the
     // index normally matches. It can still be short or long if the file changed
     // in the window between the two. Reconciling again keeps the ids an agent
     // is holding, where renumbering the file 1..N would discard every one of
@@ -398,9 +398,9 @@ pub(crate) fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<Lin
 
         let index: Vec<(i64, Option<String>)> = {
             let mut stmt = conn.prepare(
-                "SELECT sequence_id, parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order"
+                "SELECT sequence_id, parent_context FROM lines WHERE file_key = ?1 ORDER BY sort_order"
             )?;
-            let rows = stmt.query_map([session_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            let rows = stmt.query_map([file_key], |row| Ok((row.get(0)?, row.get(1)?)))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
 
@@ -413,7 +413,7 @@ pub(crate) fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<Lin
                         .replacen("{}", &filepath, 1)
                 );
             }
-            reconcile_index(conn, session_id, &filepath, &[])?;
+            reconcile_index(conn, file_key, &filepath, &[])?;
             reconciled = true;
             continue;
         }
@@ -430,8 +430,8 @@ pub(crate) fn load_buffer(conn: &mut Connection, session_id: &str) -> Result<Lin
 
         let stored_next: i64 = conn
             .query_row(
-                "SELECT next_line_id FROM sessions WHERE session_id = ?1",
-                [session_id],
+                "SELECT next_line_id FROM files WHERE file_key = ?1",
+                [file_key],
                 |row| row.get(0),
             )
             .unwrap_or(1);

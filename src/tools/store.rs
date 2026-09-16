@@ -21,6 +21,9 @@ pub(crate) fn get_db_path() -> Result<PathBuf> {
             .join("ast-editor")
     };
     fs::create_dir_all(&path).context("Failed to create cache directory")?;
+    // The one place the old word stays. Renaming the file would abandon every
+    // store already on disk rather than carry it over, which is the opposite of
+    // what the rename inside it is for.
     path.push("sessions.db");
     Ok(path)
 }
@@ -43,12 +46,18 @@ pub(crate) fn get_db_connection() -> Result<Connection> {
     conn.execute("PRAGMA temp_store = MEMORY;", [])
         .context("Failed to configure temp_store MEMORY")?;
 
+    // A store written before the tables were named for what they hold. The
+    // entries are a file's identity and the line ids keyed to it, so moving
+    // them is what keeps those ids: created afresh instead, every id a caller
+    // is holding would be refused on the next call.
+    migrate_sessions_to_files(&conn)?;
+
     // Every call makes what it needs: a caller whose first act is an edit opens
     // the store the same way a caller who reads first does, rather than finding
     // tables somebody else was expected to have created.
     let has_schema = conn
         .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'",
             [],
             |_| Ok(()),
         )
@@ -62,6 +71,52 @@ pub(crate) fn get_db_connection() -> Result<Connection> {
     Ok(conn)
 }
 
+/// Carry a store written under the old names over to the new ones. A file's
+/// entry was a `session` and its key a `session_id`, which described something
+/// opened and closed; nothing here is. The rows are the same rows, so they are
+/// renamed rather than rebuilt — the line ids a caller is holding are in them.
+///
+/// Runs on every open and does nothing once there is no `files` table,
+/// which is the state a store reaches on its first open after this and stays
+/// in. It is safe to delete once no store predates it.
+fn migrate_sessions_to_files(conn: &Connection) -> Result<()> {
+    // Two calls can find the old shape at the same moment, so the rename takes
+    // the write lock before it looks rather than after: whichever arrives
+    // second finds the work already done and the table gone.
+    conn.execute_batch("BEGIN IMMEDIATE;")
+        .context("Failed to take the store's write lock")?;
+    let renamed = (|| -> Result<()> {
+        let old = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()
+            .context("Failed to look for the store's previous schema")?
+            .is_some();
+        if !old {
+            return Ok(());
+        }
+        // `lines` keeps its name; only the key it joins on moves.
+        conn.execute_batch(
+            "ALTER TABLE sessions RENAME TO files;
+             ALTER TABLE files RENAME COLUMN session_id TO file_key;
+             ALTER TABLE lines RENAME COLUMN session_id TO file_key;",
+        )
+        .context("Failed to carry the store over to the names it uses now")
+    })();
+    match renamed {
+        Ok(()) => conn
+            .execute_batch("COMMIT;")
+            .context("Failed to commit the store's rename"),
+        Err(err) => {
+            let _ = conn.execute_batch("ROLLBACK;");
+            Err(err)
+        }
+    }
+}
+
 pub(crate) fn create_tables(conn: &Connection) -> Result<()> {
     let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |row| row.get(0))?;
     if auto_vacuum != 2 {
@@ -72,9 +127,9 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<()> {
     }
 
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS sessions (
+        "CREATE TABLE IF NOT EXISTS files (
             filepath TEXT PRIMARY KEY,
-            session_id TEXT UNIQUE NOT NULL,
+            file_key TEXT UNIQUE NOT NULL,
             file_hash TEXT NOT NULL,
             mtime INTEGER NOT NULL,
             last_accessed_at INTEGER NOT NULL,
@@ -83,21 +138,21 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<()> {
         );",
         [],
     )
-    .context("Failed to create sessions table")?;
+    .context("Failed to create files table")?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS lines (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
+            file_key TEXT NOT NULL,
             sequence_id INTEGER NOT NULL,
             line_hash TEXT,
             norm_hash TEXT,
-            -- The line's position. Every write replaces a session's rows, so
+            -- The line's position. Every write replaces a file's rows, so
             -- this is recomputed from the position rather than kept between
             -- them, and nothing reads it but ORDER BY.
             sort_order REAL NOT NULL,
             parent_context TEXT,
-            FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+            FOREIGN KEY(file_key) REFERENCES files(file_key) ON DELETE CASCADE
         );",
         [],
     )
@@ -105,7 +160,7 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<()> {
 
     // Add indices for fast lookups
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_lines_session_id ON lines(session_id);",
+        "CREATE INDEX IF NOT EXISTS idx_lines_session_id ON lines(file_key);",
         [],
     )
     .context("Failed to create index idx_lines_session_id")?;
@@ -142,10 +197,10 @@ const SESSION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub(crate) fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
     conn.execute(
-        "DELETE FROM sessions WHERE last_accessed_at < ?1;",
+        "DELETE FROM files WHERE last_accessed_at < ?1;",
         [now - SESSION_TTL_SECONDS],
     )
-    .context("Failed to clean up stale sessions")?;
+    .context("Failed to clean up stale files")?;
     conn.execute(
         "DELETE FROM previews WHERE created_at < ?1;",
         [now - PREVIEW_TTL_SECONDS],

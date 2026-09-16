@@ -6,18 +6,18 @@ use rusqlite::OptionalExtension;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::buffer::{load_buffer, LineBuffer};
+use super::file_entry::{compute_sha256, init_file_entry, reconcile_index};
 use super::line_id::{
-    compute_line_hash, compute_normalized_hash, compute_stored_hash, LineEdit, SessionMetadata,
+    compute_line_hash, compute_normalized_hash, compute_stored_hash, FileEntry, LineEdit,
 };
-use super::session_db::{compute_sha256, init_edit_session, reconcile_index};
 use super::store::{get_db_connection, PREVIEW_TTL_SECONDS};
 
-pub(crate) trait SessionRepository: Send + Sync {
-    fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata>;
-    fn get_total_lines(&self, session_id: &str) -> Result<usize>;
+pub(crate) trait FileStore: Send + Sync {
+    fn init_session(&self, filepath: &str, is_binary: bool) -> Result<FileEntry>;
+    fn get_total_lines(&self, file_key: &str) -> Result<usize>;
     fn fetch_lines_range(
         &self,
-        session_id: &str,
+        file_key: &str,
         start_line: usize,
         end_line: usize,
     ) -> Result<Vec<(i64, Option<String>, String)>>;
@@ -25,40 +25,40 @@ pub(crate) trait SessionRepository: Send + Sync {
     /// resulting buffer and the ids the batch would report.
     fn plan_line_edits(
         &self,
-        session_id: &str,
+        file_key: &str,
         edits: &[LineEdit],
     ) -> Result<(LineBuffer, Vec<String>)>;
-    /// Persist a planned buffer as the session's new index. Call only once the
+    /// Persist a planned buffer as the file's new index. Call only once the
     /// buffer's content has been accepted and written to disk.
-    fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()>;
-    fn get_session_crlf(&self, session_id: &str) -> Result<bool>;
-    fn get_session_id(&self, filepath: &str) -> Result<Option<String>>;
-    fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>>;
-    fn smart_resync(&self, filepath: &str, session_id: &str, start_ids: &[String]) -> Result<()>;
+    fn commit_buffer(&self, file_key: &str, buffer: &LineBuffer) -> Result<()>;
+    fn get_file_crlf(&self, file_key: &str) -> Result<bool>;
+    fn get_file_key(&self, filepath: &str) -> Result<Option<String>>;
+    fn find_matching_lines(&self, file_key: &str, pattern: &regex::Regex) -> Result<Vec<usize>>;
+    fn smart_resync(&self, filepath: &str, file_key: &str, start_ids: &[String]) -> Result<()>;
     fn create_preview(&self, filepath: &str, edits: &[LineEdit]) -> Result<String>;
     fn take_preview(&self, filepath: &str, preview_id: &str) -> Result<Vec<LineEdit>>;
 }
 
-pub(crate) struct SqliteSessionRepository;
+pub(crate) struct SqliteFileStore;
 
-impl SessionRepository for SqliteSessionRepository {
-    fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata> {
-        init_edit_session(filepath, is_binary)
+impl FileStore for SqliteFileStore {
+    fn init_session(&self, filepath: &str, is_binary: bool) -> Result<FileEntry> {
+        init_file_entry(filepath, is_binary)
     }
 
-    fn get_total_lines(&self, session_id: &str) -> Result<usize> {
+    fn get_total_lines(&self, file_key: &str) -> Result<usize> {
         let conn = get_db_connection()?;
         let total_lines: usize = conn.query_row(
-            "SELECT COUNT(*) FROM lines WHERE session_id = ?1",
-            rusqlite::params![session_id],
+            "SELECT COUNT(*) FROM lines WHERE file_key = ?1",
+            rusqlite::params![file_key],
             |row| row.get(0),
         )?;
         Ok(total_lines)
     }
 
-    fn find_matching_lines(&self, session_id: &str, pattern: &regex::Regex) -> Result<Vec<usize>> {
+    fn find_matching_lines(&self, file_key: &str, pattern: &regex::Regex) -> Result<Vec<usize>> {
         let mut conn = get_db_connection()?;
-        let buffer = load_buffer(&mut conn, session_id)?;
+        let buffer = load_buffer(&mut conn, file_key)?;
         Ok(buffer
             .lines
             .iter()
@@ -68,11 +68,11 @@ impl SessionRepository for SqliteSessionRepository {
             .collect())
     }
 
-    fn get_session_crlf(&self, session_id: &str) -> Result<bool> {
+    fn get_file_crlf(&self, file_key: &str) -> Result<bool> {
         let conn = get_db_connection()?;
         let crlf: i32 = conn.query_row(
-            "SELECT COALESCE(line_ending_crlf, 0) FROM sessions WHERE session_id = ?1",
-            rusqlite::params![session_id],
+            "SELECT COALESCE(line_ending_crlf, 0) FROM files WHERE file_key = ?1",
+            rusqlite::params![file_key],
             |row| row.get(0),
         )?;
         Ok(crlf != 0)
@@ -80,12 +80,12 @@ impl SessionRepository for SqliteSessionRepository {
 
     fn fetch_lines_range(
         &self,
-        session_id: &str,
+        file_key: &str,
         start_line: usize,
         end_line: usize,
     ) -> Result<Vec<(i64, Option<String>, String)>> {
         let mut conn = get_db_connection()?;
-        let buffer = load_buffer(&mut conn, session_id)?;
+        let buffer = load_buffer(&mut conn, file_key)?;
         let from = start_line.saturating_sub(1);
         let to = std::cmp::min(end_line, buffer.lines.len());
         if from >= to {
@@ -105,26 +105,26 @@ impl SessionRepository for SqliteSessionRepository {
 
     fn plan_line_edits(
         &self,
-        session_id: &str,
+        file_key: &str,
         edits: &[LineEdit],
     ) -> Result<(LineBuffer, Vec<String>)> {
         let mut conn = get_db_connection()?;
-        let mut buffer = load_buffer(&mut conn, session_id)?;
+        let mut buffer = load_buffer(&mut conn, file_key)?;
         let modified_lines = buffer.apply(edits)?;
         Ok((buffer, modified_lines))
     }
 
-    fn commit_buffer(&self, session_id: &str, buffer: &LineBuffer) -> Result<()> {
+    fn commit_buffer(&self, file_key: &str, buffer: &LineBuffer) -> Result<()> {
         let mut conn = get_db_connection()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM lines WHERE session_id = ?1", [session_id])?;
+        tx.execute("DELETE FROM lines WHERE file_key = ?1", [file_key])?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO lines (session_id, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
+                "INSERT INTO lines (file_key, sequence_id, line_hash, norm_hash, sort_order, parent_context) VALUES (?1, ?2, ?3, ?4, ?5, ?6);"
             )?;
             for (idx, line) in buffer.lines.iter().enumerate() {
                 stmt.execute(rusqlite::params![
-                    session_id,
+                    file_key,
                     line.seq,
                     compute_stored_hash(&line.content),
                     compute_normalized_hash(&line.content),
@@ -211,12 +211,12 @@ impl SessionRepository for SqliteSessionRepository {
         Ok(serde_json::from_str(&edits_json)?)
     }
 
-    fn get_session_id(&self, filepath: &str) -> Result<Option<String>> {
+    fn get_file_key(&self, filepath: &str) -> Result<Option<String>> {
         let conn = get_db_connection()?;
         let res = conn.query_row(
-            "SELECT session_id FROM sessions WHERE filepath = ?1 ORDER BY last_accessed_at DESC LIMIT 1",
+            "SELECT file_key FROM files WHERE filepath = ?1 ORDER BY last_accessed_at DESC LIMIT 1",
             [filepath],
-            |row| row.get::<_, String>(0)
+            |row| row.get::<_, String>(0),
         );
         match res {
             Ok(sid) => Ok(Some(sid)),
@@ -225,8 +225,8 @@ impl SessionRepository for SqliteSessionRepository {
         }
     }
 
-    fn smart_resync(&self, filepath: &str, session_id: &str, start_ids: &[String]) -> Result<()> {
+    fn smart_resync(&self, filepath: &str, file_key: &str, start_ids: &[String]) -> Result<()> {
         let mut conn = get_db_connection()?;
-        reconcile_index(&mut conn, session_id, filepath, start_ids).map(|_| ())
+        reconcile_index(&mut conn, file_key, filepath, start_ids).map(|_| ())
     }
 }

@@ -1,5 +1,5 @@
 use crate::tools::formatter;
-use crate::tools::repository::SessionRepository;
+use crate::tools::repository::FileStore;
 use anyhow::Result;
 
 pub(crate) struct ViewLinesOutput {
@@ -9,7 +9,7 @@ pub(crate) struct ViewLinesOutput {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn view_lines(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     start_line: Option<usize>,
     end_line: Option<usize>,
@@ -19,17 +19,16 @@ pub(crate) fn view_lines(
     fixed_string: Option<bool>,
 ) -> Result<ViewLinesOutput> {
     let meta = repository.init_session(filepath, false)?;
-    let session_id = meta.session_id;
+    let file_key = meta.file_key;
 
-    let total_lines = repository.get_total_lines(&session_id)?;
+    let total_lines = repository.get_total_lines(&file_key)?;
 
     // Fetch enclosing contexts map and absolute ranges
     let conn = crate::tools::store::get_db_connection()?;
     let all_parent_contexts = {
-        let mut stmt = conn.prepare(
-            "SELECT parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order",
-        )?;
-        let mut rows = stmt.query(rusqlite::params![session_id])?;
+        let mut stmt = conn
+            .prepare("SELECT parent_context FROM lines WHERE file_key = ?1 ORDER BY sort_order")?;
+        let mut rows = stmt.query(rusqlite::params![file_key])?;
         let mut contexts = Vec::new();
         while let Some(row) = rows.next()? {
             let ctx: Option<String> = row.get(0)?;
@@ -71,7 +70,7 @@ pub(crate) fn view_lines(
                 err
             )
         })?;
-        let matches = repository.find_matching_lines(&session_id, &pattern)?;
+        let matches = repository.find_matching_lines(&file_key, &pattern)?;
 
         if matches.is_empty() {
             let config = crate::tools::metadata::get_config();
@@ -150,7 +149,7 @@ pub(crate) fn view_lines(
     for (idx, (start, end)) in intervals.iter().enumerate() {
         let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
             repository,
-            &session_id,
+            &file_key,
             *start,
             *end,
             only_ids_bool,
@@ -246,7 +245,7 @@ pub(crate) fn view_lines(
 }
 
 pub(crate) fn create_lines(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     content: &str,
     return_ids: Option<bool>,
@@ -271,7 +270,7 @@ pub(crate) fn create_lines(
             let config = crate::tools::metadata::get_config();
             let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
                 repository,
-                &meta.session_id,
+                &meta.file_key,
                 1,
                 meta.total_lines,
                 true,
@@ -356,12 +355,12 @@ fn warning_field(message: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::repository::SqliteSessionRepository;
+    use crate::tools::repository::SqliteFileStore;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
 
     fn test_view_lines(
-        repository: &impl SessionRepository,
+        repository: &impl FileStore,
         filepath: &str,
         start_line: usize,
         end_line: usize,
@@ -440,7 +439,7 @@ mod tests {
         let filepath_str = file_path.to_str().unwrap();
 
         let content = "line 1\nline 2\nline 3";
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let output = create_lines(&repository, filepath_str, content, Some(true))?;
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
@@ -484,7 +483,7 @@ mod tests {
         let filepath_str = file_path.to_str().unwrap();
 
         let content = "line 1\nline 2\nline 3";
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let output = create_lines(&repository, filepath_str, content, Some(false))?;
 
         let val: serde_json::Value = serde_json::from_str(&output)?;
@@ -521,7 +520,7 @@ mod tests {
         fs::write(filepath_str, initial_content)?;
 
         // Try to create again
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let res = create_lines(&repository, filepath_str, "new content", None);
         assert!(res.is_err());
         let err_msg = res.err().unwrap().to_string();
@@ -549,7 +548,7 @@ mod tests {
 
         // Write content containing a null byte to trigger BINARY_FILE_ERROR during DB initialization
         let content = "hello \x00 world";
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let res = create_lines(&repository, filepath_str, content, None);
 
         assert!(res.is_err());
@@ -580,7 +579,7 @@ mod tests {
             lines.push(format!("line {}", idx));
         }
         let content = lines.join("\n");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let _ = create_lines(&repository, filepath_str, &content, None)?;
 
         // View lines from 1 to 1000
@@ -623,7 +622,7 @@ mod tests {
         // Line 1: normal, Line 2: 2500 characters, Line 3: normal
         let long_line = "A".repeat(2500);
         let content = format!("short 1\n{}\nshort 3", long_line);
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let _ = create_lines(&repository, filepath_str, &content, None)?;
 
         let output = test_view_lines(&repository, filepath_str, 1, 3, None)?;
@@ -675,7 +674,7 @@ mod tests {
             lines.push(line_content.clone());
         }
         let content = lines.join("\n");
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let _ = create_lines(&repository, filepath_str, &content, None)?;
 
         let output = test_view_lines(&repository, filepath_str, 1, 50, None)?;
@@ -734,7 +733,7 @@ fn helper_func() {
 "#;
         fs::write(filepath_str, code)?;
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
 
         let res = view_lines(
             &repository,
@@ -796,7 +795,7 @@ Details here
 "#;
         fs::write(filepath_str, doc)?;
 
-        let repository = SqliteSessionRepository;
+        let repository = SqliteFileStore;
         let res = view_lines(
             &repository,
             filepath_str,

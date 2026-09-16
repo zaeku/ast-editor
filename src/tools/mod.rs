@@ -1,5 +1,6 @@
 pub(crate) mod buffer;
 pub(crate) mod edit;
+pub(crate) mod file_entry;
 pub(crate) mod formatter;
 pub(crate) mod inspect;
 pub(crate) mod line_id;
@@ -7,7 +8,6 @@ pub(crate) mod metadata;
 pub(crate) mod outline;
 pub(crate) mod repository;
 pub(crate) mod script;
-pub(crate) mod session_db;
 pub(crate) mod store;
 pub(crate) mod view;
 
@@ -16,9 +16,9 @@ pub(crate) mod view;
 // the index falling out of step with a file being written under it. Inside the
 // crate rather than under tests/ so that nothing has to be `pub` to be tested.
 #[cfg(test)]
-mod line_edit_tests;
+mod file_entry_tests;
 #[cfg(test)]
-mod session_db_tests;
+mod line_edit_tests;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
@@ -339,7 +339,7 @@ impl ToolDispatcher {
                     paths.extend(more.iter().filter_map(|v| v.as_str()).map(str::to_string));
                 }
 
-                let repository = repository::SqliteSessionRepository;
+                let repository = repository::SqliteFileStore;
                 let mut blocks = Vec::new();
                 let mut per_file = Vec::new();
 
@@ -395,7 +395,7 @@ impl ToolDispatcher {
                     .get("dry_run")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let repository = repository::SqliteSessionRepository;
+                let repository = repository::SqliteFileStore;
 
                 let text = if let Some(preview_id) = arguments.get("apply").and_then(|v| v.as_str())
                 {
@@ -443,7 +443,7 @@ impl ToolDispatcher {
                     .and_then(|v| v.as_str())
                     .context("Missing content")?;
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
-                let repository = repository::SqliteSessionRepository;
+                let repository = repository::SqliteFileStore;
                 let text = view::create_lines(&repository, filepath, content, return_ids)?;
                 Ok(fenced("json", &text))
             }

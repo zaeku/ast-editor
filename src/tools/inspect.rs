@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tree_sitter::{Query, QueryCursor, StreamingIterator};
 
 use crate::parser::ParserManager;
-use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
+use crate::tools::repository::{FileStore, SqliteFileStore};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct InspectArgs {
@@ -75,15 +75,15 @@ pub(crate) struct OutlineEntry {
     pub end_id: Option<String>,
 }
 
-/// The id `edit` would take for a line number, if a session exists.
+/// The id `edit` would take for a line number, if the file has an entry.
 fn line_id_at(
-    repository: &impl SessionRepository,
-    session_id: &Option<String>,
+    repository: &impl FileStore,
+    file_key: &Option<String>,
     line: usize,
 ) -> Option<String> {
-    let session_id = session_id.as_ref()?;
+    let file_key = file_key.as_ref()?;
     let row = repository
-        .fetch_lines_range(session_id, line, line)
+        .fetch_lines_range(file_key, line, line)
         .ok()?
         .into_iter()
         .next()?;
@@ -264,8 +264,8 @@ fn outline_of(
     language: &tree_sitter::Language,
     root: tree_sitter::Node,
     code: &str,
-    repository: &impl SessionRepository,
-    session_id: &Option<String>,
+    repository: &impl FileStore,
+    file_key: &Option<String>,
     lang_name: &str,
 ) -> Vec<OutlineEntry> {
     let mut entries = Vec::new();
@@ -303,8 +303,8 @@ fn outline_of(
                     signature: text.lines().next().unwrap_or("").trim().to_string(),
                     start_line,
                     end_line,
-                    start_id: line_id_at(repository, session_id, start_line),
-                    end_id: line_id_at(repository, session_id, end_line),
+                    start_id: line_id_at(repository, file_key, start_line),
+                    end_id: line_id_at(repository, file_key, end_line),
                 });
             }
         }
@@ -346,11 +346,11 @@ pub(crate) async fn outline_report(
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let lang_name = language_name(ext)?;
 
-    let repository = SqliteSessionRepository;
-    let session_id_opt = repository
+    let repository = SqliteFileStore;
+    let file_key_opt = repository
         .init_session(filepath, false)
         .ok()
-        .map(|meta| meta.session_id);
+        .map(|meta| meta.file_key);
 
     // Markdown is read by comrak, not by a grammar, so its headings are the
     // outline. The markdown path already finds them; they come back as
@@ -366,7 +366,7 @@ pub(crate) async fn outline_report(
             &code,
             &args,
             &repository,
-            &session_id_opt,
+            &file_key_opt,
         )?)?;
         let headings = found["matches"]
             .as_array()
@@ -408,7 +408,7 @@ pub(crate) async fn outline_report(
             root_node,
             &code,
             &repository,
-            &session_id_opt,
+            &file_key_opt,
             &lang_name,
         ),
     };
@@ -439,16 +439,16 @@ pub(crate) async fn run_inspect(
         );
     }
 
-    // JIT edit session pre-caching
-    let repository = SqliteSessionRepository;
-    let mut session_id_opt = None;
+    // JIT entry pre-caching
+    let repository = SqliteFileStore;
+    let mut file_key_opt = None;
     match repository.init_session(&args.filepath, false) {
         Ok(meta) => {
-            session_id_opt = Some(meta.session_id);
+            file_key_opt = Some(meta.file_key);
         }
         Err(e) => {
             tracing::warn!(
-                "Failed to initialize edit session for inspect pre-caching: {:?}",
+                "Failed to make a file entry for inspect pre-caching: {:?}",
                 e
             );
         }
@@ -457,7 +457,7 @@ pub(crate) async fn run_inspect(
     if lang_name == "markdown" {
         return Ok(Inspected {
             blocks: Vec::new(),
-            report: run_markdown_inspect(&code, &args, &repository, &session_id_opt)?,
+            report: run_markdown_inspect(&code, &args, &repository, &file_key_opt)?,
         });
     }
 
@@ -521,10 +521,10 @@ pub(crate) async fn run_inspect(
                             let end_line = end_position.row + 1;
 
                             if args.include_code.unwrap_or(true) {
-                                blocks.push(match session_id_opt {
-                                    Some(ref session_id) => definition_lines(
+                                blocks.push(match file_key_opt {
+                                    Some(ref file_key) => definition_lines(
                                         &repository,
-                                        session_id,
+                                        file_key,
                                         start_line,
                                         end_line,
                                     )
@@ -556,8 +556,8 @@ pub(crate) async fn run_inspect(
                             capture_name,
                             start_line,
                             end_line,
-                            start_id: line_id_at(&repository, &session_id_opt, start_line),
-                            end_id: line_id_at(&repository, &session_id_opt, end_line),
+                            start_id: line_id_at(&repository, &file_key_opt, start_line),
+                            end_id: line_id_at(&repository, &file_key_opt, end_line),
                             text: if definition.is_some() {
                                 node_text.lines().next().unwrap_or("").to_string()
                             } else {
@@ -603,14 +603,14 @@ pub(crate) async fn run_inspect(
 /// The lines of a definition, rendered the way `view` renders them, so a
 /// block read here and a block read there are the same thing.
 fn definition_lines(
-    repository: &impl crate::tools::repository::SessionRepository,
-    session_id: &str,
+    repository: &impl crate::tools::repository::FileStore,
+    file_key: &str,
     start_line: usize,
     end_line: usize,
 ) -> Result<String> {
     let formatted = crate::tools::formatter::retrieve_and_format_lines(
         repository,
-        session_id,
+        file_key,
         start_line,
         end_line,
         false,
@@ -623,8 +623,8 @@ fn definition_lines(
 pub(crate) fn run_markdown_inspect(
     code: &str,
     args: &InspectArgs,
-    repository: &impl SessionRepository,
-    session_id_opt: &Option<String>,
+    repository: &impl FileStore,
+    file_key_opt: &Option<String>,
 ) -> Result<String> {
     let arena = comrak::Arena::new();
     let mut options = comrak::Options::default();
@@ -636,7 +636,7 @@ pub(crate) fn run_markdown_inspect(
     let root = comrak::parse_document(&arena, code, &options);
     let mut matches = Vec::new();
 
-    collect_markdown_matches(root, code, args, repository, session_id_opt, &mut matches);
+    collect_markdown_matches(root, code, args, repository, file_key_opt, &mut matches);
 
     let mut status: Option<String> = None;
     let mut hint = None;
@@ -673,8 +673,8 @@ fn collect_markdown_matches<'a>(
     node: &'a comrak::nodes::AstNode<'a>,
     code: &str,
     args: &InspectArgs,
-    repository: &impl SessionRepository,
-    session_id_opt: &Option<String>,
+    repository: &impl FileStore,
+    file_key_opt: &Option<String>,
     matches: &mut Vec<InspectMatch>,
 ) {
     let data = node.data.borrow();
@@ -754,8 +754,8 @@ fn collect_markdown_matches<'a>(
             capture_name: kind.to_string(),
             start_line,
             end_line,
-            start_id: line_id_at(repository, session_id_opt, start_line),
-            end_id: line_id_at(repository, session_id_opt, end_line),
+            start_id: line_id_at(repository, file_key_opt, start_line),
+            end_id: line_id_at(repository, file_key_opt, end_line),
             text: node_text,
             definition,
         });
@@ -764,7 +764,7 @@ fn collect_markdown_matches<'a>(
     // Recurse into children
     let mut child = node.first_child();
     while let Some(c) = child {
-        collect_markdown_matches(c, code, args, repository, session_id_opt, matches);
+        collect_markdown_matches(c, code, args, repository, file_key_opt, matches);
         child = c.next_sibling();
     }
 }
@@ -826,7 +826,7 @@ fn safe_byte_slice(s: &str, mut start: usize, mut end: usize) -> &str {
 #[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
-    use crate::tools::repository::SqliteSessionRepository;
+    use crate::tools::repository::SqliteFileStore;
 
     /// `extract_text` indexes `lines[l - 1]`, so a line number of zero or one
     /// past the end is an out-of-bounds read rather than an empty answer. The
@@ -859,8 +859,8 @@ fn main() {}
 - Item 2
 "#;
 
-        let repository = SqliteSessionRepository;
-        let session_id_opt = None;
+        let repository = SqliteFileStore;
+        let file_key_opt = None;
 
         // Test Headings
         let args = InspectArgs {
@@ -869,8 +869,7 @@ fn main() {}
             template: Some("headings".to_string()),
             include_code: Some(true),
         };
-        let res_val =
-            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val = run_markdown_inspect(md_content, &args, &repository, &file_key_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Heading""#));
         assert!(text.contains(r##""text": "# Heading 1"##));
@@ -882,8 +881,7 @@ fn main() {}
             template: Some("code_blocks".to_string()),
             include_code: Some(true),
         };
-        let res_val =
-            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val = run_markdown_inspect(md_content, &args, &repository, &file_key_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "CodeBlock""#));
         assert!(text.contains("fn main()"));
@@ -895,8 +893,7 @@ fn main() {}
             template: Some("links".to_string()),
             include_code: Some(true),
         };
-        let res_val =
-            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val = run_markdown_inspect(md_content, &args, &repository, &file_key_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Link""#));
         assert!(text.contains(r#""capture_name": "Image""#));
@@ -908,8 +905,7 @@ fn main() {}
             template: Some("tables".to_string()),
             include_code: Some(true),
         };
-        let res_val =
-            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val = run_markdown_inspect(md_content, &args, &repository, &file_key_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Table""#));
 
@@ -920,8 +916,7 @@ fn main() {}
             template: Some("lists".to_string()),
             include_code: Some(true),
         };
-        let res_val =
-            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val = run_markdown_inspect(md_content, &args, &repository, &file_key_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "List""#));
 
@@ -932,8 +927,7 @@ fn main() {}
             template: None,
             include_code: Some(true),
         };
-        let res_val =
-            run_markdown_inspect(md_content, &args, &repository, &session_id_opt).unwrap();
+        let res_val = run_markdown_inspect(md_content, &args, &repository, &file_key_opt).unwrap();
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Paragraph""#));
     }

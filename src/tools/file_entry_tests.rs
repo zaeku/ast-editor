@@ -1,4 +1,4 @@
-//! What `session_db.rs` declares, tested against a real store.
+//! What `file_entry.rs` declares, tested against a real store.
 //!
 //! Its own file rather than a module inside that one: the tests are two fifths
 //! of it, and the cut this leaves behind — a store and the ids keyed on it —
@@ -7,9 +7,9 @@
 
 #![allow(clippy::await_holding_lock)]
 
+use crate::tools::file_entry::*;
 use crate::tools::line_id::*;
-use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
-use crate::tools::session_db::*;
+use crate::tools::repository::{FileStore, SqliteFileStore};
 use crate::tools::store::*;
 use crate::tools::TEST_DB_LOCK as DB_LOCK;
 use anyhow::{Context, Result};
@@ -18,7 +18,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn view_lines_old_compat(
-    repository: &impl SessionRepository,
+    repository: &impl FileStore,
     filepath: &str,
     start_line: usize,
     end_line: usize,
@@ -81,9 +81,9 @@ fn test_create_tables_in_memory() -> Result<()> {
 
     // Verify that tables exist by query
     let mut stmt =
-        conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions';")?;
+        conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='files';")?;
     let mut rows = stmt.query([])?;
-    assert!(rows.next()?.is_some(), "sessions table should exist");
+    assert!(rows.next()?.is_some(), "files table should exist");
 
     let mut stmt =
         conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='lines';")?;
@@ -187,29 +187,29 @@ fn test_cleanup_stale_sessions() -> Result<()> {
     // derived from the window is stale or fresh whatever the window is, and
     // the test then holds for a window of two minutes or of none. What the
     // window is for decides the two numbers: it has to outlast the task an
-    // agent is in the middle of, and a session nothing has touched for a
+    // agent is in the middle of, and an entry nothing has touched for a
     // month is not one of those.
     let day = 24 * 60 * 60;
     let stale_time = now - 31 * day;
     let fresh_time = now - day;
 
     conn.execute(
-        "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
-        rusqlite::params!["stale.rs", "session_stale", "hash1", 100, stale_time],
+        "INSERT INTO files (filepath, file_key, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
+        rusqlite::params!["stale.rs", "key_stale", "hash1", 100, stale_time],
     )?;
 
     conn.execute(
-        "INSERT INTO sessions (filepath, session_id, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
-        rusqlite::params!["fresh.rs", "session_fresh", "hash2", 100, fresh_time],
+        "INSERT INTO files (filepath, file_key, file_hash, mtime, last_accessed_at) VALUES (?1, ?2, ?3, ?4, ?5);",
+        rusqlite::params!["fresh.rs", "key_fresh", "hash2", 100, fresh_time],
     )?;
 
     cleanup_stale_sessions(&conn)?;
 
-    let mut stmt = conn.prepare("SELECT count(*) FROM sessions")?;
+    let mut stmt = conn.prepare("SELECT count(*) FROM files")?;
     let count: i64 = stmt.query_row([], |row| row.get(0))?;
     assert_eq!(count, 1);
 
-    let mut stmt = conn.prepare("SELECT filepath FROM sessions")?;
+    let mut stmt = conn.prepare("SELECT filepath FROM files")?;
     let filepath: String = stmt.query_row([], |row| row.get(0))?;
     assert_eq!(filepath, "fresh.rs");
 
@@ -217,7 +217,7 @@ fn test_cleanup_stale_sessions() -> Result<()> {
 }
 
 #[test]
-fn test_init_edit_session_nonexistent_file() -> Result<()> {
+fn test_init_file_entry_nonexistent_file() -> Result<()> {
     let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-nonexistent");
     if temp_dir.exists() {
@@ -226,10 +226,10 @@ fn test_init_edit_session_nonexistent_file() -> Result<()> {
     let file_path = temp_dir.join("missing.rs");
     let filepath_str = file_path.to_str().unwrap();
 
-    let res = init_edit_session(filepath_str, false);
+    let res = init_file_entry(filepath_str, false);
     assert!(res.is_err());
 
-    let metadata = init_edit_session(filepath_str, true)?;
+    let metadata = init_file_entry(filepath_str, true)?;
     assert_eq!(metadata.total_lines, 0);
     assert!(metadata.is_supported);
     assert!(file_path.exists());
@@ -239,14 +239,14 @@ fn test_init_edit_session_nonexistent_file() -> Result<()> {
 }
 
 #[test]
-fn test_init_edit_session_binary_file() -> Result<()> {
+fn test_init_file_entry_binary_file() -> Result<()> {
     let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-binary");
     fs::create_dir_all(&temp_dir)?;
     let file_path = temp_dir.join("binary.bin");
     fs::write(&file_path, b"Hello\x00world")?;
 
-    let res = init_edit_session(file_path.to_str().unwrap(), false);
+    let res = init_file_entry(file_path.to_str().unwrap(), false);
     assert!(res.is_err());
     let err_msg = format!("{:?}", res.err().unwrap());
     assert!(err_msg.contains("BINARY_FILE_ERROR"));
@@ -256,14 +256,14 @@ fn test_init_edit_session_binary_file() -> Result<()> {
 }
 
 #[test]
-fn test_init_edit_session_unsupported_language() -> Result<()> {
+fn test_init_file_entry_unsupported_language() -> Result<()> {
     let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-unsupported");
     fs::create_dir_all(&temp_dir)?;
     let file_path = temp_dir.join("unsupported.txt");
     fs::write(&file_path, "Hello\nworld")?;
 
-    let metadata = init_edit_session(file_path.to_str().unwrap(), false)?;
+    let metadata = init_file_entry(file_path.to_str().unwrap(), false)?;
     assert_eq!(metadata.total_lines, 2);
     assert!(!metadata.is_supported);
     assert!(metadata.warning_message.is_some());
@@ -273,7 +273,7 @@ fn test_init_edit_session_unsupported_language() -> Result<()> {
 }
 
 #[test]
-fn test_init_edit_session_lifecycle() -> Result<()> {
+fn test_init_file_entry_lifecycle() -> Result<()> {
     let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
     let temp_dir = crate::tools::test_temp_dir("line-editor-test-init-lifecycle");
     fs::create_dir_all(&temp_dir)?;
@@ -281,19 +281,19 @@ fn test_init_edit_session_lifecycle() -> Result<()> {
     fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
     let filepath_str = file_path.to_str().unwrap();
 
-    let metadata1 = init_edit_session(filepath_str, false)?;
+    let metadata1 = init_file_entry(filepath_str, false)?;
     assert_eq!(metadata1.total_lines, 3);
     assert!(metadata1.is_supported);
     assert!(metadata1.warning_message.is_none());
 
-    let metadata2 = init_edit_session(filepath_str, false)?;
-    assert_eq!(metadata1.session_id, metadata2.session_id);
+    let metadata2 = init_file_entry(filepath_str, false)?;
+    assert_eq!(metadata1.file_key, metadata2.file_key);
     assert_eq!(metadata1.file_hash, metadata2.file_hash);
     assert_eq!(metadata1.mtime, metadata2.mtime);
 
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
     let ids_before: Vec<i64> = repository
-        .fetch_lines_range(&metadata1.session_id, 1, metadata1.total_lines)?
+        .fetch_lines_range(&metadata1.file_key, 1, metadata1.total_lines)?
         .into_iter()
         .map(|(seq, _, _)| seq)
         .collect();
@@ -302,15 +302,15 @@ fn test_init_edit_session_lifecycle() -> Result<()> {
         &file_path,
         "fn main() {\n    println!(\"Hello!\");\n    // extra line\n}\n",
     )?;
-    let metadata3 = init_edit_session(filepath_str, false)?;
-    // The session is reconciled rather than rebuilt, so it keeps its
+    let metadata3 = init_file_entry(filepath_str, false)?;
+    // The entry is reconciled rather than rebuilt, so it keeps its
     // identity and the lines that survived keep their sequence numbers.
-    assert_eq!(metadata1.session_id, metadata3.session_id);
+    assert_eq!(metadata1.file_key, metadata3.file_key);
     assert_ne!(metadata1.file_hash, metadata3.file_hash);
     assert_eq!(metadata3.total_lines, 4);
 
     let ids_after: Vec<i64> = repository
-        .fetch_lines_range(&metadata3.session_id, 1, metadata3.total_lines)?
+        .fetch_lines_range(&metadata3.file_key, 1, metadata3.total_lines)?
         .into_iter()
         .map(|(seq, _, _)| seq)
         .collect();
@@ -331,7 +331,7 @@ fn test_init_edit_session_lifecycle() -> Result<()> {
     // The store holds no text, so content is checked through the buffer
     // the repository serves from disk.
     let lines: Vec<String> = repository
-        .fetch_lines_range(&metadata3.session_id, 1, metadata3.total_lines)?
+        .fetch_lines_range(&metadata3.file_key, 1, metadata3.total_lines)?
         .into_iter()
         .map(|(_, _, content)| content)
         .collect();
@@ -372,10 +372,10 @@ async fn test_view_lines() -> Result<()> {
     fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
     let filepath_str = file_path.to_str().unwrap();
 
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
-    // 1. Initialize session
-    let metadata = init_edit_session(filepath_str, false)?;
+    // 1. Make the entry
+    let metadata = init_file_entry(filepath_str, false)?;
     assert_eq!(metadata.total_lines, 3);
 
     // 2. View all lines (1 to 3)
@@ -445,9 +445,9 @@ async fn test_view_lines_jit_initialization() -> Result<()> {
     fs::write(&file_path, "fn main() {\n    println!(\"Hello!\");\n}\n")?;
     let filepath_str = file_path.to_str().unwrap();
 
-    let repository = SqliteSessionRepository;
+    let repository = SqliteFileStore;
 
-    // Call view_lines directly without calling init_edit_session
+    // Call view_lines directly without calling init_file_entry
     let output = view_lines_old_compat(&repository, filepath_str, 1, 3, None)?;
 
     let val: serde_json::Value = serde_json::from_str(&output)?;

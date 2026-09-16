@@ -54,7 +54,7 @@ fn schema_of(tool: &str) -> Result<Value> {
         .with_context(|| format!("Unknown tool '{}'", name))
 }
 
-/// An absolute path, so that a session is keyed the same however the caller
+/// An absolute path, so that an entry is keyed the same however the caller
 /// spelled it. The file need not exist yet: `create` makes one.
 pub(crate) fn absolute(path: &str) -> Result<String> {
     let path = std::path::Path::new(path);
@@ -410,8 +410,8 @@ mod tests {
 
     #[test]
     fn test_a_relative_path_becomes_absolute() {
-        // A session is keyed by the path string, so the same file reached from
-        // two directories must not become two sessions.
+        // An entry is keyed by the path string, so the same file reached from
+        // two directories must not become two files.
         let parsed = arguments("view", &args(&["some/where.rs"])).unwrap();
         let path = parsed["filepath"].as_str().unwrap();
         assert!(std::path::Path::new(path).is_absolute(), "{}", path);

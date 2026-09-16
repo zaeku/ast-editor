@@ -236,11 +236,6 @@ impl ToolDispatcher {
                                 "required": ["op"]
                             }
                         },
-                        "strict_validation": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "If true, rolls back edits on syntax or parser error. If false, saves changes anyway and returns warnings/errors."
-                        },
                         "dry_run": {
                             "type": "boolean",
                             "default": false,
@@ -387,10 +382,6 @@ impl ToolDispatcher {
                     .get("filepath")
                     .and_then(|v| v.as_str())
                     .context("Missing filepath")?;
-                let strict_validation = arguments
-                    .get("strict_validation")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
                 let dry_run = arguments
                     .get("dry_run")
                     .and_then(|v| v.as_bool())
@@ -399,14 +390,7 @@ impl ToolDispatcher {
 
                 let text = if let Some(preview_id) = arguments.get("apply").and_then(|v| v.as_str())
                 {
-                    edit::apply_preview(
-                        &repository,
-                        filepath,
-                        preview_id,
-                        strict_validation,
-                        parser_manager,
-                    )
-                    .await?
+                    edit::apply_preview(&repository, filepath, preview_id, parser_manager).await?
                 } else {
                     let edits_val = arguments.get("edits").context("Missing edits array")?;
                     let edits: Vec<line_id::LineEdit> = serde_json::from_value(edits_val.clone())?;
@@ -422,14 +406,7 @@ impl ToolDispatcher {
                             fenced("json", &preview.report)
                         ));
                     }
-                    edit::edit_lines(
-                        &repository,
-                        filepath,
-                        edits,
-                        strict_validation,
-                        parser_manager,
-                    )
-                    .await?
+                    edit::edit_lines(&repository, filepath, edits, parser_manager).await?
                 };
                 Ok(fenced("json", &text))
             }

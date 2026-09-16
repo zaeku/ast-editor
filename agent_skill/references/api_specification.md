@@ -113,7 +113,6 @@ Apply edits transactionally to a file. Answers with the lines it changed, each a
 | `dry_run` | `boolean` |  | If true, returns the unified diff and the syntax result the edits would produce, without writing to disk or assigning line IDs. The response carries a preview_id whatever the verdict; pass it back as 'apply' to commit that exact batch without resending it. |
 | `edits` | `array` |  |  |
 | `filepath` | `string` | yes | Path to the file, relative to the working directory or absolute |
-| `strict_validation` | `boolean` |  | If true, rolls back edits on syntax or parser error. If false, saves changes anyway and returns warnings/errors. |
 
 Each entry of `edits`:
 
@@ -218,8 +217,8 @@ An id is refused if it was already applied, if it is addressed at another file,
 or if the file changed since the preview was taken — in that last case the diff
 and the syntax result no longer describe the outcome, so preview again.
 
-A refusal under `--strict` carries a `preview_id` too, so a batch the parser
-disliked can be committed with `apply` when you judge the parser wrong.
+A refusal carries a `preview_id` too, so a batch the parser disliked can be
+committed with `apply` when you judge the parser wrong.
 
 ## `create`
 

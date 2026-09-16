@@ -65,12 +65,13 @@ reads in `40,80`. Directives taking a payload: `replace`, `insert_after <id>`,
 `move <address> before|after <dest>`. `replace`, `delete` and `move` take a
 span; the rest act at one line.
 
-Add `--dry-run` or `--strict` after the file. `--strict` is the
-`strict_validation` parameter the API reference names.
+Add `--dry-run` after the file to see what a batch would do without writing it.
 
-The syntax check is a parser's opinion and tree-sitter is sometimes wrong about
-valid code, so nothing a check refuses is thrown away: a refusal names the batch
-it kept, and `--apply <preview_id>` commits it if you judge the parser wrong.
+An edit is parsed before it is written and a result that does not parse is
+refused. The check is a parser's opinion and tree-sitter is sometimes wrong
+about valid code, so nothing it refuses is thrown away: a refusal names the
+batch it kept, and `--apply <preview_id>` commits it if you judge the parser
+wrong. Disagreeing costs one call rather than the work.
 
 Within one batch, do not target a line an earlier directive changed. The id
 carries that line's content hash, so it no longer matches and `edit` refuses

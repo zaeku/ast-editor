@@ -131,19 +131,7 @@ async fn run_edit(args: &[String]) -> anyhow::Result<String> {
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         return crate::cli::help_for("edit");
     }
-    // `--strict` is how the script form has always spelled strict_validation.
-    let args: Vec<String> = args
-        .iter()
-        .map(|arg| {
-            if arg == "--strict" {
-                "--strict-validation".to_string()
-            } else {
-                arg.clone()
-            }
-        })
-        .collect();
-
-    let mut arguments = crate::cli::arguments("edit", &args)?;
+    let mut arguments = crate::cli::arguments("edit", args)?;
     let given = arguments
         .as_object_mut()
         .context("edit takes options, not a bare value")?;

@@ -88,8 +88,8 @@ An id is refused if it was already applied, if it is addressed at another file,
 or if the file changed since the preview was taken — in that last case the diff
 and the syntax result no longer describe the outcome, so preview again.
 
-A refusal under `--strict` carries a `preview_id` too, so a batch the parser
-disliked can be committed with `apply` when you judge the parser wrong.
+A refusal carries a `preview_id` too, so a batch the parser disliked can be
+committed with `apply` when you judge the parser wrong.
 
 ## `create`
 

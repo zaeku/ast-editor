@@ -610,7 +610,7 @@ fn every_shipped_language_is_syntax_checked() {
 
     let before = std::fs::read_to_string(&file).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_ast-editor"))
-        .args(["edit", file.to_str().unwrap(), "--strict"])
+        .args(["edit", file.to_str().unwrap()])
         .env("AST_EDITOR_CACHE_DIR", store_for("nixchecked"))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -1024,7 +1024,7 @@ fn a_move_lands_where_it_was_addressed() {
 
     for (n, (block, position, dest, want)) in cases.iter().enumerate() {
         let test = format!("move{n}");
-        let file = scratch(&format!("move{n}.rs"), start);
+        let file = scratch(&format!("move{n}.txt"), start);
         let ids = ast_editor(&test, &["view", file.to_str().unwrap(), "--only-ids"]);
         assert!(
             ids.status.success(),
@@ -1504,7 +1504,7 @@ fn a_span_addressed_backwards_is_refused() {
 fn a_span_of_one_line_is_one_line() {
     let start = "one\ntwo\nthree\nfour\n";
 
-    let file = scratch("span_same_id.rs", start);
+    let file = scratch("span_same_id.txt", start);
     let ids = line_ids("spansame", &file);
     let out = run_script(
         "spansame",
@@ -1523,7 +1523,7 @@ fn a_span_of_one_line_is_one_line() {
 
     for (n, op) in ["delete", "move"].iter().enumerate() {
         let test = format!("spanempty{n}");
-        let file = scratch(&format!("span_empty_end{n}.rs"), start);
+        let file = scratch(&format!("span_empty_end{n}.txt"), start);
         let ids = line_ids(&test, &file);
         let extra = if *op == "move" {
             format!(r#","dest_id":"{}","move_position":"after""#, ids[3])
@@ -1554,7 +1554,7 @@ fn a_span_of_one_line_is_one_line() {
 /// and the nearest line is then the one before it.
 #[test]
 fn deleting_the_last_line_answers_with_the_new_last_line() {
-    let file = scratch("delete_tail.rs", "one\ntwo\nthree\n");
+    let file = scratch("delete_tail.txt", "one\ntwo\nthree\n");
     let ids = line_ids("deltail", &file);
     let out = run_script("deltail", &file, &format!("delete {}\n", ids[2]));
     assert!(
@@ -1576,7 +1576,7 @@ fn deleting_the_last_line_answers_with_the_new_last_line() {
 /// line of the file, which is only nearest when the hole is past the end.
 #[test]
 fn deleting_a_line_answers_with_the_line_that_took_its_place() {
-    let file = scratch("delete_middle.rs", "one\ntwo\nthree\nfour\n");
+    let file = scratch("delete_middle.txt", "one\ntwo\nthree\nfour\n");
     let before = line_ids("delmid", &file);
     let out = run_script("delmid", &file, &format!("delete {}\n", before[1]));
     assert!(
@@ -1600,7 +1600,7 @@ fn deleting_a_line_answers_with_the_line_that_took_its_place() {
 /// error: the ends of a span may meet.
 #[test]
 fn a_span_may_begin_and_end_on_the_same_line() {
-    let file = scratch("span_meets.rs", "one\ntwo\nthree\n");
+    let file = scratch("span_meets.txt", "one\ntwo\nthree\n");
     let ids = line_ids("spanmeet", &file);
     let out = run_script(
         "spanmeet",
@@ -1625,7 +1625,7 @@ fn an_insert_with_no_line_named_goes_to_the_end_it_faces() {
         ("insert_after", "one\ntwo\nX\n"),
     ] {
         let test = format!("notarget_{op}");
-        let file = scratch(&format!("no_target_{op}.rs"), "one\ntwo\n");
+        let file = scratch(&format!("no_target_{op}.txt"), "one\ntwo\n");
         let json = format!(r#"{{"edits":[{{"op":"{op}","content":"X\n"}}]}}"#);
         let out = ast_editor(&test, &["edit", file.to_str().unwrap(), "--json", &json]);
         assert!(
@@ -1646,7 +1646,7 @@ fn an_insert_acts_at_the_line_it_names() {
         ("insert_after", "one\ntwo\nX\nthree\n"),
     ] {
         let test = format!("at_line_{directive}");
-        let file = scratch(&format!("at_line_{directive}.rs"), "one\ntwo\nthree\n");
+        let file = scratch(&format!("at_line_{directive}.txt"), "one\ntwo\nthree\n");
         let ids = line_ids(&test, &file);
         let out = run_script(
             &test,
@@ -2660,7 +2660,7 @@ fn a_move_takes_each_of_its_four_positions() {
 
     for (n, (block, tail, want)) in cases.iter().enumerate() {
         let test = format!("pos{n}");
-        let file = scratch(&format!("pos{n}.rs"), start);
+        let file = scratch(&format!("pos{n}.txt"), start);
         let ids = line_ids(&test, &file);
         let script = tail
             .split(' ')
@@ -3331,11 +3331,11 @@ fn a_parse_error_carries_a_window_of_the_file_around_it() {
         "window",
         &file,
         &format!("replace {} ```\nfn d( {{\n```\n", ids[3]),
-        &["--strict"],
+        &[],
     );
     assert!(!out.status.success(), "a broken edit was accepted");
 
-    // A strict refusal answers in the shape of a dry run, on stderr.
+    // A refusal answers in the shape of a dry run, on stderr.
     let diagnostics = json_block(&out.stderr)["diagnostics"].clone();
     let context: Vec<String> = diagnostics[0]["context"]
         .as_array()
@@ -3409,7 +3409,7 @@ fn a_parse_error_carries_a_window_of_the_file_around_it() {
             "replace {} ```\nfn b( {{\n```\nreplace {} ```\nfn e) }}\n```\n",
             ids[1], ids[4]
         ),
-        &["--strict"],
+        &[],
     );
     assert!(!out.status.success(), "two broken edits were accepted");
     let diagnostics = json_block(&out.stderr)["diagnostics"]

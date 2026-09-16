@@ -359,34 +359,63 @@ pub(crate) async fn edit_lines_dry_run(
     })
 }
 
+/// What an edit does with a result the parser rejects.
+#[derive(Clone, Copy, PartialEq)]
+enum OnRejectedParse {
+    /// Roll back and hand the batch back under an id. What a caller who has
+    /// not seen a verdict gets, so that a broken file is never the answer to
+    /// an edit they did not know was broken.
+    Refuse,
+    /// Write it. What applying a preview id means: the verdict came back with
+    /// that id and the caller sent it anyway (D-01M27KKNNRRZ96).
+    Write,
+}
+
 /// Apply the edit batch a previous dry run validated, addressed by its preview
-/// id instead of resent in full.
+/// id instead of resent in full. It does not refuse what it is given: the
+/// batch was checked when the preview was taken and the caller read the answer
+/// before naming it here.
 pub(crate) async fn apply_preview(
     repository: &impl FileStore,
     filepath: &str,
     preview_id: &str,
-    strict_validation: bool,
     parser_manager: &crate::parser::ParserManager,
 ) -> Result<String> {
     let edits = repository.take_preview(filepath, preview_id)?;
-    edit_lines(
+    apply_batch(
         repository,
         filepath,
         edits,
-        strict_validation,
+        OnRejectedParse::Write,
         parser_manager,
     )
     .await
 }
 
-/// Apply a batch and answer with the lines it changed. `strict_validation`
-/// decides what happens when the result does not parse: rolled back and
-/// refused, or written with the verdict beside it. Both check.
+/// Apply a batch and answer with the lines it changed. A result that does not
+/// parse is rolled back and refused, and the batch is kept under an id so a
+/// caller who judges the parser wrong applies it (D-01M28NM3ECNY08).
 pub(crate) async fn edit_lines(
     repository: &impl FileStore,
     filepath: &str,
     edits: Vec<LineEdit>,
-    strict_validation: bool,
+    parser_manager: &crate::parser::ParserManager,
+) -> Result<String> {
+    apply_batch(
+        repository,
+        filepath,
+        edits,
+        OnRejectedParse::Refuse,
+        parser_manager,
+    )
+    .await
+}
+
+async fn apply_batch(
+    repository: &impl FileStore,
+    filepath: &str,
+    edits: Vec<LineEdit>,
+    on_rejected: OnRejectedParse,
     parser_manager: &crate::parser::ParserManager,
 ) -> Result<String> {
     resync_if_stale(repository, filepath, &edits)?;
@@ -424,12 +453,12 @@ pub(crate) async fn edit_lines(
             contexts,
             _raw_ast: _,
         } => {
-            if strict_validation {
-                // A refusal in the shape of a dry run: the same verdict, the
-                // same diagnostics, and the batch kept under an id, so a caller
-                // who judges the parser wrong applies it rather than sending it
-                // again (D-01M28NM3ECNY08). The exit code still says nothing
-                // happened (D-01M28HCSAMTEFS).
+            // A refusal in the shape of a dry run: the same verdict, the same
+            // diagnostics, and the batch kept under an id, so a caller who
+            // judges the parser wrong applies it rather than sending it again
+            // (D-01M28NM3ECNY08). The exit code still says nothing happened
+            // (D-01M28HCSAMTEFS).
+            if on_rejected == OnRejectedParse::Refuse {
                 let diagnostics: Vec<_> = errors
                     .iter()
                     .zip(contexts.iter())
@@ -449,7 +478,9 @@ pub(crate) async fn edit_lines(
                 });
                 anyhow::bail!("```json\n{}\n```", serde_json::to_string_pretty(&report)?);
             } else {
-                // Permissive Mode: Write to disk and save, but return status "saved_with_errors" with details
+                // Applying a preview id: the verdict came back with that id
+                // and the caller sent it anyway, so the work happens and the
+                // answer says what it knows (D-01M27KKNNRRZ96).
                 fs::write(filepath, &final_content)?;
                 repository.commit_buffer(&file_key, &buffer)?;
                 repository.smart_resync(filepath, &file_key, &[])?;
@@ -480,7 +511,7 @@ pub(crate) async fn edit_lines(
             }
         }
         SyntaxValidationResult::InfrastructureFailure(reason) => {
-            if strict_validation {
+            if on_rejected == OnRejectedParse::Refuse {
                 let kept = repository.create_preview(filepath, &edits)?;
                 let report = serde_json::json!({
                     "syntax_valid": serde_json::Value::Null,
@@ -493,7 +524,8 @@ pub(crate) async fn edit_lines(
                 });
                 anyhow::bail!("```json\n{}\n```", serde_json::to_string_pretty(&report)?);
             } else {
-                // Permissive Mode: Write to disk, but return "saved" with error reason message
+                // Applying a preview id: the check could not run when the
+                // preview was taken either, and the caller sent the id anyway.
                 fs::write(filepath, &final_content)?;
                 repository.commit_buffer(&file_key, &buffer)?;
                 repository.smart_resync(filepath, &file_key, &[])?;
@@ -554,18 +586,6 @@ pub(crate) async fn edit_lines(
         ));
     }
     Ok(format!("{{\n  {}\n}}", fields.join(",\n  ")))
-}
-
-/// `edit_lines` at the setting the dispatcher passes for an edit that did not
-/// ask for strictness. It spares every test below a bare `false`.
-#[cfg(test)]
-pub(crate) async fn edit_lines_permissive(
-    repository: &impl FileStore,
-    filepath: &str,
-    edits: Vec<LineEdit>,
-    parser_manager: &crate::parser::ParserManager,
-) -> Result<String> {
-    edit_lines(repository, filepath, edits, false, parser_manager).await
 }
 
 #[cfg(test)]
@@ -664,7 +684,7 @@ mod tests {
             content: Some("    let a = 42;".to_string()),
             ..Default::default()
         }];
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -692,7 +712,7 @@ mod tests {
             content: Some("    let b = 2;".to_string()),
             ..Default::default()
         }];
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -717,7 +737,7 @@ mod tests {
             content: None,
             ..Default::default()
         }];
-        let _preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let _preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert_eq!(
             fs::read_to_string(&file_path)?,
             "fn main() {\n    let a = 42;\n}\n"
@@ -749,7 +769,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let res = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let res = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert!(res.contains("modified_lines"), "{}", res);
 
         // Verify disk content includes both the external change and our new edit!
@@ -779,7 +799,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let res = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await;
+        let res = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(
@@ -817,33 +837,9 @@ mod tests {
             ..Default::default()
         }];
 
-        // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines_permissive)
-        let res = edit_lines_permissive(&repository, filepath_str, edits.clone(), &env.pm).await?;
-        let val: serde_json::Value = serde_json::from_str(&res)?;
-        assert_eq!(val["status"], "saved_with_errors");
-        assert_eq!(val["syntax_valid"], false);
-        assert!(val["diagnostics"].is_array());
-
-        // Verify disk content was saved (i.e. changed)
-        assert_eq!(
-            fs::read_to_string(&file_path)?,
-            "fn main() {\n    let a = {;\n}\n"
-        );
-
-        // Restore initial content for strict validation test
-        fs::write(&file_path, initial_content)?;
-        let _metadata_strict = init_file_entry(filepath_str, false)?;
-        let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let start_id_strict = find_line_id(&lines_view_strict, "let a = 1;");
-        let edits_strict = vec![LineEdit {
-            op: EditOp::Replace,
-            start_id: Some(start_id_strict),
-            content: Some("    let a = {;".to_string()),
-            ..Default::default()
-        }];
-
-        // 2. Test Strict Mode (strict_validation: true)
-        let res_strict = edit_lines(&repository, filepath_str, edits_strict, true, &env.pm).await;
+        // The batch is refused, the file is left alone, and the batch is kept
+        // under an id the answer names.
+        let res_strict = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
         assert!(
@@ -861,7 +857,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
 
         // Verify DB content was rolled back (re-query content of line 2)
-        let lines_strict = repository.fetch_lines_range(&_metadata_strict.file_key, 2, 2)?;
+        let lines_strict = repository.fetch_lines_range(&_metadata.file_key, 2, 2)?;
         assert_eq!(lines_strict.len(), 1);
         assert_eq!(lines_strict[0].2.trim(), "let a = 1;");
 
@@ -889,7 +885,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -929,7 +925,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -963,7 +959,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -993,7 +989,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1027,7 +1023,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
         // The op and the field are named as a caller spells them, and so is
@@ -1057,7 +1053,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1098,7 +1094,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1143,7 +1139,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1175,7 +1171,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let preview = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         let res: serde_json::Value = serde_json::from_str(&preview)?;
         assert!(res["status"].is_null(), "success is the exit code: {}", res);
         let modified = res["modified_lines"].as_array().unwrap();
@@ -1226,7 +1222,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert!(result.contains("modified_lines"), "{}", result);
 
         // Verify that the file content was updated on disk
@@ -1264,7 +1260,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
 
         // The edit should succeed (status success) but return warnings!
         assert!(
@@ -1313,7 +1309,7 @@ mod tests {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
 
         // The edit should succeed (status success) but return HTML warnings!
         assert!(
@@ -1407,7 +1403,7 @@ fn main() {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(result.is_ok());
 
         let disk_content = fs::read_to_string(&file_path)?;
@@ -1442,7 +1438,7 @@ fn main() {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
         assert!(
             !result.contains("\"status\""),
             "success is the exit code: {}",
@@ -1482,7 +1478,7 @@ fn main() {
             ..Default::default()
         }];
 
-        let result = edit_lines_permissive(&repository, filepath_str, edits, &env.pm).await?;
+        let result = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
 
         let val: serde_json::Value = serde_json::from_str(&result)?;
         assert!(val["status"].is_null(), "success is the exit code: {}", val);
@@ -1535,33 +1531,9 @@ fn main() {
             ..Default::default()
         }];
 
-        // 1. Test Permissive Mode (strict_validation: false by default when calling edit_lines_permissive)
-        let res = edit_lines_permissive(&repository, filepath_str, edits.clone(), &env.pm).await?;
-        let val: serde_json::Value = serde_json::from_str(&res)?;
-        assert_eq!(val["status"], "saved_with_errors");
-        assert_eq!(val["syntax_valid"], false);
-        assert!(val["diagnostics"].is_array());
-
-        // Verify disk content was saved (i.e. changed)
-        assert_eq!(
-            fs::read_to_string(&file_path)?,
-            "if [ \"$x\" = \"1\" ]; then\n    echo \"one\"\nelse\n"
-        );
-
-        // Restore initial content for strict validation test
-        fs::write(&file_path, initial_content)?;
-        let _metadata_strict = init_file_entry(filepath_str, false)?;
-        let lines_view_strict = test_view_lines(&repository, filepath_str, 1, 3, None)?;
-        let start_id_strict = find_line_id(&lines_view_strict, "fi");
-        let edits_strict = vec![LineEdit {
-            op: EditOp::Replace,
-            start_id: Some(start_id_strict),
-            content: Some("else".to_string()),
-            ..Default::default()
-        }];
-
-        // 2. Test Strict Mode (strict_validation: true)
-        let res_strict = edit_lines(&repository, filepath_str, edits_strict, true, &env.pm).await;
+        // The batch is refused, the file is left alone, and the batch is kept
+        // under an id the answer names.
+        let res_strict = edit_lines(&repository, filepath_str, edits, &env.pm).await;
         assert!(res_strict.is_err());
         let err_msg = res_strict.unwrap_err().to_string();
         assert!(
@@ -1579,7 +1551,7 @@ fn main() {
         assert_eq!(fs::read_to_string(&file_path)?, initial_content);
 
         // Verify DB content was rolled back (re-query content of line 3)
-        let lines_strict = repository.fetch_lines_range(&_metadata_strict.file_key, 3, 3)?;
+        let lines_strict = repository.fetch_lines_range(&_metadata.file_key, 3, 3)?;
         assert_eq!(lines_strict.len(), 1);
         assert_eq!(lines_strict[0].2.trim(), "fi");
 

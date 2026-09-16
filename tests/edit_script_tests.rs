@@ -179,7 +179,7 @@ fn test_an_unknown_operation_names_the_line() {
 
 #[test]
 fn test_a_payload_keeps_comments_and_blank_lines() {
-    let file = scratch("verbatim", "v.rs", "fn main() {\n    old();\n}\n");
+    let file = scratch("verbatim", "v.txt", "fn main() {\n    old();\n}\n");
     let id = ids("verbatim", &file);
 
     // '#' and blank lines are directive-level syntax, but inside a block they
@@ -254,7 +254,7 @@ fn test_a_batch_that_fails_validation_writes_none_of_itself() {
         "replace {} ```\n    let a = 10;\n```\nreplace {} ```\n    let b = ;\n```\n",
         id[1], id[2]
     );
-    let out = edit("atomic", &file, &["--strict"], &script);
+    let out = edit("atomic", &file, &[], &script);
     assert!(!out.status.success());
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(

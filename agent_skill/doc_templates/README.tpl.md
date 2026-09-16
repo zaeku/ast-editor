@@ -102,18 +102,17 @@ response about work that happened.
 
 ## What a syntax check does
 
-An edit is parsed after it is applied, and the verdict is reported rather than
-enforced: the answer carries `syntax_valid` and the diagnostics, and the file is
-written. A parser is not always right about valid code, and an edit that a
-grammar dislikes is often one a person meant.
+An edit is parsed before it is written. A result that does not parse is
+refused, the file is left alone, and the refusal carries a `preview_id` — so
+`--apply <preview_id>` commits the batch unchanged where you judge the parser
+wrong. A dry run answers the same way and never writes.
 
-`--strict` inverts that. The edit is refused, the file is left alone, and the
-refusal carries a `preview_id` — so `--apply <preview_id>` commits the batch
-unchanged where you judge the parser wrong. A dry run answers the same way and
-never writes.
+The verdict is reported rather than enforced, which is what that id is for: a
+parser is not always right about valid code, and an edit a grammar dislikes is
+often one a person meant. What it costs to disagree is one call, not the work.
 
-`syntax_valid: null` means no grammar covers the file type and the result was
-written without a check.
+`syntax_valid: null` means no grammar covers the file type. There was nothing
+to check against, so the edit is written.
 
 ## The tools
 

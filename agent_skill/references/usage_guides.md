@@ -40,12 +40,10 @@ only the refused one needs re-reading.
 ## What a syntax check does
 
 An edit is parsed after it is applied, and the verdict is reported rather than
-enforced: the answer carries `syntax_valid` and the diagnostics, and the file is
-written. Prose is checked too — an unclosed code fence in Markdown comes back as
-a warning — and a warning never blocks a write.
-
-`--strict` refuses instead, leaves the file alone, and hands back a `preview_id`
-that `--apply` commits if you judge the parser wrong.
+enforced: a result that does not parse is refused, the file is left alone, and
+the refusal hands back a `preview_id` that `--apply` commits if you judge the
+parser wrong. Prose is checked too — an unclosed code fence in Markdown comes
+back as a warning — and a warning never blocks a write.
 
 A file no grammar covers is written with `syntax_valid: null`.
 
@@ -60,7 +58,7 @@ Replacing a block in one directive is better than a loop of single-line
 `replace` and `delete` operations:
 
 - The whole span is one batch, so it is parsed once and either reported on or,
-  under `--strict`, refused as a unit.
+  refused as a unit.
 - One call rather than several.
 - Nothing in between can move, since the batch is applied against the ids it
   was given.

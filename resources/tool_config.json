@@ -22,5 +22,6 @@
   "error_target_changed_outside": "Line {} changed outside this tool since you read it. Read that range again; the ids you hold for other lines are unaffected.",
   "error_edit_missing_field": "The '{}' op needs {}, and this one carries {}. `ast-editor skill api` lists what each op takes.",
   "error_pattern_not_found": "The line holds no occurrence {} of '{}'. Read the line again for its current text; nothing was written.",
-  "error_file_written_while_read": "{} is being written while it is read, so its line index could not be brought in step with it. Nothing was written. Run this again once the writer has finished."
+  "error_file_written_while_read": "{} is being written while it is read, so its line index could not be brought in step with it. Nothing was written. Run this again once the writer has finished.",
+  "error_op_takes_one_line": "The '{}' op acts at one line, so it takes a start_id rather than a span, and this one carries an end_id. Nothing was written. Drop end_id, or use replace, delete or move, which span."
 }

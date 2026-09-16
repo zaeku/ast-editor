@@ -146,6 +146,14 @@ impl LineBuffer {
         for edit in edits {
             match edit.op {
                 EditOp::InsertAfter | EditOp::InsertBefore | EditOp::Append | EditOp::Prepend => {
+                    if edit.end_id.as_ref().is_some_and(|id| !id.is_empty()) {
+                        bail!(
+                            "{}",
+                            crate::tools::metadata::get_config()
+                                .error_op_takes_one_line
+                                .replacen("{}", &crate::tools::session_db::op_name(edit.op), 1)
+                        );
+                    }
                     let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
                     let no_target = edit.start_id.as_ref().is_none_or(|s| s.is_empty());
 

@@ -3604,3 +3604,56 @@ fn a_dry_run_that_does_not_parse_still_names_its_batch() {
         "a dry run wrote to the file"
     );
 }
+
+/// An op that acts at one line is given a span. The script form refuses it and
+/// the JSON form used to take the field and drop it, so the same batch wrote
+/// something different depending on which door it arrived through. README says
+/// the ops that do not span say so if given two ids; both doors say it now.
+#[test]
+fn an_insert_given_a_span_is_refused_at_either_door() {
+    let content = "fn main() {\n    let a = 1;\n    let b = 2;\n}\n";
+    for (test, op) in [
+        ("span_after", "insert_after"),
+        ("span_before", "insert_before"),
+    ] {
+        let file = scratch(&format!("{test}.rs"), content);
+        let ids = line_ids(test, &file);
+        let path = file.to_str().unwrap();
+
+        let out = ast_editor(
+            test,
+            &[
+                "edit",
+                path,
+                "--json",
+                &format!(
+                    r#"{{"filepath":"{path}","edits":[{{"op":"{op}","start_id":"{}","end_id":"{}","content":"    // x"}}]}}"#,
+                    ids[1], ids[2]
+                ),
+            ],
+        );
+        assert!(
+            !out.status.success(),
+            "{op} took a span through the json form: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            content,
+            "{op} wrote to the file before refusing the span"
+        );
+
+        // The script form has always refused it, and is the other half of the
+        // claim: one door enforcing it is what let this through.
+        let refused = run_script(
+            test,
+            &file,
+            &format!("{op} {},{} ```\n    // x\n```\n", ids[1], ids[2]),
+        );
+        assert!(
+            !refused.status.success(),
+            "{op} took a span through the script form: {}",
+            String::from_utf8_lossy(&refused.stdout)
+        );
+    }
+}

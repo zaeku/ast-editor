@@ -31,6 +31,7 @@ pub(crate) struct ToolConfig {
     pub error_target_changed_outside: String,
     pub error_pattern_not_found: String,
     pub error_file_written_while_read: String,
+    pub error_op_takes_one_line: String,
     pub help_footer: String,
     pub error_strict_refused: String,
     pub error_strict_unevaluable: String,

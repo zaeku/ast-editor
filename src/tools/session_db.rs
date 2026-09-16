@@ -176,6 +176,14 @@ pub(crate) struct LineEdit {
     pub occurrence: Option<usize>,
 }
 
+/// An op's name as a caller spells it, which is what `serde` renamed it to.
+pub(crate) fn op_name(op: EditOp) -> String {
+    serde_json::to_value(op)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| format!("{op:?}"))
+}
+
 /// What to say when an edit does not carry a field its op needs. The op and the
 /// field are named as a caller spells them, and so is what the edit did carry,
 /// because the mistake is usually a field in the wrong place rather than a
@@ -206,10 +214,7 @@ pub(crate) fn missing_field(edit: &LineEdit, needs: &str) -> anyhow::Error {
     } else {
         carried.join(", ")
     };
-    let op = serde_json::to_value(edit.op)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| format!("{:?}", edit.op));
+    let op = op_name(edit.op);
     anyhow::anyhow!(
         "{}",
         crate::tools::metadata::get_config()

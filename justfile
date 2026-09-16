@@ -97,7 +97,7 @@ release LEVEL='patch' EXECUTE='':
 # Install just the binary.
 install-bin: build
     mkdir -p '{{bin_dir}}'
-    install -m 755 target/release/ast-editor '{{bin_dir}}/ast-editor'
+    install -m 755 "$CARGO_TARGET_DIR/release/ast-editor" '{{bin_dir}}/ast-editor'
     @echo 'installed {{bin_dir}}/ast-editor'
     @'{{bin_dir}}/ast-editor' --help > /dev/null && echo 'verified   the installed binary runs'
 
@@ -108,7 +108,7 @@ install-bin: build
 install-skill: build
     mkdir -p '{{skill_dir}}'
     rm -rf '{{skill_dir}}/references'
-    ./target/release/ast-editor skill > '{{skill_dir}}/SKILL.md'
+    "$CARGO_TARGET_DIR/release/ast-editor" skill > '{{skill_dir}}/SKILL.md'
     @echo 'installed {{skill_dir}}/SKILL.md'
 
 # Remove what `install` placed.

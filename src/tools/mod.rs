@@ -15,6 +15,8 @@ pub(crate) mod view;
 // crate rather than under tests/ so that nothing has to be `pub` to be tested.
 #[cfg(test)]
 mod line_edit_tests;
+#[cfg(test)]
+mod session_db_tests;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;

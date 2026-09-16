@@ -7,7 +7,7 @@
 
 use anyhow::{bail, Result};
 
-use crate::tools::session_db::{EditOp, LineEdit, MovePosition};
+use crate::tools::line_id::{EditOp, LineEdit, MovePosition};
 
 /// Parse a script into the batch it describes.
 pub(crate) fn parse(script: &str) -> Result<Vec<LineEdit>> {

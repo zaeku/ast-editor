@@ -1,10 +1,10 @@
 #![allow(clippy::await_holding_lock)]
 use crate::parser::ParserManager;
 use crate::tools::edit;
+use crate::tools::line_id::{EditOp, MovePosition};
 use crate::tools::repository;
 use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
 use crate::tools::session_db;
-use crate::tools::session_db::{EditOp, MovePosition};
 use crate::tools::view;
 use std::fs;
 use std::path::PathBuf;
@@ -1128,7 +1128,7 @@ async fn test_store_holds_no_file_text() {
 
     // Invariant 9: the index is an index, not a copy. Nothing in the database
     // file should contain the text of the lines it tracks.
-    let db = session_db::get_db_path().unwrap();
+    let db = crate::tools::store::get_db_path().unwrap();
     // Recent writes sit in the write-ahead log until it is folded back in.
     let raw: Vec<u8> = [db.clone(), db.with_extension("db-wal")]
         .iter()
@@ -1447,7 +1447,7 @@ async fn test_a_desynced_index_reconciles_instead_of_renumbering() {
     // reconcile at the gate and the buffer load: drop the last index row so the
     // index is shorter than the file, without touching the file itself.
     let meta = session_db::init_edit_session(file.path_str(), false).unwrap();
-    let db = rusqlite::Connection::open(session_db::get_db_path().unwrap()).unwrap();
+    let db = rusqlite::Connection::open(crate::tools::store::get_db_path().unwrap()).unwrap();
     db.execute(
         "DELETE FROM lines WHERE session_id = ?1 AND sequence_id = (SELECT MAX(sequence_id) FROM lines WHERE session_id = ?1)",
         [&meta.session_id],

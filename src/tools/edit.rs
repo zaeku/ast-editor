@@ -1,6 +1,6 @@
+pub(crate) use crate::tools::line_id::LineEdit;
 use crate::tools::repository::SessionRepository;
 use crate::tools::session_db::check_language_supported;
-pub(crate) use crate::tools::session_db::LineEdit;
 use anyhow::Result;
 use std::fs;
 
@@ -577,8 +577,9 @@ pub(crate) async fn edit_lines_permissive(
 mod tests {
     use super::*;
     use crate::parser::ParserManager;
+    use crate::tools::line_id::{parse_line_id, EditOp, MovePosition};
     use crate::tools::repository::SqliteSessionRepository;
-    use crate::tools::session_db::{init_edit_session, parse_line_id, EditOp, MovePosition};
+    use crate::tools::session_db::init_edit_session;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
 
     /// A temporary directory to put fixtures in. The grammars are compiled in
@@ -1498,8 +1499,8 @@ fn main() {
             "the id says which line it is: {}",
             val
         );
-        let (old_seq, _) = crate::tools::session_db::parse_line_id(&line_1_id)?;
-        let (new_seq, _) = crate::tools::session_db::parse_line_id(new_id)?;
+        let (old_seq, _) = crate::tools::line_id::parse_line_id(&line_1_id)?;
+        let (new_seq, _) = crate::tools::line_id::parse_line_id(new_id)?;
         assert_eq!(old_seq, new_seq);
 
         let expected_json = format!(

@@ -24,7 +24,7 @@ pub(crate) fn view_lines(
     let total_lines = repository.get_total_lines(&session_id)?;
 
     // Fetch enclosing contexts map and absolute ranges
-    let conn = crate::tools::session_db::get_db_connection()?;
+    let conn = crate::tools::store::get_db_connection()?;
     let all_parent_contexts = {
         let mut stmt = conn.prepare(
             "SELECT parent_context FROM lines WHERE session_id = ?1 ORDER BY sort_order",

@@ -2,11 +2,13 @@ pub(crate) mod buffer;
 pub(crate) mod edit;
 pub(crate) mod formatter;
 pub(crate) mod inspect;
+pub(crate) mod line_id;
 pub(crate) mod metadata;
 pub(crate) mod outline;
 pub(crate) mod repository;
 pub(crate) mod script;
 pub(crate) mod session_db;
+pub(crate) mod store;
 pub(crate) mod view;
 
 // Drives the tools through the crate rather than through the command, which is
@@ -407,8 +409,7 @@ impl ToolDispatcher {
                     .await?
                 } else {
                     let edits_val = arguments.get("edits").context("Missing edits array")?;
-                    let edits: Vec<session_db::LineEdit> =
-                        serde_json::from_value(edits_val.clone())?;
+                    let edits: Vec<line_id::LineEdit> = serde_json::from_value(edits_val.clone())?;
                     if dry_run {
                         // The diff is the point of a dry run, so it is a block
                         // to read rather than a string to unescape.

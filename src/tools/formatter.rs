@@ -1,5 +1,5 @@
+use crate::tools::line_id::compute_line_hash;
 use crate::tools::repository::SessionRepository;
-use crate::tools::session_db::compute_line_hash;
 use anyhow::Result;
 
 /// Where a line is broken for display. The break is at a fixed count of

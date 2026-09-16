@@ -7,8 +7,10 @@
 
 #![allow(clippy::await_holding_lock)]
 
+use crate::tools::line_id::*;
 use crate::tools::repository::{SessionRepository, SqliteSessionRepository};
 use crate::tools::session_db::*;
+use crate::tools::store::*;
 use crate::tools::TEST_DB_LOCK as DB_LOCK;
 use anyhow::{Context, Result};
 use rusqlite::Connection;

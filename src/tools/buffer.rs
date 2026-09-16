@@ -9,10 +9,10 @@ use std::fs;
 
 use rusqlite::Connection;
 
-use super::session_db::{
-    compute_line_hash, missing_field, parse_line_id, reconcile_index, EditOp, LineEdit,
-    MovePosition,
+use super::line_id::{
+    compute_line_hash, missing_field, parse_line_id, EditOp, LineEdit, MovePosition,
 };
+use super::session_db::reconcile_index;
 
 /// One line of a file being edited, paired with the sequence number that
 /// identifies it. Position in `LineBuffer::lines` is the line's order.
@@ -151,7 +151,7 @@ impl LineBuffer {
                             "{}",
                             crate::tools::metadata::get_config()
                                 .error_op_takes_one_line
-                                .replacen("{}", &crate::tools::session_db::op_name(edit.op), 1)
+                                .replacen("{}", &crate::tools::line_id::op_name(edit.op), 1)
                         );
                     }
                     let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));

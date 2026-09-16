@@ -6,11 +6,11 @@ use rusqlite::OptionalExtension;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::buffer::{load_buffer, LineBuffer};
-use super::session_db::{
-    compute_line_hash, compute_normalized_hash, compute_sha256, compute_stored_hash,
-    get_db_connection, init_edit_session, reconcile_index, LineEdit, SessionMetadata,
-    PREVIEW_TTL_SECONDS,
+use super::line_id::{
+    compute_line_hash, compute_normalized_hash, compute_stored_hash, LineEdit, SessionMetadata,
 };
+use super::session_db::{compute_sha256, init_edit_session, reconcile_index};
+use super::store::{get_db_connection, PREVIEW_TTL_SECONDS};
 
 pub(crate) trait SessionRepository: Send + Sync {
     fn init_session(&self, filepath: &str, is_binary: bool) -> Result<SessionMetadata>;

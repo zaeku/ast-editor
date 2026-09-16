@@ -3657,3 +3657,67 @@ fn an_insert_given_a_span_is_refused_at_either_door() {
         );
     }
 }
+
+/// Every kind of definition a language declares is in its outline. The check is
+/// against what each fixture declares rather than against a recorded answer: an
+/// outline built from the `classes` and `functions` templates passed a fixture
+/// test for as long as both existed while leaving out a Rust `enum`, a
+/// TypeScript `interface` and a C `typedef`, because the fixture had been
+/// written from what the code already did.
+#[test]
+fn an_outline_names_every_definition_its_file_declares() {
+    // Each entry is the file, its source, and the signatures that have to come
+    // back — one per definition the source declares, in no particular order.
+    let cases: &[(&str, &str, &[&str])] = &[
+        (
+            "kinds.rs",
+            "struct S {\n    x: i32,\n}\nenum E {\n    A,\n}\ntrait T {\n    fn m(&self);\n}\ntype Alias = i32;\nconst C: i32 = 1;\nfn f() {}\n",
+            &["struct S", "enum E", "trait T", "type Alias", "const C", "fn f"],
+        ),
+        (
+            "kinds.ts",
+            "interface I {\n    a: string;\n}\ntype Al = string;\nenum En {\n    A,\n}\nclass C {\n    m() {}\n}\nfunction f() {}\n",
+            &["interface I", "type Al", "enum En", "class C", "function f"],
+        ),
+        (
+            "kinds.go",
+            "package p\n\ntype I interface {\n\tM()\n}\n\ntype S struct {\n\tx int\n}\n\nfunc F() {}\n",
+            &["type I interface", "type S struct", "func F"],
+        ),
+        (
+            "kinds.c",
+            "struct S {\n    int x;\n};\nenum E {\n    A\n};\ntypedef int Alias;\nvoid f(void) {}\n",
+            &["struct S", "enum E", "typedef int Alias", "void f"],
+        ),
+        (
+            "kinds.java",
+            "interface I {\n    void m();\n}\nenum E {\n    A\n}\nclass C {\n    void g() {}\n}\n",
+            &["interface I", "enum E", "class C", "void g"],
+        ),
+    ];
+
+    for (name, source, wanted) in cases {
+        let test = name.replace('.', "_");
+        let file = scratch(name, source);
+        let out = ast_editor(&test, &["outline", file.to_str().unwrap()]);
+        assert!(
+            out.status.success(),
+            "outline {name} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let listed: Vec<String> = json_block(&out.stdout)["outline"]
+            .as_array()
+            .expect("an outline")
+            .iter()
+            .map(|entry| entry["signature"].as_str().unwrap_or("").to_string())
+            .collect();
+        for definition in *wanted {
+            assert!(
+                listed
+                    .iter()
+                    .any(|signature| signature.contains(definition)),
+                "{name} declares {definition:?} and its outline does not name it: {listed:?}"
+            );
+        }
+    }
+}

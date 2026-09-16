@@ -169,6 +169,94 @@ fn template_query(lang: &str, template: &str) -> Option<String> {
     }
 }
 
+/// Every kind of definition a language declares, as one query with a capture
+/// per kind. `outline` used to borrow the `classes` and `functions` templates,
+/// which name what several languages have in common rather than what any one
+/// of them declares: a Rust `enum`, a TypeScript `interface` and a C `typedef`
+/// were each absent from a listing that says it holds the file's definitions.
+///
+/// Node names are the grammar's own, read from `outline --sexp` rather than
+/// guessed. A name a grammar does not have is a query that will not compile,
+/// and the caller below passes over a query that will not compile, so a wrong
+/// name here is a language that silently lists nothing.
+fn outline_query(lang: &str) -> Option<&'static str> {
+    Some(match lang {
+        "rust" => {
+            "(function_item) @function
+             (struct_item) @struct
+             (union_item) @struct
+             (enum_item) @enum
+             (trait_item) @trait
+             (type_item) @type
+             (const_item) @const
+             (static_item) @const
+             (macro_definition) @macro
+             (mod_item) @module"
+        }
+        "python" => {
+            "(function_definition) @function
+             (class_definition) @class"
+        }
+        "go" => {
+            "(function_declaration) @function
+             (method_declaration) @function
+             (type_declaration (type_spec type: (interface_type))) @interface
+             (type_declaration (type_spec type: (struct_type))) @struct
+             (const_declaration) @const"
+        }
+        // TypeScript's own declarations on top of what JavaScript has. `tsx`
+        // is the same grammar with JSX, so it takes the same list.
+        "typescript" | "tsx" => {
+            "(function_declaration) @function
+             (method_definition) @function
+             (class_declaration) @class
+             (abstract_class_declaration) @class
+             (interface_declaration) @interface
+             (type_alias_declaration) @type
+             (enum_declaration) @enum"
+        }
+        "javascript" => {
+            "(function_declaration) @function
+             (method_definition) @function
+             (class_declaration) @class"
+        }
+        "java" => {
+            "(method_declaration) @function
+             (constructor_declaration) @function
+             (class_declaration) @class
+             (interface_declaration) @interface
+             (enum_declaration) @enum
+             (record_declaration) @record"
+        }
+        "c" => {
+            "(function_definition) @function
+             (struct_specifier) @struct
+             (union_specifier) @struct
+             (enum_specifier) @enum
+             (type_definition) @type"
+        }
+        "cpp" => {
+            "(function_definition) @function
+             (struct_specifier) @struct
+             (class_specifier) @class
+             (union_specifier) @struct
+             (enum_specifier) @enum
+             (type_definition) @type
+             (namespace_definition) @module"
+        }
+        // A struct and an enum are `class_declaration` in this grammar, so one
+        // capture covers all three and the signature line tells them apart.
+        "swift" => {
+            "(function_declaration) @function
+             (class_declaration) @class
+             (protocol_declaration) @protocol"
+        }
+        "bash" => "(function_definition) @function",
+        "lua" => "(function_declaration) @function",
+        _ => return None,
+    })
+}
+
 /// The file's top-level definitions, using whichever templates the language
 /// declares. Each entry carries the line ids `edit` takes, so an outline is
 /// enough to act on.
@@ -182,12 +270,24 @@ fn outline_of(
 ) -> Vec<OutlineEntry> {
     let mut entries = Vec::new();
 
-    for template in ["classes", "functions"] {
-        let Some(query_str) = template_query(lang_name, template) else {
-            continue;
+    // One query for the language rather than a loop over borrowed templates. A
+    // query that will not compile is a programming error in the table above,
+    // not a file the caller got wrong, so it says so where whoever edits that
+    // table will read it rather than answering with an empty outline.
+    {
+        let Some(query_str) = outline_query(lang_name) else {
+            return entries;
         };
-        let Ok(query) = Query::new(language, &query_str) else {
-            continue;
+        let query = match Query::new(language, query_str) {
+            Ok(query) => query,
+            Err(err) => {
+                tracing::warn!(
+                    language = lang_name,
+                    error = %err,
+                    "the outline query names a node this grammar does not have"
+                );
+                return entries;
+            }
         };
 
         let mut cursor = QueryCursor::new();

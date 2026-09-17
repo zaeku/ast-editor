@@ -3739,3 +3739,81 @@ fn an_outline_names_every_definition_its_file_declares() {
         }
     }
 }
+
+/// Every language whose query names its definitions is asked for them.
+///
+/// `outline_query` answers with one query per language, and a wrong node name
+/// in one of them compiles to nothing rather than failing — the table says so
+/// beside itself. Rust was the only language an outline test ever read, so
+/// deleting any other arm changed no test's mind.
+///
+/// The kinds are what each language declares, so the assertion is on them
+/// rather than on a count: a query that found the wrong thing passes a count.
+#[test]
+fn outline_names_the_definitions_of_every_language_it_queries() {
+    let cases: &[(&str, &str, &[&str])] = &[
+        (
+            "q.py",
+            "def f():\n    pass\n\nclass C:\n    pass\n",
+            &["function", "class"],
+        ),
+        (
+            "q.js",
+            "function f() {}\nclass C {}\n",
+            &["function", "class"],
+        ),
+        (
+            "q.cpp",
+            "struct S {};\nclass C {};\nvoid f() {}\n",
+            &["struct", "class", "function"],
+        ),
+        (
+            "q.swift",
+            "func f() {}\nclass C {}\n",
+            &["function", "class"],
+        ),
+        ("q.sh", "f() {\n  echo hi\n}\n", &["function"]),
+        ("q.lua", "function f()\nend\n", &["function"]),
+        (
+            "q.go",
+            "type S struct{}\nfunc f() {}\n",
+            &["struct", "function"],
+        ),
+        (
+            "q.java",
+            "class C {\n    void f() {}\n}\n",
+            &["class", "function"],
+        ),
+        (
+            "q.ts",
+            "interface I {}\nfunction f() {}\n",
+            &["interface", "function"],
+        ),
+        (
+            "q.c",
+            "struct S {};\nvoid f() {}\n",
+            &["struct", "function"],
+        ),
+    ];
+
+    for (name, source, wanted) in cases {
+        let file = scratch(name, source);
+        let out = ast_editor("outline_langs", &["outline", file.to_str().unwrap()]);
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let block = json_block(&out.stdout);
+        let mut kinds: Vec<String> = block["outline"]
+            .as_array()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|entry| entry["kind"].as_str().unwrap_or("").to_string())
+            .collect();
+        kinds.sort();
+        let mut wanted: Vec<String> = wanted.iter().map(|kind| kind.to_string()).collect();
+        wanted.sort();
+        assert_eq!(kinds, wanted, "{name} outlined {block}");
+    }
+}

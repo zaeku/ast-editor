@@ -322,4 +322,35 @@ fn main() {}
         let text = &res_val;
         assert!(text.contains(r#""capture_name": "Paragraph""#));
     }
+
+    /// `safe_byte_slice` is what keeps an offset from landing inside a
+    /// character, and every comparison and decrement in it is here because a
+    /// mutation run found that nothing reached them.
+    ///
+    /// "가" is three bytes, so offsets 1 and 2 are inside it. A start that is
+    /// inside one walks back to its beginning and an end that is inside one
+    /// walks back too, which is why a slice of the middle of a character is
+    /// shorter than asked for rather than a panic.
+    #[test]
+    fn a_slice_lands_on_character_boundaries() {
+        let text = "a가b";
+
+        // Whole string, and the two ends clamped past it.
+        assert_eq!(safe_byte_slice(text, 0, text.len()), "a가b");
+        assert_eq!(safe_byte_slice(text, 0, 999), "a가b");
+        assert_eq!(safe_byte_slice(text, 999, 999), "");
+
+        // Inside the multi-byte character from either side. Byte 1 opens it and
+        // byte 4 closes it, so 2 and 3 are within.
+        assert_eq!(safe_byte_slice(text, 0, 2), "a");
+        assert_eq!(safe_byte_slice(text, 0, 3), "a");
+        assert_eq!(safe_byte_slice(text, 0, 4), "a가");
+        assert_eq!(safe_byte_slice(text, 2, text.len()), "가b");
+        assert_eq!(safe_byte_slice(text, 3, text.len()), "가b");
+
+        // A start after the end answers with nothing rather than panicking,
+        // which is what the comparison at the bottom is for.
+        assert_eq!(safe_byte_slice(text, 4, 1), "");
+        assert_eq!(safe_byte_slice("", 0, 0), "");
+    }
 }

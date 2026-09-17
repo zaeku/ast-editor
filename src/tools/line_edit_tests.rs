@@ -2493,3 +2493,60 @@ async fn test_bash_syntax_validation_error_rolls_back() -> Result<()> {
     fs::remove_dir_all(&env.dir)?;
     Ok(())
 }
+
+/// After an edit, the store's counter stands above every sequence number the
+/// file holds.
+///
+/// `commit_buffer` writes lines without touching `files.next_line_id`; what
+/// keeps it ahead is the reconcile that runs on the next read, because the edit
+/// changed the file on disk. `load_buffer` takes
+/// `max(stored_next, highest_live + 1)`, and this invariant is why the second
+/// term never decides — which is why mutating it survives a mutation run and is
+/// excluded rather than chased.
+///
+/// If this stops holding, that term is the only thing between a new line and a
+/// live line's number, and the exclusion has to go with it.
+#[tokio::test]
+async fn the_stored_counter_stays_above_every_live_sequence_number() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("seq_counter.rs", "fn main() {}\n");
+    let path = file.path_str();
+    let repository = SqliteFileStore;
+    let pm = create_test_parser_manager();
+
+    for content in ["// one\n// two\n", "// three\n"] {
+        let target = live_id(&repository, path, 1);
+        edit_lines(
+            &repository,
+            path,
+            vec![LineEdit {
+                op: EditOp::InsertAfter,
+                start_id: Some(target),
+                content: Some(content.to_string()),
+                ..Default::default()
+            }],
+            &pm,
+        )
+        .await
+        .unwrap();
+
+        let meta = file_entry::init_file_entry(path, false).unwrap();
+        let highest = index_pairs(&repository, path)
+            .into_iter()
+            .map(|(seq, _)| seq)
+            .max()
+            .unwrap();
+        let conn = crate::tools::store::get_db_connection().unwrap();
+        let stored: i64 = conn
+            .query_row(
+                "SELECT next_line_id FROM files WHERE file_key = ?1",
+                [&meta.file_key],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            stored > highest,
+            "the counter is {stored} and a live line holds {highest}"
+        );
+    }
+}

@@ -18,4 +18,18 @@ exclude_re = [
     # it was written either way. Held by
     # `test_a_negated_unknown_option_is_named_as_it_was_written` in `cli.rs`.
     "replace match guard .* with true in arguments",
+    # `safe_byte_slice` walks an offset back to a character boundary while it
+    # is not on one and has somewhere to go. Zero is always a boundary, so a
+    # `>= 0` in place of the `> 0` agrees at every offset — the second half of
+    # the condition decides it either way. Held by
+    # `a_slice_lands_on_character_boundaries` in `markdown.rs`, which walks
+    # both loops down to zero.
+    "replace > with >= in safe_byte_slice",
+    # `load_buffer` takes `max(stored_next, highest_live + 1)`, and the second
+    # term never decides: an edit changes the file, so the next read reconciles,
+    # and the reconcile leaves the stored counter above every live number.
+    # Held by `the_stored_counter_stays_above_every_live_sequence_number` in
+    # `line_edit_tests.rs`. If that stops holding, this term is the only thing
+    # between a new line and a live line's number, and this exclusion goes.
+    "replace \\+ with [-*] in load_buffer",
 ]

@@ -1,5 +1,6 @@
 #![allow(clippy::await_holding_lock)]
 use crate::parser::ParserManager;
+use crate::tools::create;
 use crate::tools::edit;
 use crate::tools::file_entry;
 use crate::tools::line_id::{EditOp, MovePosition};
@@ -517,7 +518,7 @@ async fn test_integration_create_lines_flow() {
     // 1. Create the new file via calling `create` tool logic
     let initial_content = "fn main() {\n    let x = 42;\n}\n";
     let create_res =
-        view::create_lines(&repository, &filepath_str, initial_content, Some(true)).unwrap();
+        create::create_lines(&repository, &filepath_str, initial_content, Some(true)).unwrap();
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
 
     assert!(val["status"].is_null(), "success is the exit code: {}", val);
@@ -537,7 +538,7 @@ async fn test_integration_create_lines_flow() {
     assert!(id2.contains('#'));
 
     // 3. Try calling `create` on the same file path again and verify it returns a `FILE_ALREADY_EXISTS` error
-    let dup_res = view::create_lines(&repository, &filepath_str, "different content", None);
+    let dup_res = create::create_lines(&repository, &filepath_str, "different content", None);
     assert!(dup_res.is_err());
     let dup_err = dup_res.unwrap_err().to_string();
     assert!(dup_err.contains("FILE_ALREADY_EXISTS"));
@@ -656,7 +657,7 @@ async fn test_integration_create_lines_return_ids_false() {
 
     let initial_content = "fn main() {\n    let x = 42;\n}\n";
     let create_res =
-        view::create_lines(&repository, &filepath_str, initial_content, Some(false)).unwrap();
+        create::create_lines(&repository, &filepath_str, initial_content, Some(false)).unwrap();
     let val: serde_json::Value = serde_json::from_str(&create_res).unwrap();
 
     assert!(val["status"].is_null(), "success is the exit code: {}", val);

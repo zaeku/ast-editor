@@ -1,4 +1,5 @@
 pub(crate) mod buffer;
+pub(crate) mod create;
 pub(crate) mod edit;
 pub(crate) mod file_entry;
 pub(crate) mod formatter;
@@ -422,7 +423,7 @@ impl ToolDispatcher {
                     .context("Missing content")?;
                 let return_ids = arguments.get("return_ids").and_then(|v| v.as_bool());
                 let repository = repository::SqliteFileStore;
-                let text = view::create_lines(&repository, filepath, content, return_ids)?;
+                let text = create::create_lines(&repository, filepath, content, return_ids)?;
                 Ok(fenced("json", &text))
             }
             _ => bail!("Unknown tool: {}", name),

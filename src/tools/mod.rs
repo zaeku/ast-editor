@@ -11,6 +11,7 @@ pub(crate) mod outline;
 pub(crate) mod repository;
 pub(crate) mod script;
 pub(crate) mod store;
+pub(crate) mod syntax;
 pub(crate) mod view;
 
 // Drives the tools through the crate rather than through the command, which is

@@ -12,6 +12,21 @@ readme = "README.md"
 keywords = ["tree-sitter", "ast", "editing", "cli", "agent"]
 categories = ["command-line-utilities", "development-tools"]
 
+# What a crate built from here does not need. `resources/` and `agent_skill/`
+# stay: the binary compiles them in with `include_str!`. These are how the
+# repository is worked on rather than how the program is built, and one of them
+# drives a machine that is none of a reader's business.
+exclude = [
+    "/.cargo/",
+    "/.envrc",
+    "/.git-blame-ignore-revs",
+    "/.github/",
+    "/.gitignore",
+    "/.mailmap",
+    "/release.toml",
+    "/tools/",
+]
+
 [dependencies]
 # Core parser
 tree-sitter = "0.26.10"

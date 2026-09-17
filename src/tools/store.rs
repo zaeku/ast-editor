@@ -247,3 +247,69 @@ pub(crate) fn cleanup_stale_sessions(conn: &Connection) -> Result<()> {
         .ok();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two lifetimes are durations written as arithmetic, and a run of
+    /// mutations on 2026-09-17 found nothing reading them. A session outlives
+    /// the task an agent is in the middle of; a preview outlives the answer
+    /// that handed it back.
+    #[test]
+    fn a_lifetime_is_the_span_it_is_written_as() {
+        assert_eq!(SESSION_TTL_SECONDS, 7 * 86_400, "seven days");
+        assert_eq!(PREVIEW_TTL_SECONDS, 3_600, "one hour");
+    }
+
+    /// The sweep takes what is older than the lifetime and leaves what is not.
+    /// The cutoff is `now` less the lifetime, so reading it as anything else —
+    /// a division, a sum — either spares everything or takes everything.
+    #[test]
+    fn the_sweep_takes_what_has_outlived_its_lifetime() {
+        let _lock = crate::tools::TEST_DB_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let conn = get_db_connection().unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let insert = |stamp: i64, name: &str| {
+            conn.execute(
+                "INSERT INTO previews (filepath, file_hash, edits_json, created_at)
+                 VALUES (?1, 'h', '[]', ?2);",
+                rusqlite::params![name, stamp],
+            )
+            .unwrap();
+        };
+        let present = |name: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM previews WHERE filepath = ?1",
+                [name],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+
+        let stale = "/sweep/stale.rs";
+        let fresh = "/sweep/fresh.rs";
+        conn.execute(
+            "DELETE FROM previews WHERE filepath IN (?1, ?2)",
+            [stale, fresh],
+        )
+        .unwrap();
+        insert(now - PREVIEW_TTL_SECONDS - 60, stale);
+        insert(now, fresh);
+
+        cleanup_stale_sessions(&conn).unwrap();
+
+        assert!(!present(stale), "a preview past its lifetime was kept");
+        assert!(present(fresh), "a preview inside its lifetime was swept");
+
+        conn.execute("DELETE FROM previews WHERE filepath = ?1", [fresh])
+            .unwrap();
+    }
+}

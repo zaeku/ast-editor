@@ -32,4 +32,10 @@ exclude_re = [
     # `line_edit_tests.rs`. If that stops holding, this term is the only thing
     # between a new line and a live line's number, and this exclusion goes.
     "replace \\+ with [-*] in load_buffer",
+    # `move_span` shifts a destination that sits after the block by what the
+    # drain took and leaves one before it alone. The two readings differ only
+    # where the destination is the block's own last line, and a destination
+    # inside the block is refused before either runs. Held by
+    # `a_move_into_the_block_being_moved_is_refused` in `line_edit_tests.rs`.
+    "replace > with >= in LineBuffer::move_span",
 ]

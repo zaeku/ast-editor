@@ -449,6 +449,31 @@ mod tests {
         );
     }
 
+    /// Help lines put every option's type in one column, and the column is
+    /// the longest flag rather than the longest field name — the `--` counts.
+    ///
+    /// Read as `field.len() * 2` the column moves, and it moves for every
+    /// option at once, so a test that only looked at one line would still
+    /// pass. These assert the column itself.
+    #[test]
+    fn test_every_option_puts_its_type_in_the_same_column() {
+        let help = help_for("view").unwrap();
+        let column = |flag: &str| -> usize {
+            let row = help
+                .lines()
+                .find(|line| line.trim_start().starts_with(flag))
+                .unwrap_or_else(|| panic!("no row for {flag} in:\n{help}"));
+            let kind = row.split_whitespace().nth(1).unwrap();
+            row.find(kind).unwrap()
+        };
+
+        // `--context-lines` is the longest of view's flags at fifteen, so the
+        // column is two of indent, fifteen of flag, two of padding and a space.
+        assert_eq!(column("--end-line"), 20, "{help}");
+        assert_eq!(column("--only-ids"), 20, "{help}");
+        assert_eq!(column("--context-lines"), 20, "{help}");
+    }
+
     /// `wrap` breaks a row before the word that would take it past the width,
     /// counting the space that would join them. The width is the last column a
     /// row may fill, so a row that lands exactly on it stays whole.

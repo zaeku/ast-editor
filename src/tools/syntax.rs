@@ -268,6 +268,36 @@ pub(crate) async fn validate_syntax(
 mod tests {
     use super::*;
 
+    /// The window around an error is two lines either side, and the error's
+    /// own line is the one with the arrow.
+    ///
+    /// Read as `error_row * 2` the far edge agrees at row two and nowhere else,
+    /// so the rows here avoid it. The ends clamp: a row near the top has no
+    /// two lines above it and one near the bottom has none below.
+    #[test]
+    fn an_error_is_shown_with_two_lines_either_side() {
+        let source = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\n";
+
+        // Row 4 counts from zero, so the arrow is on line 5 and the window is
+        // lines 3 through 7.
+        let middle = format_error_context(source, 4);
+        assert_eq!(middle.len(), 5, "{middle:?}");
+        assert!(middle[0].starts_with("   3:     "), "{middle:?}");
+        assert!(middle[2].starts_with("   5: --> "), "{middle:?}");
+        assert!(middle[4].starts_with("   7:     "), "{middle:?}");
+
+        // The top clamps to the first line rather than counting below it.
+        let top = format_error_context(source, 0);
+        assert_eq!(top.len(), 3, "{top:?}");
+        assert!(top[0].starts_with("   1: --> "), "{top:?}");
+        assert!(top[2].starts_with("   3:     "), "{top:?}");
+
+        // The bottom clamps to the last line.
+        let bottom = format_error_context(source, 8);
+        assert!(bottom.last().unwrap().starts_with("   9:"), "{bottom:?}");
+        assert_eq!(bottom.len(), 3, "{bottom:?}");
+    }
+
     /// A line closes a fence when it starts with the fence character and
     /// carries nothing else. Both halves are needed: `\u0060\u0060\u0060rust` starts with
     /// one and opens a block rather than closing it, and a line of tildes

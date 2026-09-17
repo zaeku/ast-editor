@@ -2494,6 +2494,109 @@ async fn test_bash_syntax_validation_error_rolls_back() -> Result<()> {
     Ok(())
 }
 
+/// Taking a preview sweeps the ones that outlived their hour.
+///
+/// `create_preview` clears the expired rows before it writes its own, with the
+/// same cutoff the periodic sweep uses. Read as anything but `now` less the
+/// lifetime it either spares every stale row or takes every live one.
+///
+/// The stale row goes in after the last read, because `init_file_entry` sweeps
+/// on its way past and would take it before `create_preview` was asked to.
+#[tokio::test]
+async fn taking_a_preview_clears_the_ones_that_expired() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("preview_sweep.rs", "fn main() {}\n");
+    let repository = SqliteFileStore;
+    let target = live_id(&repository, file.path_str(), 1);
+
+    let stale = "/preview/expired.rs";
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    {
+        let conn = crate::tools::store::get_db_connection().unwrap();
+        conn.execute("DELETE FROM previews WHERE filepath = ?1", [stale])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO previews (filepath, file_hash, edits_json, created_at)
+             VALUES (?1, 'h', '[]', ?2);",
+            rusqlite::params![stale, now - crate::tools::store::PREVIEW_TTL_SECONDS - 60],
+        )
+        .unwrap();
+    }
+
+    repository
+        .create_preview(
+            file.path_str(),
+            &[LineEdit {
+                op: EditOp::Replace,
+                start_id: Some(target),
+                content: Some("fn main() {}\n".to_string()),
+                ..Default::default()
+            }],
+        )
+        .unwrap();
+
+    let conn = crate::tools::store::get_db_connection().unwrap();
+    let left: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM previews WHERE filepath = ?1",
+            [stale],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(left, 0, "a preview past its hour survived a new one");
+}
+
+/// A move whose destination is inside the block being moved is refused, at
+/// either end of it.
+///
+/// `move_span` shifts a destination that sits after the block by the number of
+/// lines the drain took, and leaves one before it alone. The two readings of
+/// that comparison differ only when the destination is the block's own last
+/// line, which this refuses first — so no test can tell them apart, and
+/// `mutants.toml` says so on the strength of this.
+#[tokio::test]
+async fn a_move_into_the_block_being_moved_is_refused() {
+    let _lock = acquire_db_lock();
+    let file = TestFile::new("self_move.txt", "a\nb\nc\nd\n");
+    let path = file.path_str();
+    let repository = SqliteFileStore;
+    let pm = create_test_parser_manager();
+
+    for line in [1, 2] {
+        let start = live_id(&repository, path, 1);
+        let end = live_id(&repository, path, 2);
+        let dest = live_id(&repository, path, line);
+        let refused = edit_lines(
+            &repository,
+            path,
+            vec![LineEdit {
+                op: EditOp::Move,
+                start_id: Some(start),
+                end_id: Some(end),
+                dest_id: Some(dest),
+                move_position: Some(MovePosition::After),
+                ..Default::default()
+            }],
+            &pm,
+        )
+        .await;
+        let err = refused
+            .expect_err(&format!(
+                "a move onto line {line} of its own block was allowed"
+            ))
+            .to_string();
+        assert!(
+            err.contains("Cannot move a range into itself"),
+            "line {line}: {err}"
+        );
+    }
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "a\nb\nc\nd\n");
+}
+
 /// After an edit, the store's counter stands above every sequence number the
 /// file holds.
 ///

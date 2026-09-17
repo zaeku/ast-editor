@@ -11,3 +11,4 @@ decisions/
 
 # CodeGraph's index: a build product of the source beside it.
 .codegraph/
+tools/mutation-ssh.env

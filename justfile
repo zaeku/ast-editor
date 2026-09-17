@@ -117,16 +117,19 @@ uninstall:
     rm -rf '{{skill_dir}}'
     @echo 'removed {{bin_dir}}/ast-editor and {{skill_dir}}'
 
-# The suite runs on a rented Colab session rather than here, because a full run
-# is 873 mutants. Needs the `colab` CLI; SESSION, HARDWARE and JOBS override it.
+# A run is over eight hundred mutants and each is a build, so it happens on a
+# machine with cores to spare rather than here. The ssh host is a workstation
+# that is nearly always up and in nobody else's queue, which is why it is the
+# default; HOST and JOBS override it.
 
 # Measure what the tests would catch, and print what survived.
 mutants:
+    ./tools/mutation-ssh.sh
+
+# The same measurement on a rented Colab session, for when the host is not there.
+mutants-colab:
     ./tools/mutation-run.sh
 
-# Sharding buys wall clock; the total cost is the same either way. SHARDS,
-# HARDWARE and JOBS override it.
-
-# The same measurement, split across rented sessions.
+# The same measurement again, split across several rented sessions.
 mutants-split:
     ./tools/mutation-shards.sh

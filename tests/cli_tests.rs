@@ -1608,10 +1608,10 @@ fn deleting_a_line_names_the_run_that_moved_up() {
     let answer = json_block(&out.stdout);
     let runs = answer["renumbered"].as_array().unwrap();
     assert_eq!(runs.len(), 1, "one hole moves one run: {answer}");
-    assert_eq!(runs[0]["from"][0].as_str().unwrap(), before[2]);
-    assert_eq!(runs[0]["from"][1].as_u64().unwrap(), 2);
-    assert_eq!(runs[0]["to"][0].as_str().unwrap(), before[3]);
-    assert_eq!(runs[0]["to"][1].as_u64().unwrap(), 3);
+    assert_eq!(runs[0]["range"][0].as_str().unwrap(), before[2]);
+    assert_eq!(runs[0]["range"][1].as_str().unwrap(), before[3]);
+    assert_eq!(runs[0]["line_numbers"][0].as_u64().unwrap(), 2);
+    assert_eq!(runs[0]["line_numbers"][1].as_u64().unwrap(), 3);
 }
 
 /// `delete a,a` addresses one line twice, which is a span of one and not an

@@ -89,7 +89,8 @@ number]`, in file order — so the id and where it landed arrive together and a
 following edit needs no second read.
 
 A `renumbered` array holds one entry per run of lines that an edit left at a new
-number, `{"from": [id, line], "to": [id, line]}`. The lines inside a run are
+number, `{"range": [first_id, last_id], "line_numbers": [first, last]}`. The
+lines inside a run are
 contiguous and in order, so its two ends give the number of every line between
 them. A `delete` writes nothing, so it answers with an empty `modified_lines`
 and the run that moved up into the hole.

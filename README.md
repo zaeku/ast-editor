@@ -194,7 +194,8 @@ Apply edits transactionally to a file. Answers with the lines it wrote, each as 
   others act at one line and say so if given two.
 * The answer is `modified_lines`, each entry a line the batch wrote as
   `[id, line number]`, and `renumbered`, each entry a run of lines the batch
-  left at a new number, named by its two ends.
+  left at a new number, each naming the ids of its first and last line and where
+  those two landed.
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 
@@ -219,7 +220,7 @@ EOF
     ["5#b7a3",2], ["2#9639",3]
   ],
   "renumbered": [
-    {"from": ["2#9639", 3], "to": ["2#9639", 3]}
+    {"range": ["2#9639", "2#9639"], "line_numbers": [3, 3]}
   ]
 }
 ```

@@ -118,6 +118,17 @@ rsync -az --delete --delete-excluded \
     ./ "$HOST:$REMOTE_DIR/repo/" ||
     fail "could not send the working copy to $HOST:$REMOTE_DIR/repo/"
 
+# The exclusions cargo-mutants reads, sent on their own: the rsync this machine
+# ships left `.cargo/` behind twice, and a run without that file measures every
+# mutant the list has rather than the ones worth reading.
+if [ -f .cargo/mutants.toml ]; then
+    remote "mkdir -p ~/$REMOTE_DIR/repo/.cargo"
+    ssh -o BatchMode=yes "$HOST" "cat > ~/$REMOTE_DIR/repo/.cargo/mutants.toml" \
+        < .cargo/mutants.toml ||
+        fail "could not send .cargo/mutants.toml"
+    note "sent the mutant exclusions"
+fi
+
 # --- The run, detached from this connection ---------------------------------
 
 cat > "$WORK/run.sh" <<RUN
@@ -126,7 +137,12 @@ R=\$HOME/$REMOTE_DIR
 export CARGO_HOME=\$HOME/.cargo RUSTUP_HOME=\$HOME/.rustup
 export PATH=\$CARGO_HOME/bin:\$PATH
 export CARGO_BUILD_JOBS=$BUILD_JOBS
-rm -f "\$R/done" "\$R/heartbeat"
+# A run that ended without writing its marker leaves its heartbeat loop behind,
+# and two of them writing one file makes the elapsed time whichever wrote last
+# — the number the cap is read from. The pid is recorded rather than matched on
+# a pattern, because a pattern matches the shell that is doing the matching.
+[ -f "\$R/beat.pid" ] && kill -9 "\$(cat "\$R/beat.pid")" 2>/dev/null
+rm -f "\$R/done" "\$R/heartbeat" "\$R/beat.pid"
 cd "\$R/repo"
 
 start=\$(date +%s)
@@ -145,6 +161,7 @@ start=\$(date +%s)
     done
 ) &
 beat=\$!
+echo \$beat > "\$R/beat.pid"
 
 # A run that finds survivors exits non-zero and so does one refused in the
 # unmutated tree, and either way the marker below is what the watcher waits

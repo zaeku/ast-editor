@@ -172,7 +172,8 @@ is an error rather than zero matches.
   others act at one line and say so if given two.
 * The answer is `modified_lines`, each entry a line the batch wrote as
   `[id, line number]`, and `renumbered`, each entry a run of lines the batch
-  left at a new number, named by its two ends.
+  left at a new number, each naming the ids of its first and last line and where
+  those two landed.
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 

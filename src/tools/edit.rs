@@ -339,11 +339,11 @@ async fn apply_batch(
             .iter()
             .map(|range| {
                 Ok(format!(
-                    "    {{\"from\": [{}, {}], \"to\": [{}, {}]}}",
-                    serde_json::to_string(&range.from.0)?,
-                    range.from.1,
-                    serde_json::to_string(&range.to.0)?,
-                    range.to.1,
+                    "    {{\"range\": [{}, {}], \"line_numbers\": [{}, {}]}}",
+                    serde_json::to_string(&range.range.0)?,
+                    serde_json::to_string(&range.range.1)?,
+                    range.line_numbers.0,
+                    range.line_numbers.1,
                 ))
             })
             .collect::<Result<Vec<_>>>()?;

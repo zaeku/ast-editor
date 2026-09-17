@@ -26,12 +26,17 @@ pub(crate) struct BufLine {
 /// A file's lines held in memory for the duration of one edit batch. Edits
 /// mutate the buffer; nothing reaches the database or the disk until the
 /// caller decides the result is good.
-/// A run of lines that all landed on new numbers, named by its two ends. What
-/// is between them is contiguous and in order, so the ends give every number
-/// in the run and nothing in between is listed.
+/// A run of lines that all landed on new numbers: the ids of its first and
+/// last line, and where those two now are. What is between them is contiguous
+/// and in order, so the ends give every number in the run.
+///
+/// The ids and the numbers are apart because they are read apart — a caller
+/// holds ids and wants numbers — and because a pair of one of each had to
+/// carry "these are the ends" in the two words naming it, which `from` and
+/// `to` did not: an agent read them as one line moved to another.
 pub(crate) struct Renumbered {
-    pub from: (String, usize),
-    pub to: (String, usize),
+    pub range: (String, String),
+    pub line_numbers: (usize, usize),
 }
 
 pub(crate) struct LineBuffer {
@@ -209,8 +214,8 @@ impl LineBuffer {
 
     fn range_between(&self, start: usize, end: usize) -> Renumbered {
         Renumbered {
-            from: (self.id_at(start), start + 1),
-            to: (self.id_at(end), end + 1),
+            range: (self.id_at(start), self.id_at(end)),
+            line_numbers: (start + 1, end + 1),
         }
     }
 

@@ -26,6 +26,14 @@ pub(crate) struct BufLine {
 /// A file's lines held in memory for the duration of one edit batch. Edits
 /// mutate the buffer; nothing reaches the database or the disk until the
 /// caller decides the result is good.
+/// A run of lines that all landed on new numbers, named by its two ends. What
+/// is between them is contiguous and in order, so the ends give every number
+/// in the run and nothing in between is listed.
+pub(crate) struct Renumbered {
+    pub from: (String, usize),
+    pub to: (String, usize),
+}
+
 pub(crate) struct LineBuffer {
     pub lines: Vec<BufLine>,
     next_seq: i64,
@@ -140,9 +148,17 @@ impl LineBuffer {
     }
 
     /// Apply one batch of edits in order, returning the ids the batch touched.
-    /// The lines a batch changed, as their ids. Each op is a method below, so
-    /// this is the order they run in and nothing else.
-    pub(crate) fn apply(&mut self, edits: &[LineEdit]) -> Result<Vec<String>> {
+    /// What a batch changed: the ids of the lines it wrote, and the runs of
+    /// lines it left at a different number than they had. A line that was
+    /// written is not renumbered — it is new or it is rewritten in place, and
+    /// the first list already names it.
+    pub(crate) fn apply(&mut self, edits: &[LineEdit]) -> Result<(Vec<String>, Vec<Renumbered>)> {
+        let numbered_before: std::collections::HashMap<i64, usize> = self
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| (line.seq, idx + 1))
+            .collect();
         let mut modified = Vec::new();
 
         for edit in edits {
@@ -157,7 +173,45 @@ impl LineBuffer {
             }
         }
 
-        Ok(modified)
+        let renumbered = self.renumbered_since(&numbered_before);
+        Ok((modified, renumbered))
+    }
+
+    /// Every run of lines whose number changed, in file order. A run breaks
+    /// where a line did not move — a line written by this batch, or one the
+    /// batch never reached — so the lines inside one are contiguous and
+    /// counting from either end gives the number of every line between.
+    fn renumbered_since(
+        &self,
+        numbered_before: &std::collections::HashMap<i64, usize>,
+    ) -> Vec<Renumbered> {
+        let mut ranges = Vec::new();
+        let mut run: Option<(usize, usize)> = None;
+
+        for (idx, line) in self.lines.iter().enumerate() {
+            let moved = numbered_before
+                .get(&line.seq)
+                .is_some_and(|before| *before != idx + 1);
+            if moved {
+                run = Some(match run {
+                    Some((start, _)) => (start, idx),
+                    None => (idx, idx),
+                });
+            } else if let Some((start, end)) = run.take() {
+                ranges.push(self.range_between(start, end));
+            }
+        }
+        if let Some((start, end)) = run {
+            ranges.push(self.range_between(start, end));
+        }
+        ranges
+    }
+
+    fn range_between(&self, start: usize, end: usize) -> Renumbered {
+        Renumbered {
+            from: (self.id_at(start), start + 1),
+            to: (self.id_at(end), end + 1),
+        }
     }
 
     /// The run of lines an edit addresses: `start_id` alone is one line, and
@@ -286,20 +340,10 @@ impl LineBuffer {
         Ok(())
     }
 
-    fn delete(&mut self, edit: &LineEdit, modified: &mut Vec<String>) -> Result<()> {
+    fn delete(&mut self, edit: &LineEdit, _modified: &mut Vec<String>) -> Result<()> {
         let (idx, end_idx) = self.span_of(edit)?;
         self.lines.drain(idx..=end_idx);
 
-        // Report the line now nearest the hole, so the agent has a
-        // live id to anchor its next edit on.
-        if !self.lines.is_empty() {
-            let neighbour = if idx < self.lines.len() {
-                idx
-            } else {
-                self.lines.len() - 1
-            };
-            modified.push(self.id_at(neighbour));
-        }
         Ok(())
     }
 

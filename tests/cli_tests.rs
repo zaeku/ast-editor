@@ -1549,11 +1549,11 @@ fn a_span_of_one_line_is_one_line() {
     }
 }
 
-/// A delete answers with the line now nearest the hole, so the next edit has a
-/// live id to anchor on. Taking the last line out leaves the hole past the end,
-/// and the nearest line is then the one before it.
+/// A delete writes no line, so `modified_lines` is empty and what it did say is
+/// carried by the run of lines that moved up into the hole. Taking the last
+/// line out moves nothing, so there is no run and the answer names none.
 #[test]
-fn deleting_the_last_line_answers_with_the_new_last_line() {
+fn deleting_the_last_line_renumbers_nothing() {
     let file = scratch("delete_tail.txt", "one\ntwo\nthree\n");
     let ids = line_ids("deltail", &file);
     let out = run_script("deltail", &file, &format!("delete {}\n", ids[2]));
@@ -1564,18 +1564,22 @@ fn deleting_the_last_line_answers_with_the_new_last_line() {
     );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "one\ntwo\n");
 
-    let named = json_block(&out.stdout)["modified_lines"][0][0]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(named, ids[1], "the answer did not name the new last line");
+    let answer = json_block(&out.stdout);
+    assert_eq!(
+        answer["modified_lines"].as_array().map(Vec::len),
+        Some(0),
+        "a delete wrote a line: {answer}"
+    );
+    assert!(
+        answer["renumbered"].as_array().is_none_or(Vec::is_empty),
+        "every surviving line kept its number: {answer}"
+    );
 }
 
-/// Deleting a line in the middle leaves the hole where that line was, so the
-/// line now nearest it is the one that moved up into the gap — not the last
-/// line of the file, which is only nearest when the hole is past the end.
+/// Deleting a line in the middle moves every line below it up one, and the
+/// answer names that run by its two ends.
 #[test]
-fn deleting_a_line_answers_with_the_line_that_took_its_place() {
+fn deleting_a_line_names_the_run_that_moved_up() {
     let file = scratch("delete_middle.txt", "one\ntwo\nthree\nfour\n");
     let before = line_ids("delmid", &file);
     let out = run_script("delmid", &file, &format!("delete {}\n", before[1]));
@@ -1589,11 +1593,13 @@ fn deleting_a_line_answers_with_the_line_that_took_its_place() {
         "one\nthree\nfour\n"
     );
 
-    let named = json_block(&out.stdout)["modified_lines"][0][0]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(named, before[2], "the answer did not name the line below");
+    let answer = json_block(&out.stdout);
+    let runs = answer["renumbered"].as_array().unwrap();
+    assert_eq!(runs.len(), 1, "one hole moves one run: {answer}");
+    assert_eq!(runs[0]["from"][0].as_str().unwrap(), before[2]);
+    assert_eq!(runs[0]["from"][1].as_u64().unwrap(), 2);
+    assert_eq!(runs[0]["to"][0].as_str().unwrap(), before[3]);
+    assert_eq!(runs[0]["to"][1].as_u64().unwrap(), 3);
 }
 
 /// `delete a,a` addresses one line twice, which is a span of one and not an

@@ -27,7 +27,11 @@ pub(crate) trait FileStore: Send + Sync {
         &self,
         file_key: &str,
         edits: &[LineEdit],
-    ) -> Result<(LineBuffer, Vec<String>)>;
+    ) -> Result<(
+        LineBuffer,
+        Vec<String>,
+        Vec<crate::tools::buffer::Renumbered>,
+    )>;
     /// Persist a planned buffer as the file's new index. Call only once the
     /// buffer's content has been accepted and written to disk.
     fn commit_buffer(&self, file_key: &str, buffer: &LineBuffer) -> Result<()>;
@@ -107,11 +111,15 @@ impl FileStore for SqliteFileStore {
         &self,
         file_key: &str,
         edits: &[LineEdit],
-    ) -> Result<(LineBuffer, Vec<String>)> {
+    ) -> Result<(
+        LineBuffer,
+        Vec<String>,
+        Vec<crate::tools::buffer::Renumbered>,
+    )> {
         let mut conn = get_db_connection()?;
         let mut buffer = load_buffer(&mut conn, file_key)?;
-        let modified_lines = buffer.apply(edits)?;
-        Ok((buffer, modified_lines))
+        let (modified_lines, renumbered) = buffer.apply(edits)?;
+        Ok((buffer, modified_lines, renumbered))
     }
 
     fn commit_buffer(&self, file_key: &str, buffer: &LineBuffer) -> Result<()> {

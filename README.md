@@ -185,14 +185,16 @@ is an error rather than zero matches.
 
 ### `edit`
 
-Apply edits transactionally to a file. Answers with the lines it changed, each as [id, line number], so a following edit needs no second read.
+Apply edits transactionally to a file. Answers with the lines it wrote, each as [id, line number], and with the runs of lines it left at a new number, so a following edit needs no second read.
 
 * `replace`, `replace_substring`, `insert_before`, `insert_after`, `delete`,
   `move`.
 * An address is one id, or `<start_id>,<end_id>` for a span — the comma `view`
   already reads in `40,80`. `replace`, `delete` and `move` take a span; the
   others act at one line and say so if given two.
-* The answer is `modified_lines`, each entry a line as `[id, line number]`.
+* The answer is `modified_lines`, each entry a line the batch wrote as
+  `[id, line number]`, and `renumbered`, each entry a run of lines the batch
+  left at a new number, named by its two ends.
 * Content is line-terminated text: an empty payload is no lines, so a `replace`
   with one deletes the line.
 
@@ -215,6 +217,9 @@ EOF
 {
   "modified_lines": [
     ["5#b7a3",2], ["2#9639",3]
+  ],
+  "renumbered": [
+    {"from": ["2#9639", 3], "to": ["2#9639", 3]}
   ]
 }
 ```

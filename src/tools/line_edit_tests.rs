@@ -1909,8 +1909,18 @@ async fn test_case_insensitive_validation_and_deletion_preview() -> Result<()> {
     let preview = edit_lines(&repository, filepath_str, edits, &env.pm).await?;
     let res: serde_json::Value = serde_json::from_str(&preview)?;
     assert!(res["status"].is_null(), "success is the exit code: {}", res);
-    let modified = res["modified_lines"].as_array().unwrap();
-    assert!(!modified.is_empty());
+    // A delete writes no line, so what says it happened is the run of lines
+    // that moved up into the hole.
+    assert!(
+        res["modified_lines"].as_array().unwrap().is_empty(),
+        "a delete wrote a line: {}",
+        res
+    );
+    assert!(
+        !res["renumbered"].as_array().unwrap().is_empty(),
+        "the lines after the hole kept their numbers: {}",
+        res
+    );
 
     let disk_content = fs::read_to_string(&file_path)?;
     assert!(disk_content.contains("let a = 1;"));

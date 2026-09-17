@@ -109,7 +109,7 @@
   },
   {
     "name": "edit",
-    "description": "Apply edits transactionally to a file. Answers with the lines it changed, each as [id, line number], so a following edit needs no second read.",
+    "description": "Apply edits transactionally to a file. Answers with the lines it wrote, each as [id, line number], and with the runs of lines it left at a new number, so a following edit needs no second read.",
     "inputSchema": {
       "type": "object",
       "properties": {

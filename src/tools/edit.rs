@@ -59,7 +59,7 @@ pub(crate) async fn edit_lines_dry_run(
     let original_content = fs::read_to_string(filepath)?;
 
     // A preview is a plan that is never committed, so there is nothing to undo.
-    let (buffer, _) = repository.plan_line_edits(&file_key, &edits)?;
+    let (buffer, _, _) = repository.plan_line_edits(&file_key, &edits)?;
     let preview_content = buffer.join(line_ending);
 
     let diff = similar::TextDiff::from_lines(&original_content, &preview_content)
@@ -185,7 +185,8 @@ async fn apply_batch(
 
     // Plan the batch without persisting it. Nothing is committed until the
     // content it produces has been accepted, so a rejected edit needs no undo.
-    let (buffer, newly_modified_lines) = repository.plan_line_edits(&file_key, &edits)?;
+    let (buffer, newly_modified_lines, renumbered) =
+        repository.plan_line_edits(&file_key, &edits)?;
     // Each id with the line it is now, walked off the planned buffer: an id
     // alone does not say where its line went (card #5).
     let newly_modified_lines = buffer.locate(&newly_modified_lines);
@@ -329,6 +330,27 @@ async fn apply_batch(
     // A field appears when it has something to say: an edit that parsed says
     // nothing, and one nothing could read says so (card #1).
     let mut fields = vec![format!("\"modified_lines\": {}", indented_ids)];
+    if !renumbered.is_empty() {
+        // Every line after an edit that changed the file's length is at a new
+        // number. The ends of each run say so, and what is between them is
+        // contiguous, so nothing in the middle has to be listed
+        // (D-01M2NTVZGAP3VT).
+        let ranges = renumbered
+            .iter()
+            .map(|range| {
+                Ok(format!(
+                    "    {{\"from\": [{}, {}], \"to\": [{}, {}]}}",
+                    serde_json::to_string(&range.from.0)?,
+                    range.from.1,
+                    serde_json::to_string(&range.to.0)?,
+                    range.to.1,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        // One run to a row, the way the ids are printed, so a long answer is
+        // read down a column rather than across a line.
+        fields.push(format!("\"renumbered\": [\n{}\n  ]", ranges.join(",\n")));
+    }
     if let Some(warns) = warnings {
         fields.push(format!("\"warnings\": {}", serde_json::to_string(&warns)?));
     }

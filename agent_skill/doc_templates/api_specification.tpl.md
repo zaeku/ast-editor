@@ -67,6 +67,14 @@ A batch that replaces a span of two lines with one, and inserts after another:
 Every id the batch minted comes back in `modified_lines`, each entry a line as
 `[id, line number]`, so a following edit needs no second read.
 
+A batch that changes how many lines a file has moves every line after it, and
+`renumbered` names those runs: `{"from": [id, line], "to": [id, line]}` for
+each. Lines inside a run stay contiguous and in order, so its two ends give the
+number of every line between them and nothing in the middle is listed. A
+`delete` writes no line, so it answers with an empty `modified_lines` and the
+run that moved up into the hole; a `replace` given no lines answers the same
+way, because it is the same edit.
+
 ### Previewing a batch
 
 `dry_run` runs the same batch against a copy. The answer carries the unified

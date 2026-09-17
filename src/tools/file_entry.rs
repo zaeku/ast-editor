@@ -110,13 +110,28 @@ pub(crate) fn reconcile_index(
         }
     }
 
+    // A retired line sits in both queues — once under its own hash and once
+    // under its hash ignoring whitespace — so a seq the first pass hands out
+    // has to be refused by the second. Handing one out twice gives two lines
+    // the same id, and an edit addressed to it then takes whichever comes
+    // first (D-01M27KBH6NNXZJ, D-01M280K52X35JE).
+    let mut taken: std::collections::HashSet<i64> = assigned.iter().flatten().copied().collect();
+    let mut claim = |slot: &mut Option<i64>, queue: &mut VecDeque<i64>| {
+        while let Some(seq) = queue.pop_front() {
+            if taken.insert(seq) {
+                *slot = Some(seq);
+                return;
+            }
+        }
+    };
+
     // A moved line reads as a delete plus an insert. Where an inserted line
     // matches a retired one exactly, it is that same line in a new place, so
     // it keeps its identity.
     for (new_idx, slot) in assigned.iter_mut().enumerate() {
         if slot.is_none() {
             if let Some(queue) = retired.get_mut(disk_hashes[new_idx].as_str()) {
-                *slot = queue.pop_front();
+                claim(slot, queue);
             }
         }
     }
@@ -130,7 +145,7 @@ pub(crate) fn reconcile_index(
     for (new_idx, slot) in assigned.iter_mut().enumerate() {
         if slot.is_none() {
             if let Some(queue) = respaced.get_mut(disk_norms[new_idx].as_str()) {
-                *slot = queue.pop_front();
+                claim(slot, queue);
             }
         }
     }

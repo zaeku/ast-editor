@@ -73,8 +73,20 @@ fn tool_options(tool: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// A fixture for one test, under a directory this process owns.
+///
+/// The number is the directory rather than the name, so a test that addresses
+/// its fixture by basename still can. Two tests that pick one name share a
+/// directory otherwise, run on their own threads, and the second one's content
+/// lands under the first one's path — which is not a failure until there are
+/// enough threads for the reads to interleave. A 44-vCPU machine has them and
+/// a laptop does not, so it cost a mutation run rather than a test run.
 fn scratch(name: &str, content: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("ast-editor-cli-files-{}", std::process::id()));
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir()
+        .join(format!("ast-editor-cli-files-{}", std::process::id()))
+        .join(NEXT.fetch_add(1, Ordering::SeqCst).to_string());
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(name);
     std::fs::write(&path, content).unwrap();

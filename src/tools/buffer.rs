@@ -140,225 +140,229 @@ impl LineBuffer {
     }
 
     /// Apply one batch of edits in order, returning the ids the batch touched.
+    /// The lines a batch changed, as their ids. Each op is a method below, so
+    /// this is the order they run in and nothing else.
     pub(crate) fn apply(&mut self, edits: &[LineEdit]) -> Result<Vec<String>> {
         let mut modified = Vec::new();
 
         for edit in edits {
             match edit.op {
                 EditOp::InsertAfter | EditOp::InsertBefore | EditOp::Append | EditOp::Prepend => {
-                    if edit.end_id.as_ref().is_some_and(|id| !id.is_empty()) {
-                        bail!(
-                            "{}",
-                            crate::tools::metadata::get_config()
-                                .error_op_takes_one_line
-                                .replacen("{}", &crate::tools::line_id::op_name(edit.op), 1)
-                        );
-                    }
-                    let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
-                    let no_target = edit.start_id.as_ref().is_none_or(|s| s.is_empty());
-
-                    let at = if edit.op == EditOp::Append
-                        || (edit.op == EditOp::InsertAfter && no_target)
-                    {
-                        self.lines.len()
-                    } else if edit.op == EditOp::Prepend
-                        || (edit.op == EditOp::InsertBefore && no_target)
-                    {
-                        0
-                    } else {
-                        let start_id = edit
-                            .start_id
-                            .as_ref()
-                            .filter(|s| !s.is_empty())
-                            .ok_or_else(|| missing_field(edit, "start_id"))?;
-                        let idx = self.position_of(start_id, "Start", "start_id")?;
-                        if edit.op == EditOp::InsertAfter {
-                            idx + 1
-                        } else {
-                            idx
-                        }
-                    };
-
-                    self.insert_at(at, contents, &mut modified);
+                    self.insert(edit, &mut modified)?
                 }
-
-                EditOp::Replace => {
-                    let start_id = edit
-                        .start_id
-                        .as_ref()
-                        .filter(|s| !s.is_empty())
-                        .ok_or_else(|| missing_field(edit, "start_id"))?;
-                    let content = edit
-                        .content
-                        .as_ref()
-                        .ok_or_else(|| missing_field(edit, "content"))?;
-                    let start_idx = self.position_of(start_id, "Start", "start_id")?;
-                    let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
-                        Some(end_id) => {
-                            let idx = self.position_of(end_id, "End", "end_id")?;
-                            if start_idx > idx {
-                                bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order.");
-                            }
-                            idx
-                        }
-                        None => start_idx,
-                    };
-
-                    // A payload is the lines it has (D-01M280Y0JPPWBG), and an
-                    // address is a span of one or more. The span's first line
-                    // keeps its sequence number and takes the first of the
-                    // payload; the rest of the span goes; what is left of the
-                    // payload follows as new lines. No lines is no lines: an
-                    // empty payload takes the span out.
-                    let mut contents = split_insert_content(content);
-                    if contents.is_empty() {
-                        self.lines.drain(start_idx..=end_idx);
-                    } else {
-                        let rest = contents.split_off(1);
-                        self.lines[start_idx].content = contents.pop().unwrap_or_default();
-                        modified.push(self.id_at(start_idx));
-                        // A one-line span drains `start_idx + 1..=start_idx`,
-                        // which is empty, so the span needs no test of its own.
-                        self.lines.drain(start_idx + 1..=end_idx);
-                        if !rest.is_empty() {
-                            self.insert_at(start_idx + 1, rest, &mut modified);
-                        }
-                    }
-                }
-
-                EditOp::ReplaceSubstring => {
-                    let start_id = edit
-                        .start_id
-                        .as_ref()
-                        .ok_or_else(|| missing_field(edit, "start_id"))?;
-                    let pattern = edit
-                        .pattern
-                        .as_ref()
-                        .ok_or_else(|| missing_field(edit, "pattern"))?;
-                    let replacement = edit
-                        .replacement
-                        .as_ref()
-                        .ok_or_else(|| missing_field(edit, "replacement"))?;
-                    let occurrence = edit.occurrence.unwrap_or(1);
-                    if occurrence < 1 {
-                        bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
-                    }
-                    let idx = self.position_of(start_id, "Start", "start_id")?;
-
-                    let current = &self.lines[idx].content;
-                    let start = current
-                        .match_indices(pattern.as_str())
-                        .nth(occurrence - 1)
-                        .map(|(pos, _)| pos)
-                        .with_context(|| {
-                            crate::tools::metadata::get_config()
-                                .error_pattern_not_found
-                                .replacen("{}", &occurrence.to_string(), 1)
-                                .replacen("{}", pattern, 1)
-                        })?;
-
-                    let mut updated = String::with_capacity(current.len());
-                    updated.push_str(&current[..start]);
-                    updated.push_str(replacement);
-                    updated.push_str(&current[start + pattern.len()..]);
-                    self.lines[idx].content = updated;
-                    modified.push(self.id_at(idx));
-                }
-
-                EditOp::Delete => {
-                    let start_id = edit
-                        .start_id
-                        .as_ref()
-                        .ok_or_else(|| missing_field(edit, "start_id"))?;
-                    let idx = self.position_of(start_id, "Start", "start_id")?;
-                    let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
-                        Some(end_id) => {
-                            let last = self.position_of(end_id, "End", "end_id")?;
-                            if idx > last {
-                                bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order.");
-                            }
-                            last
-                        }
-                        None => idx,
-                    };
-                    self.lines.drain(idx..=end_idx);
-
-                    // Report the line now nearest the hole, so the agent has a
-                    // live id to anchor its next edit on.
-                    if !self.lines.is_empty() {
-                        let neighbour = if idx < self.lines.len() {
-                            idx
-                        } else {
-                            self.lines.len() - 1
-                        };
-                        modified.push(self.id_at(neighbour));
-                    }
-                }
-
-                EditOp::Move => {
-                    let start_id = edit
-                        .start_id
-                        .as_ref()
-                        .filter(|s| !s.is_empty())
-                        .ok_or_else(|| missing_field(edit, "start_id"))?;
-                    let end_id = edit
-                        .end_id
-                        .as_ref()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(start_id);
-                    let move_pos = edit.move_position.unwrap_or(MovePosition::After);
-
-                    let start_idx = self.position_of(start_id, "Start", "start_id")?;
-                    let end_idx = self.position_of(end_id, "End", "end_id")?;
-                    if start_idx > end_idx {
-                        bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
-                    }
-
-                    // Where the block lands is decided against the lines that
-                    // stay put, so resolve the destination before lifting it.
-                    let dest_idx = match move_pos {
-                        MovePosition::Prepend | MovePosition::Append => None,
-                        MovePosition::Before | MovePosition::After => {
-                            let dest_id = edit
-                                .dest_id
-                                .as_ref()
-                                .filter(|s| !s.is_empty())
-                                .ok_or_else(|| missing_field(edit, "dest_id"))?;
-                            let idx = self.position_of(dest_id, "Destination", "dest_id")?;
-                            if idx >= start_idx && idx <= end_idx {
-                                bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_id lies within source range).");
-                            }
-                            Some(idx)
-                        }
-                    };
-
-                    let block: Vec<BufLine> = self.lines.drain(start_idx..=end_idx).collect();
-                    let moved = block.len();
-
-                    let at = match (move_pos, dest_idx) {
-                        (MovePosition::Prepend, _) => 0,
-                        (MovePosition::Append, _) => self.lines.len(),
-                        (pos, Some(dest)) => {
-                            // The drain shifted every position after the block.
-                            let dest = if dest > end_idx { dest - moved } else { dest };
-                            if pos == MovePosition::Before {
-                                dest
-                            } else {
-                                dest + 1
-                            }
-                        }
-                        (_, None) => unreachable!("before/after always resolve a destination"),
-                    };
-
-                    for (offset, line) in block.into_iter().enumerate() {
-                        self.lines.insert(at + offset, line);
-                        modified.push(self.id_at(at + offset));
-                    }
-                }
+                EditOp::Replace => self.replace(edit, &mut modified)?,
+                EditOp::ReplaceSubstring => self.replace_substring(edit, &mut modified)?,
+                EditOp::Delete => self.delete(edit, &mut modified)?,
+                EditOp::Move => self.move_span(edit, &mut modified)?,
             }
         }
 
         Ok(modified)
+    }
+
+    /// The run of lines an edit addresses: `start_id` alone is one line, and
+    /// `start_id` with `end_id` is everything between them.
+    fn span_of(&self, edit: &LineEdit) -> Result<(usize, usize)> {
+        let start_id = edit
+            .start_id
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| missing_field(edit, "start_id"))?;
+        let start_idx = self.position_of(start_id, "Start", "start_id")?;
+        let end_idx = match edit.end_id.as_ref().filter(|s| !s.is_empty()) {
+            Some(end_id) => {
+                let idx = self.position_of(end_id, "End", "end_id")?;
+                if start_idx > idx {
+                    bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order.");
+                }
+                idx
+            }
+            None => start_idx,
+        };
+        Ok((start_idx, end_idx))
+    }
+
+    fn insert(&mut self, edit: &LineEdit, modified: &mut Vec<String>) -> Result<()> {
+        if edit.end_id.as_ref().is_some_and(|id| !id.is_empty()) {
+            bail!(
+                "{}",
+                crate::tools::metadata::get_config()
+                    .error_op_takes_one_line
+                    .replacen("{}", &crate::tools::line_id::op_name(edit.op), 1)
+            );
+        }
+        let contents = split_insert_content(edit.content.as_deref().unwrap_or(""));
+        let no_target = edit.start_id.as_ref().is_none_or(|s| s.is_empty());
+
+        let at = if edit.op == EditOp::Append || (edit.op == EditOp::InsertAfter && no_target) {
+            self.lines.len()
+        } else if edit.op == EditOp::Prepend || (edit.op == EditOp::InsertBefore && no_target) {
+            0
+        } else {
+            let start_id = edit
+                .start_id
+                .as_ref()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| missing_field(edit, "start_id"))?;
+            let idx = self.position_of(start_id, "Start", "start_id")?;
+            if edit.op == EditOp::InsertAfter {
+                idx + 1
+            } else {
+                idx
+            }
+        };
+
+        self.insert_at(at, contents, modified);
+        Ok(())
+    }
+
+    fn replace(&mut self, edit: &LineEdit, modified: &mut Vec<String>) -> Result<()> {
+        let content = edit
+            .content
+            .as_ref()
+            .ok_or_else(|| missing_field(edit, "content"))?;
+        let (start_idx, end_idx) = self.span_of(edit)?;
+
+        // A payload is the lines it has (D-01M280Y0JPPWBG), and an
+        // address is a span of one or more. The span's first line
+        // keeps its sequence number and takes the first of the
+        // payload; the rest of the span goes; what is left of the
+        // payload follows as new lines. No lines is no lines: an
+        // empty payload takes the span out.
+        let mut contents = split_insert_content(content);
+        if contents.is_empty() {
+            self.lines.drain(start_idx..=end_idx);
+        } else {
+            let rest = contents.split_off(1);
+            self.lines[start_idx].content = contents.pop().unwrap_or_default();
+            modified.push(self.id_at(start_idx));
+            // A one-line span drains `start_idx + 1..=start_idx`,
+            // which is empty, so the span needs no test of its own.
+            self.lines.drain(start_idx + 1..=end_idx);
+            if !rest.is_empty() {
+                self.insert_at(start_idx + 1, rest, modified);
+            }
+        }
+        Ok(())
+    }
+
+    fn replace_substring(&mut self, edit: &LineEdit, modified: &mut Vec<String>) -> Result<()> {
+        let start_id = edit
+            .start_id
+            .as_ref()
+            .ok_or_else(|| missing_field(edit, "start_id"))?;
+        let pattern = edit
+            .pattern
+            .as_ref()
+            .ok_or_else(|| missing_field(edit, "pattern"))?;
+        let replacement = edit
+            .replacement
+            .as_ref()
+            .ok_or_else(|| missing_field(edit, "replacement"))?;
+        let occurrence = edit.occurrence.unwrap_or(1);
+        if occurrence < 1 {
+            bail!("Invalid occurrence number: {}. Must be >= 1.", occurrence);
+        }
+        let idx = self.position_of(start_id, "Start", "start_id")?;
+
+        let current = &self.lines[idx].content;
+        let start = current
+            .match_indices(pattern.as_str())
+            .nth(occurrence - 1)
+            .map(|(pos, _)| pos)
+            .with_context(|| {
+                crate::tools::metadata::get_config()
+                    .error_pattern_not_found
+                    .replacen("{}", &occurrence.to_string(), 1)
+                    .replacen("{}", pattern, 1)
+            })?;
+
+        let mut updated = String::with_capacity(current.len());
+        updated.push_str(&current[..start]);
+        updated.push_str(replacement);
+        updated.push_str(&current[start + pattern.len()..]);
+        self.lines[idx].content = updated;
+        modified.push(self.id_at(idx));
+        Ok(())
+    }
+
+    fn delete(&mut self, edit: &LineEdit, modified: &mut Vec<String>) -> Result<()> {
+        let (idx, end_idx) = self.span_of(edit)?;
+        self.lines.drain(idx..=end_idx);
+
+        // Report the line now nearest the hole, so the agent has a
+        // live id to anchor its next edit on.
+        if !self.lines.is_empty() {
+            let neighbour = if idx < self.lines.len() {
+                idx
+            } else {
+                self.lines.len() - 1
+            };
+            modified.push(self.id_at(neighbour));
+        }
+        Ok(())
+    }
+
+    fn move_span(&mut self, edit: &LineEdit, modified: &mut Vec<String>) -> Result<()> {
+        let start_id = edit
+            .start_id
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| missing_field(edit, "start_id"))?;
+        let end_id = edit
+            .end_id
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(start_id);
+        let move_pos = edit.move_position.unwrap_or(MovePosition::After);
+
+        let start_idx = self.position_of(start_id, "Start", "start_id")?;
+        let end_idx = self.position_of(end_id, "End", "end_id")?;
+        if start_idx > end_idx {
+            bail!("VALIDATION_ERROR: start_id sort order is after end_id sort order for move.");
+        }
+
+        // Where the block lands is decided against the lines that
+        // stay put, so resolve the destination before lifting it.
+        let dest_idx = match move_pos {
+            MovePosition::Prepend | MovePosition::Append => None,
+            MovePosition::Before | MovePosition::After => {
+                let dest_id = edit
+                    .dest_id
+                    .as_ref()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| missing_field(edit, "dest_id"))?;
+                let idx = self.position_of(dest_id, "Destination", "dest_id")?;
+                if idx >= start_idx && idx <= end_idx {
+                    bail!("VALIDATION_ERROR: Cannot move a range into itself (dest_id lies within source range).");
+                }
+                Some(idx)
+            }
+        };
+
+        let block: Vec<BufLine> = self.lines.drain(start_idx..=end_idx).collect();
+        let moved = block.len();
+
+        let at = match (move_pos, dest_idx) {
+            (MovePosition::Prepend, _) => 0,
+            (MovePosition::Append, _) => self.lines.len(),
+            (pos, Some(dest)) => {
+                // The drain shifted every position after the block.
+                let dest = if dest > end_idx { dest - moved } else { dest };
+                if pos == MovePosition::Before {
+                    dest
+                } else {
+                    dest + 1
+                }
+            }
+            (_, None) => unreachable!("before/after always resolve a destination"),
+        };
+
+        for (offset, line) in block.into_iter().enumerate() {
+            self.lines.insert(at + offset, line);
+            modified.push(self.id_at(at + offset));
+        }
+        Ok(())
     }
 }
 

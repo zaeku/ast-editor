@@ -4,6 +4,7 @@ pub(crate) mod file_entry;
 pub(crate) mod formatter;
 pub(crate) mod inspect;
 pub(crate) mod line_id;
+pub(crate) mod markdown;
 pub(crate) mod metadata;
 pub(crate) mod outline;
 pub(crate) mod repository;

@@ -232,12 +232,54 @@ pub(crate) fn line_id_at(
     Some(format!("{:x}#{}", seq, hash?))
 }
 
+/// One block of a response, fenced and named by what it holds, so a reader —
+/// or an `awk` one-liner — can tell the code from the data without knowing
+/// which tool answered.
+///
+/// The fence is longer than any run of backticks that *starts a line* inside
+/// it, the same rule the edit script reads, and only those can be mistaken
+/// for a fence. Bounding it that way is what keeps the length predictable: no
+/// line of pretty-printed JSON can begin with a backtick, so a `json` block
+/// is always fenced with exactly three and `^```json$` matches it exactly.
+pub(crate) fn fenced(language: &str, body: &str) -> String {
+    let longest = body
+        .lines()
+        .map(|line| line.len() - line.trim_start_matches('`').len())
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(std::cmp::max(3, longest + 1));
+    format!("{}{}\n{}\n{}", fence, language, body, fence)
+}
+
+/// What a block of this file's lines is called on its fence.
+pub(crate) fn fence_language(filepath: &str) -> &'static str {
+    let ext = std::path::Path::new(filepath)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    crate::config::language_for_extension(ext).unwrap_or("text")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tools::repository::SqliteFileStore;
     use crate::tools::TEST_DB_LOCK as DB_LOCK;
     use std::fs;
+
+    #[test]
+    fn test_a_fence_outgrows_the_backticks_a_line_starts_with() {
+        assert_eq!(fenced("json", "{}"), "```json\n{}\n```");
+
+        // A json block is always three: no line of pretty-printed json can
+        // begin with a backtick, so `^```json$` is an exact match for one.
+        assert!(fenced("json", "{\n  \"tip\": \"write ``` to fence\"\n}").starts_with("```json\n"));
+
+        // A markdown file read raw can, and then the fence has to be longer.
+        let wrapped = fenced("markdown", "text\n```rust\nfn a() {}\n```");
+        assert!(wrapped.starts_with("````markdown\n"), "{}", wrapped);
+        assert!(wrapped.ends_with("\n````"), "{}", wrapped);
+    }
 
     /// A row is the two-space indent, the items on it, and the `", "` between
     /// each pair, and it breaks when the next item would take it past the

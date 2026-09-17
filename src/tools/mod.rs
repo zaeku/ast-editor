@@ -27,6 +27,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::parser::ParserManager;
+use crate::tools::formatter::{fence_language, fenced};
 
 /// A temporary directory for a test, named so that no two processes share one.
 /// A mutation run builds and tests many copies of this library at once, and
@@ -47,34 +48,6 @@ pub(crate) fn test_temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{name}-{suffix}"))
 }
 
-/// One block of a response, fenced and named by what it holds, so a reader —
-/// or an `awk` one-liner — can tell the code from the data without knowing
-/// which tool answered.
-///
-/// The fence is longer than any run of backticks that *starts a line* inside
-/// it, the same rule the edit script reads, and only those can be mistaken
-/// for a fence. Bounding it that way is what keeps the length predictable: no
-/// line of pretty-printed JSON can begin with a backtick, so a `json` block
-/// is always fenced with exactly three and `^```json$` matches it exactly.
-pub(crate) fn fenced(language: &str, body: &str) -> String {
-    let longest = body
-        .lines()
-        .map(|line| line.len() - line.trim_start_matches('`').len())
-        .max()
-        .unwrap_or(0);
-    let fence = "`".repeat(std::cmp::max(3, longest + 1));
-    format!("{}{}\n{}\n{}", fence, language, body, fence)
-}
-
-/// What a block of this file's lines is called on its fence.
-pub(crate) fn fence_language(filepath: &str) -> &'static str {
-    let ext = std::path::Path::new(filepath)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    crate::config::language_for_extension(ext).unwrap_or("text")
-}
-
 pub(crate) struct ToolDispatcher;
 
 impl ToolDispatcher {
@@ -92,189 +65,16 @@ impl Default for ToolDispatcher {
 impl ToolDispatcher {
     /// Returns the JSON schema array of available tools.
     pub(crate) fn list_tools(&self) -> Vec<Value> {
-        vec![
-            serde_json::json!({
-                "name": "inspect",
-                "description": metadata::get_tool_description("inspect"),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filepath": {
-                            "type": "string",
-                            "description": "Path to the file, relative to the working directory or absolute"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Optional Tree-sitter S-expression query"
-                        },
-                        "template": {
-                            "type": "string",
-                            "enum": ["functions", "classes", "imports", "headings", "headers", "codeblocks", "code_blocks", "links", "tables", "lists", "traits", "impls", "structs", "interfaces", "macros"],
-                            "description": "Predefined query template to run. Supported templates: functions, classes, imports (rust, python, go, javascript, typescript, tsx, java, c, cpp, swift); traits, impls (rust); interfaces, structs (go); macros (c, cpp); functions (bash); headings, headers, codeblocks, code_blocks, links, tables, lists (markdown)."
-                        },
-                        "include_code": {
-                            "type": "boolean",
-                            "description": "Whether to include the source code of the enclosing definition (default: true)"
-                        }
-                    }
-                }
-            }),
-            serde_json::json!({
-                "name": "outline",
-                "description": metadata::get_tool_description("outline"),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filepath": {
-                            "type": "string",
-                            "description": "Path to the file, relative to the working directory or absolute"
-                        },
-                        "sexp": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "If true, returns the whole parse tree as s-expression text instead of the outline. For writing a query against a grammar whose node names are not yet known."
-                        }
-                    },
-                    "required": ["filepath"]
-                }
-            }),
-            serde_json::json!({
-                "name": "view",
-                "description": metadata::get_tool_description("view"),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filepath": {
-                            "type": "string",
-                            "description": "Path to the file, relative to the working directory or absolute"
-                        },
-                        "filepaths": {
-                            "type": "array",
-                            "description": "More files to read in the same call, answered with one block each. A path after the first on the command line lands here."
-                        },
-                        "start_line": {
-                            "type": "integer",
-                            "description": "1-indexed starting line number (inclusive)"
-                        },
-                        "end_line": {
-                            "type": "integer",
-                            "description": "1-indexed ending line number (inclusive)"
-                        },
-                        "only_ids": {
-                            "type": "boolean",
-                            "description": "If true, answers with [id, line number] pairs instead of the lines themselves."
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Optional regular expression; only lines matching it are returned. Matched against the file's own lines, so it is unaffected by how the response is printed. Prefix with (?i) to ignore case."
-                        },
-                        "fixed_string": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "If true, 'query' is searched for literally rather than as a regular expression."
-                        },
-                        "context_lines": {
-                            "type": "integer",
-                            "description": "Optional number of surrounding context lines to return around query matches. Defaults to 5."
-                        }
-                    },
-                    "required": ["filepath"]
-                }
-            }),
-            serde_json::json!({
-                "name": "edit",
-                "description": metadata::get_tool_description("edit"),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filepath": {
-                            "type": "string",
-                            "description": "Path to the file, relative to the working directory or absolute"
-                        },
-                        "edits": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "op": {
-                                        "type": "string",
-                                        "enum": ["replace", "insert_after", "insert_before", "delete", "move", "replace_substring"],
-                                        "description": "The edit operation to perform."
-                                    },
-                                    "start_id": {
-                                        "type": "string",
-                                        "description": "The first line the op acts on (e.g. 1#a5c7). Required for replace, delete, move and replace_substring. Omitted for insert_before (prepends) and insert_after (appends)."
-                                    },
-                                    "end_id": {
-                                        "type": "string",
-                                        "description": "The last line of the span, where the op acts on more than one (e.g. 5#7f1c). Omitted addresses the start line alone. Taken by replace, delete and move."
-                                    },
-                                    "dest_id": {
-                                        "type": "string",
-                                        "description": "Optional destination target line ID (e.g. 10#e9c4). Required for move operations with 'before' or 'after' move_position."
-                                    },
-                                    "move_position": {
-                                        "type": "string",
-                                        "enum": ["before", "after", "prepend", "append"],
-                                        "description": "Optional relative position for move operations ('before', 'after', 'prepend', 'append')."
-                                    },
-                                    "content": {
-                                        "type": "string",
-                                        "description": "The new content to insert or replace with, as line-terminated text: \"\" is no lines at all, \"\\n\" is one empty line, and a trailing newline ends the last line rather than starting another. Omitted/ignored for delete, move."
-                                    },
-                                    "pattern": {
-                                        "type": "string",
-                                        "description": "The substring pattern to find. Required for replace_substring."
-                                    },
-                                    "replacement": {
-                                        "type": "string",
-                                        "description": "The replacement string. Required for replace_substring."
-                                    },
-                                    "occurrence": {
-                                        "type": "integer",
-                                        "description": "Optional 1-indexed occurrence count of the pattern (default: 1) for replace_substring."
-                                    }
-                                },
-                                "required": ["op"]
-                            }
-                        },
-                        "dry_run": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "If true, returns the unified diff and the syntax result the edits would produce, without writing to disk or assigning line IDs. The response carries a preview_id whatever the verdict; pass it back as 'apply' to commit that exact batch without resending it."
-                        },
-                        "apply": {
-                            "type": "string",
-                            "description": "A preview_id from an earlier dry_run, e.g. 'p1f'. Applies the batch that preview validated and returns its modified_lines. Supply 'filepath' with it; 'edits' is not needed and is ignored. A preview id is single-use, and is refused once the file has changed under it."
-                        }
-                    },
-                    "required": ["filepath"]
-                }
-            }),
-            serde_json::json!({
-                "name": "create",
-                "description": metadata::get_tool_description("create"),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "filepath": {
-                            "type": "string",
-                            "description": "Path to the file to write, relative to the working directory or absolute"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Initial text content of the file."
-                        },
-                        "return_ids": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "If true, answers with the new file's lines, each as [id, line number]. Set to false to omit them and save tokens."
-                        }
-                    },
-                    "required": ["filepath", "content"]
-                }
-            }),
-        ]
+        metadata::tools()
+            .iter()
+            .map(|tool| {
+                serde_json::json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.input_schema,
+                })
+            })
+            .collect()
     }
 
     /// Invokes the appropriate tool based on name and deserialized arguments.
@@ -435,22 +235,3 @@ impl ToolDispatcher {
 /// cache directory under `cfg(test)`.
 #[cfg(test)]
 pub(crate) static TEST_DB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(test)]
-mod tests {
-    use super::fenced;
-
-    #[test]
-    fn test_a_fence_outgrows_the_backticks_a_line_starts_with() {
-        assert_eq!(fenced("json", "{}"), "```json\n{}\n```");
-
-        // A json block is always three: no line of pretty-printed json can
-        // begin with a backtick, so `^```json$` is an exact match for one.
-        assert!(fenced("json", "{\n  \"tip\": \"write ``` to fence\"\n}").starts_with("```json\n"));
-
-        // A markdown file read raw can, and then the fence has to be longer.
-        let wrapped = fenced("markdown", "text\n```rust\nfn a() {}\n```");
-        assert!(wrapped.starts_with("````markdown\n"), "{}", wrapped);
-        assert!(wrapped.ends_with("\n````"), "{}", wrapped);
-    }
-}

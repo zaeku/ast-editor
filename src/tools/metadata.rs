@@ -1,16 +1,30 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use std::collections::HashMap;
+use serde_json::Value;
 
+/// One tool as the binary publishes it: the name a caller invokes, the
+/// description a model reads, and the schema its arguments are checked against.
+/// All three are copy rather than logic, so they live beside each other in
+/// `resources/` and are changed without opening the code that serves them.
 #[derive(Deserialize)]
-struct ToolMeta {
-    description: String,
+pub(crate) struct ToolMeta {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
 }
 
-static METADATA: Lazy<HashMap<String, ToolMeta>> = Lazy::new(|| {
+/// The published tools in the order they are answered in. A list rather than a
+/// map, because that order reaches the help, the generated documents and the
+/// skill, and a map would leave it to chance.
+static METADATA: Lazy<Vec<ToolMeta>> = Lazy::new(|| {
     let json_str = include_str!("../../resources/tool_metadata.json");
     serde_json::from_str(json_str).unwrap_or_default()
 });
+
+pub(crate) fn tools() -> &'static [ToolMeta] {
+    &METADATA
+}
 
 #[derive(Deserialize)]
 pub(crate) struct ToolConfig {
@@ -52,7 +66,8 @@ pub(crate) fn get_config() -> &'static ToolConfig {
 
 pub(crate) fn get_tool_description(name: &str) -> String {
     METADATA
-        .get(name)
+        .iter()
+        .find(|meta| meta.name == name)
         .map(|meta| meta.description.clone())
         .unwrap_or_default()
 }

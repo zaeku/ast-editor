@@ -6,9 +6,8 @@
 //! here. What comes back is the shape `inspect` answers with, because this is
 //! the `inspect` tool for one language rather than a tool of its own.
 
-use crate::tools::inspect::{
-    line_id_at, InspectArgs, InspectDefinition, InspectMatch, InspectResult,
-};
+use crate::tools::formatter::line_id_at;
+use crate::tools::inspect::{InspectArgs, InspectDefinition, InspectMatch, InspectResult};
 use crate::tools::repository::FileStore;
 use anyhow::Result;
 use std::hash::{Hash, Hasher};

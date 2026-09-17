@@ -216,6 +216,22 @@ pub(crate) fn format_lines(ids: &[(String, usize)], wrap_trigger_length: usize) 
     )
 }
 
+/// The id `edit` would take for a line number, if the file has an entry.
+pub(crate) fn line_id_at(
+    repository: &impl FileStore,
+    file_key: &Option<String>,
+    line: usize,
+) -> Option<String> {
+    let file_key = file_key.as_ref()?;
+    let row = repository
+        .fetch_lines_range(file_key, line, line)
+        .ok()?
+        .into_iter()
+        .next()?;
+    let (seq, hash, _) = row;
+    Some(format!("{:x}#{}", seq, hash?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

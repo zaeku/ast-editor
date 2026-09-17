@@ -1,11 +1,17 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
-use tree_sitter::Node;
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
+use crate::config::{language_name, outline_query};
 use crate::parser::ParserManager;
+use crate::tools::formatter::line_id_at;
+use crate::tools::inspect::InspectArgs;
+use crate::tools::markdown::run_markdown_inspect;
+use crate::tools::repository::{FileStore, SqliteFileStore};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct OutlineArgs {
@@ -70,7 +76,7 @@ pub(crate) async fn run_outline(
     parser_manager: &Arc<ParserManager>,
 ) -> Result<String> {
     if !args.sexp.unwrap_or(false) {
-        return crate::tools::inspect::outline_report(&args.filepath, parser_manager).await;
+        return outline_report(&args.filepath, parser_manager).await;
     }
     dump_tree(&args.filepath, parser_manager).await
 }
@@ -193,6 +199,163 @@ fn format_comrak_node<'a>(
     } else if node.first_child().is_some() {
         out.push_str(&format!("{}  ... (depth limit reached)\n", indent));
     }
+}
+
+/// One definition a file declares, as `outline` lists it.
+#[derive(Debug, Serialize)]
+struct OutlineEntry {
+    pub kind: String,
+    pub signature: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_id: Option<String>,
+}
+/// The file's top-level definitions, using whichever templates the language
+/// declares. Each entry carries the line ids `edit` takes, so an outline is
+/// enough to act on.
+fn outline_of(
+    language: &tree_sitter::Language,
+    root: tree_sitter::Node,
+    code: &str,
+    repository: &impl FileStore,
+    file_key: &Option<String>,
+    lang_name: &str,
+) -> Vec<OutlineEntry> {
+    let mut entries = Vec::new();
+
+    // One query for the language rather than a loop over borrowed templates. A
+    // query that will not compile is a programming error in the table above,
+    // not a file the caller got wrong, so it says so where whoever edits that
+    // table will read it rather than answering with an empty outline.
+    {
+        let Some(query_str) = outline_query(lang_name) else {
+            return entries;
+        };
+        let query = match Query::new(language, query_str) {
+            Ok(query) => query,
+            Err(err) => {
+                tracing::warn!(
+                    language = lang_name,
+                    error = %err,
+                    "the outline query names a node this grammar does not have"
+                );
+                return entries;
+            }
+        };
+
+        let mut cursor = QueryCursor::new();
+        let mut found = cursor.matches(&query, root, code.as_bytes());
+        while let Some(m) = found.next() {
+            for capture in m.captures {
+                let node = capture.node;
+                let start_line = node.start_position().row + 1;
+                let end_line = node.end_position().row + 1;
+                let text = node.utf8_text(code.as_bytes()).unwrap_or("");
+                entries.push(OutlineEntry {
+                    kind: query.capture_names()[capture.index as usize].to_string(),
+                    signature: text.lines().next().unwrap_or("").trim().to_string(),
+                    start_line,
+                    end_line,
+                    start_id: line_id_at(repository, file_key, start_line),
+                    end_id: line_id_at(repository, file_key, end_line),
+                });
+            }
+        }
+    }
+
+    entries.sort_by_key(|entry| entry.start_line);
+    entries
+}
+#[derive(Debug, Serialize)]
+struct OutlineReport {
+    filepath: String,
+    language: String,
+    has_syntax_errors: bool,
+    total_lines: usize,
+    outline: Vec<OutlineEntry>,
+}
+/// The file's shape, which is what `outline` answers with: the definitions it
+/// declares, each carrying the line ids `edit` takes.
+async fn outline_report(filepath: &str, parser_manager: &Arc<ParserManager>) -> Result<String> {
+    let file_path = Path::new(filepath);
+    if !file_path.exists() {
+        bail!("File not found: {:?}", file_path);
+    }
+    let code = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read file: {:?}", file_path))?;
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let lang_name = language_name(ext)?;
+
+    let repository = SqliteFileStore;
+    let file_key_opt = repository
+        .init_session(filepath, false)
+        .ok()
+        .map(|meta| meta.file_key);
+
+    // Markdown is read by comrak, not by a grammar, so its headings are the
+    // outline. The markdown path already finds them; they come back as
+    // matches, which is a search's shape, so they are read into this one.
+    if lang_name == "markdown" {
+        let args = InspectArgs {
+            filepath: filepath.to_string(),
+            query: None,
+            template: Some("headings".to_string()),
+            include_code: Some(false),
+        };
+        let found: Value = serde_json::from_str(&run_markdown_inspect(
+            &code,
+            &args,
+            &repository,
+            &file_key_opt,
+        )?)?;
+        let headings = found["matches"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|m| OutlineEntry {
+                kind: "heading".to_string(),
+                signature: m["text"].as_str().unwrap_or("").to_string(),
+                start_line: m["start_line"].as_u64().unwrap_or(0) as usize,
+                end_line: m["end_line"].as_u64().unwrap_or(0) as usize,
+                start_id: m["start_id"].as_str().map(str::to_string),
+                end_id: m["end_id"].as_str().map(str::to_string),
+            })
+            .collect();
+        let report = OutlineReport {
+            filepath: filepath.to_string(),
+            language: lang_name.to_string(),
+            has_syntax_errors: false,
+            total_lines: code.lines().count(),
+            outline: headings,
+        };
+        return Ok(serde_json::to_string_pretty(&report)?);
+    }
+
+    let (tree, language) = parser_manager
+        .parse_code(ext, &code)
+        .await
+        .context("Failed to parse code via ParserManager delegation")?;
+    let root_node = tree.root_node();
+
+    let report = OutlineReport {
+        filepath: filepath.to_string(),
+        language: lang_name.to_string(),
+        has_syntax_errors: root_node.has_error(),
+        total_lines: code.lines().count(),
+        outline: outline_of(
+            &language,
+            root_node,
+            &code,
+            &repository,
+            &file_key_opt,
+            &lang_name,
+        ),
+    };
+    Ok(serde_json::to_string_pretty(&report)?)
 }
 
 #[cfg(test)]

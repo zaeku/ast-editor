@@ -10,7 +10,7 @@
 //! names, so adding a language means one file rather than two that have to be
 //! kept in step.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tree_sitter::Language;
 use tree_sitter_language::LanguageFn;
 
@@ -344,4 +344,12 @@ pub(crate) fn outline_query(lang: &str) -> Option<&'static str> {
         "lua" => "(function_declaration) @function",
         _ => return None,
     })
+}
+
+/// The language an extension is read as, from the one table that also carries
+/// the parser for it (D-01M28RAGW19ZZC).
+pub(crate) fn language_name(ext: &str) -> Result<String> {
+    crate::config::language_for_extension(ext)
+        .map(str::to_string)
+        .with_context(|| format!("Unsupported extension: {}", ext))
 }

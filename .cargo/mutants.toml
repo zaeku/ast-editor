@@ -1,0 +1,37 @@
+# Mutants no test can catch, because the code with the mutation applied does
+# exactly what the code without it does. Each one costs a reading of the list
+# every run it appears in, so it is written down once here instead.
+#
+# An exclusion is a blind spot twice over: it hides a mutant that stops being
+# equivalent, and a pattern wider than it meant to be hides mutants that were
+# being caught. So each names a function only one mutant of its kind lives in,
+# and each rests on a condition a test asserts.
+#
+# What is not here: the insert directives in `directive_to_edit` name an op
+# that `..Default::default()` would supply anyway, and a pattern for them
+# reaches six more of the same shape that the suite does catch. They are
+# survivors with a reason written in the card that measured them, not
+# exclusions. So is the comparison in `move_span`: the function has two of the
+# same shape, one of them caught, and a pattern cannot tell them apart.
+
+exclude_re = [
+    # `safe_byte_slice` walks an offset back to a character boundary while it
+    # is not on one and has somewhere to go. Zero is always a boundary, so a
+    # `>= 0` in place of the `> 0` agrees at every offset — the second half of
+    # the condition decides it either way. Held by
+    # `a_slice_lands_on_character_boundaries` in `markdown.rs`, which walks
+    # both loops down to zero.
+    "replace > with >= in safe_byte_slice",
+    # `load_buffer` takes `max(stored_next, highest_live + 1)`, and the second
+    # term never decides: an edit changes the file, so the next read reconciles,
+    # and the reconcile leaves the stored counter above every live number.
+    # Held by `the_stored_counter_stays_above_every_live_sequence_number` in
+    # `line_edit_tests.rs`. If that stops holding, this term is the only thing
+    # between a new line and a live line's number, and this exclusion goes.
+    "replace \\+ with [-*] in load_buffer",
+    # The guard decides whether `--no-x` is read as `x` negated. When `x` is not
+    # an option neither reading finds one, and the refusal names the argument as
+    # it was written either way. Held by
+    # `test_a_negated_unknown_option_is_named_as_it_was_written` in `cli.rs`.
+    "replace match guard properties.contains_key.* with true in arguments",
+]

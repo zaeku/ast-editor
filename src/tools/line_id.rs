@@ -153,7 +153,7 @@ mod tests {
     /// `script.rs` builds a `LineEdit` for the insert directives and names the
     /// op beside `..Default::default()`, which supplies the same one. Deleting
     /// either half leaves the value alone, so no test can tell them apart and
-    /// `mutants.toml` says so — on the condition asserted here.
+    /// `.cargo/mutants.toml` says so — on the condition asserted here.
     #[test]
     fn the_default_op_is_the_one_an_insert_names() {
         assert_eq!(EditOp::default(), EditOp::InsertAfter);

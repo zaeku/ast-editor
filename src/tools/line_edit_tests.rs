@@ -2556,7 +2556,7 @@ async fn taking_a_preview_clears_the_ones_that_expired() {
 /// lines the drain took, and leaves one before it alone. The two readings of
 /// that comparison differ only when the destination is the block's own last
 /// line, which this refuses first — so no test can tell them apart, and
-/// `mutants.toml` says so on the strength of this.
+/// `.cargo/mutants.toml` says so on the strength of this.
 #[tokio::test]
 async fn a_move_into_the_block_being_moved_is_refused() {
     let _lock = acquire_db_lock();

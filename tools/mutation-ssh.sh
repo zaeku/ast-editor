@@ -148,8 +148,9 @@ beat=\$!
 
 # A run that finds survivors exits non-zero and so does one refused in the
 # unmutated tree, and either way the marker below is what the watcher waits
-# unmutated tree, and either way the marker below is what the watcher waits
-# for. With errexit on, neither would ever be written.
+# for. With errexit on neither would ever be written, which is a run that
+# finished and a watcher that waits for it forever.
+set +e
 cargo mutants -j $JOBS --timeout-multiplier 5 $EXTRA > "\$R/mutants.log" 2>&1
 code=\$?
 set -e

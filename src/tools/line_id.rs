@@ -145,3 +145,17 @@ pub(crate) fn compute_normalized_hash(content: &str) -> String {
 pub(crate) fn compute_line_hash(content: &str) -> String {
     compute_stored_hash(content)[..4].to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `script.rs` builds a `LineEdit` for the insert directives and names the
+    /// op beside `..Default::default()`, which supplies the same one. Deleting
+    /// either half leaves the value alone, so no test can tell them apart and
+    /// `mutants.toml` says so — on the condition asserted here.
+    #[test]
+    fn the_default_op_is_the_one_an_insert_names() {
+        assert_eq!(EditOp::default(), EditOp::InsertAfter);
+    }
+}

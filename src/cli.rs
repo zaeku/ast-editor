@@ -449,6 +449,18 @@ mod tests {
         );
     }
 
+    /// `--no-x` strips the prefix only when `x` is an option, and either way
+    /// the refusal names the argument as it was written. The second half is
+    /// why reading it either way answers the same, which is what
+    /// `mutants.toml` relies on when it excludes that guard.
+    #[test]
+    fn test_a_negated_unknown_option_is_named_as_it_was_written() {
+        let err = arguments("view", &args(&["/tmp/x.rs", "--no-nope"]))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--no-nope"), "{}", err);
+    }
+
     #[test]
     fn test_a_wrong_value_says_what_was_wanted() {
         let err = arguments("view", &args(&["/tmp/x.rs", "--start-line", "forty"]))

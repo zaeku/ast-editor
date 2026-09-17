@@ -1,0 +1,21 @@
+# Mutants no test can catch, because the code with the mutation applied does
+# exactly what the code without it does. Each one costs a reading of the list
+# every run it appears in, so it is written down once here instead.
+#
+# An exclusion is a blind spot, so each rests on a condition a test asserts. If
+# the condition stops holding, that test fails and whoever repairs it arrives
+# here.
+
+exclude_re = [
+    # `directive_to_edit` names the op beside `..Default::default()`, and the
+    # default is the same op. Held by `the_default_op_is_the_one_an_insert_names`
+    # in `line_id.rs`.
+    "delete field op from struct LineEdit expression in directive_to_edit",
+    # The same construction names `end_id: None`, which the default also gives.
+    "delete field end_id from struct LineEdit expression in directive_to_edit",
+    # The guard decides whether `--no-x` is read as `x` negated. When `x` is not
+    # an option neither reading finds one, and the refusal names the argument as
+    # it was written either way. Held by
+    # `test_a_negated_unknown_option_is_named_as_it_was_written` in `cli.rs`.
+    "replace match guard .* with true in arguments",
+]

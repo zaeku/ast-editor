@@ -20,10 +20,79 @@ pub(crate) fn view_lines(
 ) -> Result<ViewLinesOutput> {
     let meta = repository.init_session(filepath, false)?;
     let file_key = meta.file_key;
-
     let total_lines = repository.get_total_lines(&file_key)?;
 
-    // Fetch enclosing contexts map and absolute ranges
+    let (all_parent_contexts, context_ranges) = parent_contexts(&file_key)?;
+    let intervals = intervals_for(
+        repository,
+        &file_key,
+        total_lines,
+        start_line,
+        end_line,
+        query.as_deref(),
+        context_lines,
+        fixed_string,
+    )?;
+
+    // Only a query can come back with nothing to print: a line range always
+    // names one interval, so an empty list is a search that found no match.
+    if intervals.is_empty() {
+        return no_match(filepath, total_lines, query.as_deref().unwrap_or_default());
+    }
+
+    let only_ids_bool = only_ids.unwrap_or(false);
+    let Rendered {
+        all_formatted_text,
+        all_ids,
+        message,
+        actual_start,
+        actual_end,
+    } = render(repository, &file_key, &intervals, only_ids_bool)?;
+    let enclosing_list = enclosing(&intervals, &all_parent_contexts, &context_ranges);
+
+    let total_bytes = std::path::Path::new(filepath).metadata()?.len();
+
+    let mut parts = Vec::new();
+    parts.push(format!(
+        "  \"enclosing_contexts\": {}",
+        serde_json::to_string(&enclosing_list)?
+    ));
+    if only_ids_bool {
+        parts.push(format!("  \"lines\": {}", serde_json::to_value(&all_ids)?));
+    }
+    if let Some(msg) = message {
+        parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
+    }
+    parts.push(format!("  \"showing_end\": {}", actual_end));
+    parts.push(format!(
+        "  \"showing_start\": {}",
+        actual_start.unwrap_or(1)
+    ));
+    parts.push(format!("  \"total_bytes\": {}", total_bytes));
+    parts.push(format!("  \"total_lines\": {}", total_lines));
+
+    let metadata_json = format!("{{\n{}\n}}", parts.join(",\n"));
+    let lines_text = if only_ids_bool {
+        None
+    } else {
+        Some(all_formatted_text.join("\n"))
+    };
+
+    Ok(ViewLinesOutput {
+        lines_text,
+        metadata_json,
+    })
+}
+
+/// Every line's enclosing context, and the first and last line each context
+/// spans. Read once for the whole file, because a context reaches past the
+/// lines being printed and the answer names where it starts and ends.
+type ParentContexts = (
+    Vec<Option<String>>,
+    std::collections::HashMap<String, (usize, usize)>,
+);
+
+fn parent_contexts(file_key: &str) -> Result<ParentContexts> {
     let conn = crate::tools::store::get_db_connection()?;
     let all_parent_contexts = {
         let mut stmt = conn
@@ -47,99 +116,164 @@ pub(crate) fn view_lines(
         }
     }
 
-    // Determine target intervals
+    Ok((all_parent_contexts, context_ranges))
+}
+
+/// Which line ranges to print: whichever of the two ways the caller asked.
+#[allow(clippy::too_many_arguments)]
+fn intervals_for(
+    repository: &impl FileStore,
+    file_key: &str,
+    total_lines: usize,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+    query: Option<&str>,
+    context_lines: Option<usize>,
+    fixed_string: Option<bool>,
+) -> Result<Vec<(usize, usize)>> {
+    match query {
+        Some(q) => matching_intervals(
+            repository,
+            file_key,
+            total_lines,
+            q,
+            context_lines,
+            fixed_string,
+        ),
+        None => range_interval(total_lines, start_line, end_line),
+    }
+}
+
+/// Every line the query matches, padded by `context_lines` on each side and
+/// merged where the padding overlaps. An empty answer is a query that matched
+/// nothing, which the caller answers rather than printing the whole file.
+fn matching_intervals(
+    repository: &impl FileStore,
+    file_key: &str,
+    total_lines: usize,
+    q: &str,
+    context_lines: Option<usize>,
+    fixed_string: Option<bool>,
+) -> Result<Vec<(usize, usize)>> {
     let mut intervals = Vec::new();
-    if let Some(ref q) = query {
-        if q.is_empty() {
-            anyhow::bail!("Invalid query: query string cannot be empty");
-        }
-        let ctx_lines = context_lines.unwrap_or(5);
+    if q.is_empty() {
+        anyhow::bail!("Invalid query: query string cannot be empty");
+    }
+    let ctx_lines = context_lines.unwrap_or(5);
 
-        // The query is a regular expression, so `(?i)` at its front is how a
-        // search is made case-insensitive, and a search for text that reads as
-        // a pattern asks for it to be taken literally.
-        let pattern = if fixed_string.unwrap_or(false) {
-            regex::Regex::new(&regex::escape(q))
-        } else {
-            regex::Regex::new(q)
-        }
-        .map_err(|err| {
-            anyhow::anyhow!(
-                "'{}' is not a regular expression: {}. Pass fixed_string to search for it literally.",
-                q,
-                err
-            )
-        })?;
-        let matches = repository.find_matching_lines(&file_key, &pattern)?;
-
-        if matches.is_empty() {
-            let config = crate::tools::metadata::get_config();
-            let msg = serde_json::to_string(&config.error_no_query_match.replace("{}", q))?;
-            let metadata_json = format!(
-                "{{\n  \"enclosing_contexts\": [],\n  \"showing_start\": 1,\n  \"showing_end\": 0,\n  \"total_lines\": {},\n  \"total_bytes\": {},\n  \"message\": {}\n}}",
-                total_lines,
-                std::path::Path::new(filepath).metadata()?.len(),
-                msg
-            );
-            return Ok(ViewLinesOutput {
-                lines_text: Some(String::new()),
-                metadata_json,
-            });
-        }
-
-        for m in matches {
-            let start = if m > ctx_lines { m - ctx_lines } else { 1 };
-            let end = std::cmp::min(total_lines, m + ctx_lines);
-            intervals.push((start, end));
-        }
-
-        // Sort and merge intervals
-        intervals.sort_by_key(|val| val.0);
-        let mut merged: Vec<(usize, usize)> = Vec::new();
-        for (start, end) in intervals {
-            if let Some(last) = merged.last_mut() {
-                if start <= last.1 + 1 {
-                    last.1 = std::cmp::max(last.1, end);
-                } else {
-                    merged.push((start, end));
-                }
-            } else {
-                merged.push((start, end));
-            }
-        }
-        intervals = merged;
+    // The query is a regular expression, so `(?i)` at its front is how a
+    // search is made case-insensitive, and a search for text that reads as
+    // a pattern asks for it to be taken literally.
+    let pattern = if fixed_string.unwrap_or(false) {
+        regex::Regex::new(&regex::escape(q))
     } else {
-        let start = start_line.unwrap_or(1);
-        if start == 0 {
-            anyhow::bail!("Invalid bounds: start_line must be greater than 0");
-        }
-        // One line past what may be printed, so the read that applies the cap
-        // is the one that sees it reached and says so. Stopping at the cap here
-        // would leave that read unable to fail, and bounding the fetch is the
-        // only thing this number is for.
-        let end = end_line.unwrap_or_else(|| {
-            if total_lines == 0 {
-                start
-            } else {
-                std::cmp::min(total_lines, start.saturating_add(formatter::LINE_CAP))
-            }
-        });
-        if start > end {
-            anyhow::bail!(
-                "Invalid bounds: start_line ({}) cannot be greater than end_line ({})",
-                start,
-                end
-            );
-        }
-        // The range goes to the formatter as asked for. It applies the line cap
-        // while printing, and narrowing here as well left that one unable to
-        // fail: a cap that never decides makes the cap that does untestable.
+        regex::Regex::new(q)
+    }
+    .map_err(|err| {
+        anyhow::anyhow!(
+            "'{}' is not a regular expression: {}. Pass fixed_string to search for it literally.",
+            q,
+            err
+        )
+    })?;
+    let matches = repository.find_matching_lines(file_key, &pattern)?;
+
+    if matches.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    for m in matches {
+        let start = if m > ctx_lines { m - ctx_lines } else { 1 };
+        let end = std::cmp::min(total_lines, m + ctx_lines);
         intervals.push((start, end));
     }
 
-    let only_ids_bool = only_ids.unwrap_or(false);
-    let config = crate::tools::metadata::get_config();
+    // Sort and merge intervals
+    intervals.sort_by_key(|val| val.0);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in intervals {
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 + 1 {
+                last.1 = std::cmp::max(last.1, end);
+            } else {
+                merged.push((start, end));
+            }
+        } else {
+            merged.push((start, end));
+        }
+    }
+    Ok(merged)
+}
 
+/// The one interval a line range names, with the ends the caller left out
+/// filled in.
+fn range_interval(
+    total_lines: usize,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+) -> Result<Vec<(usize, usize)>> {
+    let start = start_line.unwrap_or(1);
+    if start == 0 {
+        anyhow::bail!("Invalid bounds: start_line must be greater than 0");
+    }
+    // One line past what may be printed, so the read that applies the cap
+    // is the one that sees it reached and says so. Stopping at the cap here
+    // would leave that read unable to fail, and bounding the fetch is the
+    // only thing this number is for.
+    let end = end_line.unwrap_or_else(|| {
+        if total_lines == 0 {
+            start
+        } else {
+            std::cmp::min(total_lines, start.saturating_add(formatter::LINE_CAP))
+        }
+    });
+    if start > end {
+        anyhow::bail!(
+            "Invalid bounds: start_line ({}) cannot be greater than end_line ({})",
+            start,
+            end
+        );
+    }
+    // The range goes to the formatter as asked for. It applies the line cap
+    // while printing, and narrowing here as well left that one unable to
+    // fail: a cap that never decides makes the cap that does untestable.
+    Ok(vec![(start, end)])
+}
+
+/// The answer for a query that matched nothing: no lines, and the configured
+/// message saying so.
+fn no_match(filepath: &str, total_lines: usize, q: &str) -> Result<ViewLinesOutput> {
+    let config = crate::tools::metadata::get_config();
+    let msg = serde_json::to_string(&config.error_no_query_match.replace("{}", q))?;
+    let metadata_json = format!(
+        "{{\n  \"enclosing_contexts\": [],\n  \"showing_start\": 1,\n  \"showing_end\": 0,\n  \"total_lines\": {},\n  \"total_bytes\": {},\n  \"message\": {}\n}}",
+        total_lines,
+        std::path::Path::new(filepath).metadata()?.len(),
+        msg
+    );
+    Ok(ViewLinesOutput {
+        lines_text: Some(String::new()),
+        metadata_json,
+    })
+}
+
+/// What the intervals print as: the text, the ids, and whichever caps were
+/// reached on the way.
+struct Rendered {
+    all_formatted_text: Vec<String>,
+    all_ids: Vec<serde_json::Value>,
+    message: Option<String>,
+    actual_start: Option<usize>,
+    actual_end: usize,
+}
+
+fn render(
+    repository: &impl FileStore,
+    file_key: &str,
+    intervals: &[(usize, usize)],
+    only_ids_bool: bool,
+) -> Result<Rendered> {
+    let config = crate::tools::metadata::get_config();
     let mut all_formatted_text = Vec::new();
     let mut all_ids = Vec::new();
     let mut warning_messages = Vec::new();
@@ -149,7 +283,7 @@ pub(crate) fn view_lines(
     for (idx, (start, end)) in intervals.iter().enumerate() {
         let formatted_res = crate::tools::formatter::retrieve_and_format_lines(
             repository,
-            &file_key,
+            file_key,
             *start,
             *end,
             only_ids_bool,
@@ -187,9 +321,23 @@ pub(crate) fn view_lines(
         }
     }
 
-    // Determine active enclosing contexts
+    Ok(Rendered {
+        all_formatted_text,
+        all_ids,
+        message,
+        actual_start,
+        actual_end,
+    })
+}
+
+/// The contexts the printed lines fall inside, each with the range it spans.
+fn enclosing(
+    intervals: &[(usize, usize)],
+    all_parent_contexts: &[Option<String>],
+    context_ranges: &std::collections::HashMap<String, (usize, usize)>,
+) -> Vec<serde_json::Value> {
     let mut active_contexts = std::collections::HashSet::new();
-    for (s, e) in &intervals {
+    for (s, e) in intervals {
         for line_num in *s..=*e {
             if let Some(Some(ctx)) = all_parent_contexts.get(line_num - 1) {
                 active_contexts.insert(ctx.clone());
@@ -209,39 +357,7 @@ pub(crate) fn view_lines(
     }
     // Sort enclosing_list by start line for stability
     enclosing_list.sort_by_key(|v| v["start"].as_u64().unwrap_or(0));
-
-    let total_bytes = std::path::Path::new(filepath).metadata()?.len();
-
-    let mut parts = Vec::new();
-    parts.push(format!(
-        "  \"enclosing_contexts\": {}",
-        serde_json::to_string(&enclosing_list)?
-    ));
-    if only_ids_bool {
-        parts.push(format!("  \"lines\": {}", serde_json::to_value(&all_ids)?));
-    }
-    if let Some(msg) = message {
-        parts.push(format!("  \"message\": {}", serde_json::to_string(&msg)?));
-    }
-    parts.push(format!("  \"showing_end\": {}", actual_end));
-    parts.push(format!(
-        "  \"showing_start\": {}",
-        actual_start.unwrap_or(1)
-    ));
-    parts.push(format!("  \"total_bytes\": {}", total_bytes));
-    parts.push(format!("  \"total_lines\": {}", total_lines));
-
-    let metadata_json = format!("{{\n{}\n}}", parts.join(",\n"));
-    let lines_text = if only_ids_bool {
-        None
-    } else {
-        Some(all_formatted_text.join("\n"))
-    };
-
-    Ok(ViewLinesOutput {
-        lines_text,
-        metadata_json,
-    })
+    enclosing_list
 }
 
 #[cfg(test)]

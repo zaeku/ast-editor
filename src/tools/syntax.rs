@@ -268,6 +268,28 @@ pub(crate) async fn validate_syntax(
 mod tests {
     use super::*;
 
+    /// A line closes a fence when it starts with the fence character and
+    /// carries nothing else. Both halves are needed: `\u0060\u0060\u0060rust` starts with
+    /// one and opens a block rather than closing it, and a line of tildes
+    /// closes nothing a backtick opened.
+    #[test]
+    fn a_closing_fence_is_the_character_and_nothing_else() {
+        // Opened, then a line that only looks like a fence. Still unclosed.
+        let looks_closed = "# H\n\n```rust\nfn a() {}\n```rust\n";
+        let refused = validate_markdown(looks_closed);
+        assert!(
+            refused.is_err(),
+            "a line with text after the fence closed the block"
+        );
+
+        // The same block closed properly.
+        let closed = "# H\n\n```rust\nfn a() {}\n```\n";
+        assert!(
+            validate_markdown(closed).is_ok(),
+            "a closed block was refused"
+        );
+    }
+
     #[test]
     fn test_validate_markdown_valid() {
         let valid_md = r#"# Hello World

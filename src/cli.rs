@@ -449,6 +449,28 @@ mod tests {
         );
     }
 
+    /// `wrap` breaks a row before the word that would take it past the width,
+    /// counting the space that would join them. The width is the last column a
+    /// row may fill, so a row that lands exactly on it stays whole.
+    #[test]
+    fn test_a_row_breaks_before_the_word_that_would_overrun_it() {
+        // "aa bb" is five, so at five it is one row and at four it is two.
+        assert_eq!(wrap("aa bb", 5), vec!["aa bb".to_string()]);
+        assert_eq!(wrap("aa bb", 4), vec!["aa".to_string(), "bb".to_string()]);
+
+        // The joining space counts: "aa b" is four with it and three without.
+        assert_eq!(wrap("aa b", 4), vec!["aa b".to_string()]);
+        assert_eq!(wrap("aa b", 3), vec!["aa".to_string(), "b".to_string()]);
+
+        // A word longer than the width is a row of its own rather than a
+        // break inside it.
+        assert_eq!(
+            wrap("aa bbbbbb cc", 4),
+            vec!["aa".to_string(), "bbbbbb".to_string(), "cc".to_string()]
+        );
+        assert!(wrap("   ", 4).is_empty());
+    }
+
     /// `--no-x` strips the prefix only when `x` is an option, and either way
     /// the refusal names the argument as it was written. The second half is
     /// why reading it either way answers the same, which is what

@@ -109,10 +109,14 @@ fn parent_contexts(file_key: &str) -> Result<ParentContexts> {
     let mut context_ranges = std::collections::HashMap::new();
     for (idx, ctx_opt) in all_parent_contexts.iter().enumerate() {
         if let Some(ctx) = ctx_opt {
-            let entry = context_ranges
+            // First sighting opens the range and every later one moves its
+            // end. Written as an insert followed by an assignment, the end the
+            // insert carries was overwritten on the same pass and could be any
+            // number at all.
+            context_ranges
                 .entry(ctx.clone())
+                .and_modify(|range: &mut (usize, usize)| range.1 = idx + 1)
                 .or_insert((idx + 1, idx + 1));
-            entry.1 = idx + 1;
         }
     }
 
@@ -575,6 +579,42 @@ mod tests {
 
         fs::remove_dir_all(&temp_dir)?;
         Ok(())
+    }
+
+    /// A definition on one line spans one line, so its range opens and closes
+    /// on the same number. That is the only case where the end a range is
+    /// opened with is the end it keeps — every longer one is moved by a later
+    /// pass — and it is what says the two halves of the range are both read.
+    #[tokio::test]
+    async fn a_one_line_definition_spans_the_line_it_is_on() {
+        let _lock = DB_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let temp_dir = crate::tools::test_temp_dir("line-editor-test-one-line-ctx");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("one.rs");
+        let filepath = path.to_str().unwrap();
+        fs::write(filepath, "fn one() {}\n\nfn two() {\n    let a = 1;\n}\n").unwrap();
+
+        let repository = SqliteFileStore;
+        let res = view_lines(&repository, filepath, None, None, None, None, None, None).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&res.metadata_json).unwrap();
+        let contexts = val["enclosing_contexts"].as_array().unwrap();
+
+        let one = contexts
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some("fn:one"))
+            .unwrap_or_else(|| panic!("the one-line definition has no range: {val}"));
+        assert_eq!(one["start"].as_u64().unwrap(), 1, "{val}");
+        assert_eq!(one["end"].as_u64().unwrap(), 1, "{val}");
+
+        let two = contexts
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some("fn:two"))
+            .unwrap();
+        assert_eq!(two["start"].as_u64().unwrap(), 3, "{val}");
+        assert_eq!(two["end"].as_u64().unwrap(), 5, "{val}");
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[tokio::test]

@@ -4,6 +4,60 @@ What changed for someone who uses `ast-editor`, newest first. Why it changed is
 in the commit that changed it, and what the project holds true is in
 `decisions/`.
 
+## 0.4.0 — 2026-09-17
+
+A minor release rather than a patch: a batch that used to be written with a note
+is refused, the flag that asked for that is gone, and an answer carries a field
+it did not.
+
+### Removed
+
+- **`--strict` is gone, because checking is not optional.** It was off by
+  default, so the only thing standing between a batch and a file that no longer
+  parses was whether the caller had thought to ask. An edit whose result does
+  not parse is refused now, nothing is written, and the refusal carries the
+  parser's diagnostics with a `preview_id`. A caller who judges the parser wrong
+  passes that id back as `--apply` and commits exactly the batch that was
+  checked — which is a decision rather than a flag, and a different act from
+  never having looked.
+
+### Changed
+
+- **`modified_lines` is the lines a call wrote, and nothing else.** A `delete`
+  writes none, so it answers with an empty one. It used to name the line nearest
+  the hole, whose number had often not changed; where those lines went is the
+  new field's business. A `replace` given no lines answers identically, because
+  it is the same edit.
+- **The answer carries `renumbered`.** An edit that changes how many lines a
+  file has moves every line after it, and the answer said nothing about it.
+  Each entry is a run of lines that moved together, naming the ids of its first
+  and last line and where those two landed:
+
+  ```json
+  "renumbered": [
+    {"range": ["4#08ad", "7#15e2"], "line_numbers": [2, 5]},
+    {"range": ["8#0d58", "a#353e"], "line_numbers": [9, 11]}
+  ]
+  ```
+
+  Lines inside a run stay contiguous and in order, so the two ends give the
+  number of every line between them and nothing in between is listed. Deleting
+  to the end of a file renumbers nothing and answers with no run at all.
+
+### Fixed
+
+- **An id could name two lines of one file, and an edit took whichever the
+  store returned first.** Reconciling a file that changed on disk could hand one
+  sequence number to two lines, which made one id for both; an edit addressed to
+  it rewrote the first and said it had succeeded. The store refuses a repeated
+  sequence number now, so a path that issues one fails where it happens rather
+  than leaving the file wrong until someone reads the listing. An existing store
+  holding such a pair has those files re-indexed on first open, which costs
+  them their ids and nothing else.
+- **A refusal's hint can be pasted.** It prints the command that applies the
+  batch it kept, and the path in it was unquoted, so a file under a directory
+  with a space in its name ran as several arguments.
+
 ## 0.3.11 — 2026-09-16
 
 Nothing the command answers has changed. The one thing worth knowing is where

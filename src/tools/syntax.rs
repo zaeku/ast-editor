@@ -6,7 +6,6 @@
 //! not, and what a prose file should be warned about. It opens nothing and
 //! stores nothing, so what it says depends on the content alone.
 
-use crate::tools::file_entry::check_language_supported;
 use anyhow::Result;
 
 fn validate_markdown(content: &str) -> Result<()> {
@@ -203,16 +202,26 @@ pub(crate) async fn validate_syntax(
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    if ext == "md" || ext == "markdown" {
-        let warnings = lint_markdown(content);
-        if warnings.is_empty() {
-            return SyntaxValidationResult::Success;
-        } else {
-            return SyntaxValidationResult::Warnings(warnings);
+    // What reads a file is the table's business, so this asks the table rather
+    // than the extension. An entry carrying no tree-sitter grammar is read by
+    // something else — comrak reads markdown — and must not reach the parser.
+    // Keyed on "md" instead, a second such entry would pass the support check,
+    // miss this branch, and fail inside the parser, which answers a plain file
+    // with a refusal. The support check is derived from the table for the same
+    // reason (D-01M27WE1VYAKPP).
+    let Some(grammar) = crate::config::grammar_for_extension(&ext) else {
+        return SyntaxValidationResult::NotChecked;
+    };
+    if grammar.language().is_none() {
+        if grammar.name == "markdown" {
+            let warnings = lint_markdown(content);
+            return if warnings.is_empty() {
+                SyntaxValidationResult::Success
+            } else {
+                SyntaxValidationResult::Warnings(warnings)
+            };
         }
-    }
-
-    if !check_language_supported(filepath) {
+        // In the table and read by nothing this knows how to check.
         return SyntaxValidationResult::NotChecked;
     }
 

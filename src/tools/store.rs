@@ -179,6 +179,32 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<()> {
     )
     .context("Failed to create index idx_lines_sort_order")?;
 
+    // An id is `sequence_id#hash`, so two lines of one file sharing a sequence
+    // number share an id, and an edit addressed to it takes whichever the
+    // store returns first. The constraint says so where it cannot be forgotten
+    // (D-01M27KBH6NNXZJ): a path that issues one twice fails at the insert
+    // rather than leaving the file wrong until someone reads the listing.
+    //
+    // A store written before this may already hold such a pair, and the index
+    // cannot be built over it. Those files lose their rows and are re-indexed
+    // on the next read, which is what losing the store costs anyway — it holds
+    // no copy of any file (D-01M27K7HHEWS57).
+    conn.execute(
+        "DELETE FROM lines WHERE file_key IN (
+            SELECT file_key FROM lines
+            GROUP BY file_key, sequence_id
+            HAVING COUNT(*) > 1
+        );",
+        [],
+    )
+    .context("Failed to clear files whose lines share a sequence number")?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_lines_file_sequence
+            ON lines(file_key, sequence_id);",
+        [],
+    )
+    .context("Failed to create index idx_lines_file_sequence")?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS previews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

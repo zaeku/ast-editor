@@ -12,13 +12,31 @@ SESSION=${SESSION:-mutants}
 # at 2, so a CPU runtime is for smoke tests and nothing else. A100 has allocated
 # on the first attempt every time; tpu v6e1 is the widest on offer at 44 vCPU
 # and the one that most often will not allocate at all. Empty means CPU.
-HARDWARE=${HARDWARE-gpu A100}
+#
+# HARDWARE names what to ask for, in order. The first that allocates is used,
+# and each is tried ATTEMPTS_EACH times, so the widest machine is asked for
+# first without the run waiting on it when it is not there.
+HARDWARE=${HARDWARE-tpu v6e1|gpu A100}
 REPO=${REPO:-https://github.com/zaeku/ast-editor.git}
 REF=${REF:-}
-JOBS=${JOBS:-8}
+# Jobs per machine, because the right number is a fraction of the vCPU it has.
+# Measured 2026-09-15: 819 mutants in 2483s at 8 jobs on 12 vCPU. Raising it
+# past the machine buys timeouts rather than throughput, and a timeout is not a
+# survivor but it is not an answer either.
+JOBS_TPU=${JOBS_TPU:-24}
+JOBS_GPU=${JOBS_GPU:-8}
+JOBS=${JOBS:-}
 EXTRA=${EXTRA:-}
 BUILD_JOBS=${BUILD_JOBS:-5}
 POLL=${POLL:-60}
+# The run reports its own elapsed seconds, and that is what this caps: a laptop
+# asleep for an hour has not spent any of it, and a kernel wedged for an hour
+# has. Zero disables the cap.
+CAP=${CAP:-10800}
+# Polls whose counts did not move. A read that fails says nothing — the file
+# being unreachable is a fact about this machine — so only a heartbeat that
+# arrives and stands still says the run stopped working.
+STALL=${STALL:-40}
 OUT=${OUT:-mutants.out}
 
 REMOTE=/content/ast-editor
@@ -68,26 +86,60 @@ pull() {
 note "reaping stale assignments"
 reap
 
-note "allocating $SESSION (${HARDWARE:-cpu})"
+note "allocating $SESSION, asking for ${HARDWARE:-cpu} in that order"
 # Registered before the first attempt: an allocation that times out locally may
 # have succeeded on the server, and this script ends in more ways than it
 # returns from.
-trap 'release; rm -rf "$WORK"' EXIT
+teardown() {
+    if [ -n "$ABANDON" ]; then
+        note "leaving $SESSION up: $ABANDON"
+        note "  watch it:   colab download -s $SESSION /content/heartbeat.txt /dev/stdout"
+        note "  collect it: colab download -s $SESSION $REMOTE/mutants.out/missed.txt $OUT/missed.txt"
+        note "  stop it:    colab stop -s $SESSION"
+    else
+        release
+    fi
+    rm -rf "$WORK"
+}
+trap teardown EXIT
+
+# The run outlives this script by design, so a release has to mean the script
+# decided on one. Set while the kernel is working, it says the session is worth
+# more than the tidiness of stopping it, and the trap says how to reach it.
+ABANDON=
 
 allocated=
-for attempt in $(seq 1 "${ATTEMPTS:-5}"); do
-    # shellcheck disable=SC2086
-    if colab new -s "$SESSION" ${HARDWARE:+--$HARDWARE} >"$WORK/new.log" 2>&1; then
-        allocated=yes
-        break
-    fi
-    note "attempt $attempt: $(grep -E '^[A-Za-z]+(Error|Timeout):' "$WORK/new.log" | tail -1)"
-    reap
-    sleep 60
+chosen=
+IFS='|' read -r -a wanted <<<"$HARDWARE"
+for want in "${wanted[@]}"; do
+    for attempt in $(seq 1 "${ATTEMPTS_EACH:-2}"); do
+        # shellcheck disable=SC2086
+        if colab new -s "$SESSION" ${want:+--$want} >"$WORK/new.log" 2>&1; then
+            allocated=yes
+            chosen=$want
+            break 2
+        fi
+        note "${want:-cpu} attempt $attempt: $(grep -E '^[A-Za-z]+(Error|Timeout):' "$WORK/new.log" | tail -1)"
+        reap
+        sleep 30
+    done
+    note "${want:-cpu} did not allocate; asking for the next"
 done
-[ -n "$allocated" ] || fail "could not allocate a session. An attempt that times
-  out locally has often allocated anyway, and reap releases it, so the hardware
-  is busy rather than the request being wrong. Try again, or set HARDWARE."
+[ -n "$allocated" ] || fail "none of ${HARDWARE:-cpu} allocated. An attempt that
+  times out locally has often allocated anyway, and reap releases it, so the
+  hardware is busy rather than the request being wrong. Try again, or set
+  HARDWARE."
+note "allocated ${chosen:-cpu}"
+
+# The number of jobs follows the machine that answered rather than the machine
+# that was asked for first.
+if [ -z "$JOBS" ]; then
+    case $chosen in
+    tpu*) JOBS=$JOBS_TPU ;;
+    *) JOBS=$JOBS_GPU ;;
+    esac
+fi
+note "running with $JOBS jobs"
 
 cat > "$WORK/setup.py" <<PY
 import subprocess
@@ -165,11 +217,23 @@ with open("/content/mutants.done", "w") as out:
     out.write(f"rc={code} wall={int(time.time()-start)}s\n")
 PY
 
-# The clone is of a pushed revision, so anything not committed yet would not be
-# measured — which reads as a test that killed nothing. Send the working copy's
-# own changes over it unless told not to.
+# The clone is of what the remote holds, so anything committed only here would
+# not be measured — which reads as a test that killed nothing. BASE names the
+# revision the clone lands on, and everything this working copy has that the
+# clone does not is sent over it. `jj diff --summary` alone would send the
+# uncommitted changes and nothing else, which is empty whenever the work has
+# just been committed and not yet pushed — the state a measurement is usually
+# asked for in.
 if [ "${LOCAL:-1}" = 1 ]; then
-    changed=$(jj diff --summary 2>/dev/null | sed -n 's/^[AM] //p')
+    BASE=${BASE:-master@origin}
+    changed=$(jj diff --from "$BASE" --summary 2>/dev/null | sed -n 's/^[AM] //p')
+    gone=$(jj diff --from "$BASE" --summary 2>/dev/null | sed -n 's/^D //p')
+    if [ -n "$gone" ]; then
+        listed=$(printf '%s\n' "$gone" | sed 's/^/  /')
+        fail "these files are gone since $BASE and the clone would still hold
+  them, which measures code that does not ship:
+$listed"
+    fi
     for path in $changed; do
         [ -f "$path" ] || continue
         colab upload -s "$SESSION" "$path" "$REMOTE/$path" >/dev/null 2>&1 ||
@@ -200,16 +264,47 @@ kill -9 "$EXEC_PID" 2>/dev/null || true
 note "local exec released; watching through the contents API"
 
 mkdir -p "$OUT"
+mkdir -p "$OUT"
+# From here the kernel is doing the work and this loop only watches. Anything
+# that goes wrong locally from now on leaves the session up rather than taking
+# the run down with it.
+ABANDON="the run was still going when the watch stopped"
 misses=0
+still=0
+last_counts=
 while true; do
     sleep "$POLL"
     if pull /content/heartbeat.txt "$WORK/hb"; then
         misses=0
-        note "$(cat "$WORK/hb")"
+        beat=$(cat "$WORK/hb")
+        note "$beat"
+
+        # The counts are what moving looks like. `up=` is a clock and rises
+        # whether or not anything is happening, so it answers the cap and not
+        # this.
+        counts=${beat#*\{}
+        if [ "$counts" = "$last_counts" ]; then
+            still=$((still + 1))
+            [ "$still" -lt "$STALL" ] || fail "nothing has been decided in
+  $still polls and the run is still up. It is wedged rather than slow, and the
+  session is left running so it can be looked at: colab stop -s $SESSION"
+        else
+            still=0
+            last_counts=$counts
+        fi
+
+        up=${beat#*up=}
+        up=${up%%s *}
+        if [ "${CAP:-0}" -gt 0 ] && [ "${up:-0}" -ge "$CAP" ]; then
+            fail "the run reports ${up}s, past the ${CAP}s cap. $OUT holds what
+  had landed; the session is left up: colab stop -s $SESSION"
+        fi
     else
+        # A file that will not come is a fact about this machine's network, not
+        # about the session. It costs patience and never a verdict.
         misses=$((misses + 1))
-        note "no answer from the session ($misses)"
-        [ "$misses" -ge 3 ] && fail "the session stopped answering; $OUT holds what had landed"
+        note "could not read the heartbeat ($misses); the session is not the
+  thing this proves anything about"
         continue
     fi
     for name in caught missed timeout unviable; do
@@ -217,6 +312,8 @@ while true; do
     done
     pull /content/mutants.done "$OUT/done.txt" && break
 done
+# The run is over, so the session is this script's to release again.
+ABANDON=
 
 pull /content/mutants.log "$OUT/mutants.log" || true
 pull /content/commit.txt "$OUT/commit.txt" || true
